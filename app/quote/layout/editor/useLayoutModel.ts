@@ -620,13 +620,29 @@ const didInitActiveLayerRef = useRef(false);
             roundRadiusIn: DEFAULT_ROUND_RADIUS_IN,
           };
 
+          // FIX: every layer in a stack physically shares one footprint (they
+          // nest in the same box), so the newly appended layer's real
+          // lengthIn/widthIn must become the shared block footprint here too
+          // -- previously only thicknessIn was updated in append mode, so
+          // appending a real file onto an editor that already had a
+          // different (e.g. stale/default) footprint left lengthIn/widthIn
+          // silently stuck at the old value while the new layer's cavities
+          // were positioned against its own real (different) footprint.
+          const nextBlock = {
+            ...prev.layout.block,
+            ...normalizeBlockPatch({
+              lengthIn: seedBlock?.lengthIn,
+              widthIn: seedBlock?.widthIn,
+              thicknessIn,
+              cornerStyle: seedBlock?.cornerStyle,
+              chamferIn: seedBlock?.chamferIn,
+            }),
+          };
+
           return {
             layout: {
               ...prev.layout,
-              block: {
-                ...prev.layout.block,
-                thicknessIn,
-              },
+              block: nextBlock,
               stack: [...prev.layout.stack, nextLayer],
               cavities: [...cavities],
             },

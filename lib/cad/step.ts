@@ -36,6 +36,23 @@ export type CavityDef = {
   radiusIn?: number | null;
   diameter?: number | null;
   r?: number | null;
+
+  // KNOWN LIMITATION (confirmed against the microservice's live OpenAPI
+  // schema at alex-io-step-service.onrender.com/openapi.json): the `Cavity`
+  // schema there has no field for a nested "island"/hole feature inside a
+  // poly cavity -- only a single outer boundary. Our own internal cavity
+  // model supports `nestedCavities` (see layoutTypes.ts / InteractiveCanvas's
+  // fill-rule="evenodd" rendering), but that data has nowhere to go here and
+  // is silently dropped from every STEP export today. Additionally, two
+  // real pockets separated by a thin wall (~0.1in in a case we debugged)
+  // can trigger a numerically unstable boolean cut in the microservice's own
+  // CSG engine -- producing either a spurious "web" face or a warped/sloped
+  // pocket floor depending on the exact boundary vertex positions, even
+  // after our own polygon is a clean, degenerate-vertex-free simple loop.
+  // Neither of these is fixable from this repo; they require changes in
+  // alex-io-step-service's own geometry kernel (adding a holes/inner-loop
+  // concept to the schema, and improving boolean-cut robustness for
+  // closely-spaced features).
 };
 
 export type FoamLayer = {

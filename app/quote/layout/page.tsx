@@ -2035,6 +2035,19 @@ function LayoutEditorHostReady(props: {
     seed: any;
   } | null>(null);
 
+  // Every layer in a stack physically shares one footprint (they nest in the
+  // same box). Appending a new layer whose own file has a different real
+  // footprint than the existing block updates the shared footprint to match
+  // (the new file's real geometry is the ground truth) -- but since older
+  // layers' cavities were positioned relative to the OLD footprint, that's
+  // worth surfacing rather than silently changing underneath the user.
+  const [footprintChangeNotice, setFootprintChangeNotice] = React.useState<{
+    oldLengthIn: number;
+    oldWidthIn: number;
+    newLengthIn: number;
+    newWidthIn: number;
+  } | null>(null);
+
 
   const {
     layout,
@@ -3383,6 +3396,7 @@ else nextYIn = snapInches(nextYIn);
       setUploadStatus("uploading");
       setUploadError(null);
       setStlUnitNotice(null);
+      setFootprintChangeNotice(null);
 
       const fd = new FormData();
       fd.append("file", file);
@@ -3451,11 +3465,35 @@ try {
         const importLabel = file?.name ? `DXF: ${file.name}` : "";
         const resolvedTargetLayerId = importMode === "replace" ? activeLayerId : null;
 
+        // Detect a footprint change BEFORE importing (append mode now syncs
+        // the shared block footprint to the new layer's real dims -- see
+        // useLayoutModel.ts). Only worth flagging when replacing a footprint
+        // that already had real content, not when adopting a footprint for
+        // the first time onto an untouched default block.
+        const FOOTPRINT_CHANGE_TOL_IN = 0.05;
+        const oldLengthIn = Number(block?.lengthIn);
+        const oldWidthIn = Number(block?.widthIn);
+        const newLengthIn = Number(seed.block?.lengthIn);
+        const newWidthIn = Number(seed.block?.widthIn);
+        const footprintChanged =
+          importMode === "append" &&
+          hasExistingGeometry &&
+          Number.isFinite(oldLengthIn) &&
+          Number.isFinite(oldWidthIn) &&
+          Number.isFinite(newLengthIn) &&
+          Number.isFinite(newWidthIn) &&
+          (Math.abs(oldLengthIn - newLengthIn) > FOOTPRINT_CHANGE_TOL_IN ||
+            Math.abs(oldWidthIn - newWidthIn) > FOOTPRINT_CHANGE_TOL_IN);
+
         importLayerFromSeed(seed, {
           mode: importMode,
           label: importMode === "append" ? importLabel : undefined,
           targetLayerId: resolvedTargetLayerId,
         });
+
+        setFootprintChangeNotice(
+          footprintChanged ? { oldLengthIn, oldWidthIn, newLengthIn, newWidthIn } : null,
+        );
 
         setUploadError(null);
 
@@ -4783,6 +4821,18 @@ const tenantCssVars = React.useMemo(() => {
                       >
                         {stlUnitNotice.appliedAs === "in" ? "Use millimeters instead" : "Use inches instead"}
                       </button>
+                    </div>
+                  ) : null}
+                  {footprintChangeNotice ? (
+                    <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-2 py-1.5 text-[11px] text-[var(--attention)]">
+                      <span>
+                        {`This layer's own real size (${footprintChangeNotice.newLengthIn.toFixed(2)} × ${footprintChangeNotice.newWidthIn.toFixed(
+                          2,
+                        )}in) is different from the block's previous footprint (${footprintChangeNotice.oldLengthIn.toFixed(
+                          2,
+                        )} × ${footprintChangeNotice.oldWidthIn.toFixed(2)}in). `}
+                        {"The block footprint has been updated to match this layer -- double-check other layers' cavity positions still make sense."}
+                      </span>
                     </div>
                   ) : null}
                 </div>

@@ -415,6 +415,36 @@ function loopPerimeter(pts: Point2[]): number {
   return sum;
 }
 
+// Below typical foam-cutting tolerance (1/16in) -- these are collapsed rather
+// than sent downstream (STEP export, 2D rendering) as if they were real
+// geometry. Top-face boundary tracing occasionally produces near-duplicate
+// consecutive vertices (a few thousandths to a few hundredths of an inch
+// apart) from the underlying mesh's own triangulation/tessellation noise,
+// not from any real feature of the part.
+const MIN_LOOP_EDGE_IN = 0.05;
+
+function simplifyClosedLoopPoints(points: Point2[], minEdgeIn: number): Point2[] {
+  if (points.length < 4) return points; // never simplify a bare triangle/quad
+
+  const out: Point2[] = [];
+  for (const p of points) {
+    const last = out[out.length - 1];
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) < minEdgeIn) continue;
+    out.push(p);
+  }
+
+  // Wraparound: also check the closing edge (last point back to first).
+  if (out.length > 3) {
+    const a = out[out.length - 1];
+    const b = out[0];
+    if (Math.hypot(b.x - a.x, b.y - a.y) < minEdgeIn) out.pop();
+  }
+
+  // Never simplify a loop down to something degenerate -- fall back to the
+  // original points rather than silently dropping the loop entirely.
+  return out.length >= 3 ? out : points;
+}
+
 function buildLoopsFromSegments(segments: Segment[], tol = 1e-6): Loop[] {
   const segsIn = Array.isArray(segments) ? segments : [];
 
@@ -506,15 +536,17 @@ function buildLoopsFromSegments(segments: Segment[], tol = 1e-6): Loop[] {
     const closed = same(pts[0], pts[pts.length - 1]);
     if (closed) pts.pop();
 
-    if (pts.length < 3) continue;
+    const simplifiedPts = closed ? simplifyClosedLoopPoints(pts, MIN_LOOP_EDGE_IN) : pts;
 
-    const a = signedArea(pts);
+    if (simplifiedPts.length < 3) continue;
+
+    const a = signedArea(simplifiedPts);
     loops.push({
       idx: loops.length,
-      points: pts,
+      points: simplifiedPts,
       closed,
       area: a,
-      perimeter: loopPerimeter(pts),
+      perimeter: loopPerimeter(simplifiedPts),
     });
   }
 
