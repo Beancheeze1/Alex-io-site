@@ -309,7 +309,14 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
 
   const blockLengthIn = snapPretty(blockLen, units);
   const blockWidthIn = snapPretty(blockWid, units);
-  const blockThicknessIn = 2; // unchanged default behavior
+
+  // Real thickness from the STL mesh's own Z-height, when the source provided
+  // one (STL only — DXF/PDF carry no Z data at all, so they keep the
+  // previous default unchanged). Already converted to inches by the STL
+  // processor, so snap for display only, not unit conversion.
+  const rawThicknessIn = Number(faces?.thicknessIn);
+  const hasRealThickness = Number.isFinite(rawThicknessIn) && rawThicknessIn > 0;
+  const blockThicknessIn = hasRealThickness ? snapPretty(rawThicknessIn, "in") : 2; // unchanged default for DXF/PDF
 
   const block: LayoutModel["block"] = {
     lengthIn: blockLengthIn,
@@ -451,7 +458,15 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
       if (!polyPoints || polyPoints.length < 3) continue;
     }
 
-    const depthIn = 1;
+    // Per-cavity floor depth isn't derived from the mesh (the STL extractor
+    // only analyzes a single top-face plane, not each cavity's own floor
+    // height), so a through-hole assumption is the most accurate available
+    // default: use the block's own real thickness when we have one (STL),
+    // which is correct for the common through-hole case and at least
+    // grounded in the actual uploaded geometry — unlike the previous flat
+    // "1 inch" default, which had no relationship to the file at all.
+    // DXF/PDF sources (no real thickness) keep the previous default exactly.
+    const depthIn = hasRealThickness ? blockThicknessIn : 1;
 
     // --- REQUIRED for your new placement block: define cavCenter*_in ---
     const cavCenterX_plan = cMean.x;

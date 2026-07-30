@@ -198,11 +198,20 @@ pdf_path = '${tempPdf}'
 with pdfplumber.open(pdf_path) as pdf:
     page = pdf.pages[0]
     pts_to_inches = 1.0 / 72.0
-    
-    curves = page.curves
-    
+
+    # Real CAD-exported PDFs overwhelmingly draw rectangular outlines and
+    # pockets as axis-aligned rectangles, which pdfplumber classifies as
+    # page.rects -- NOT page.curves (curves is only bezier/non-rectangular
+    # paths). Checking curves alone missed the common case entirely and fell
+    # through to a fabricated default block below with no error signal.
+    curves = list(page.curves) + list(page.rects)
+
     if not curves:
-        print(json.dumps({'blockWidth': 12, 'blockHeight': 12, 'shapes': []}))
+        # Honest empty result -- no vector shapes of any kind were found in
+        # this PDF (e.g. a scanned image/photo with no embedded vector
+        # graphics). 0x0 is never mistaken for a real extraction, unlike the
+        # previous fabricated "12x12" default.
+        print(json.dumps({'blockWidth': 0, 'blockHeight': 0, 'shapes': []}))
         sys.exit(0)
     
     # Find the largest shape by area (this is the block outline)

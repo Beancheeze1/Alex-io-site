@@ -2023,6 +2023,18 @@ function LayoutEditorHostReady(props: {
     "idle" | "uploading" | "done" | "error"
   >("idle");
 
+  // STL uploads carry no unit metadata at all -- when the mm-vs-inches guess
+  // falls in the genuinely ambiguous middle zone, we apply the safer default
+  // (leave as inches) but must surface that assumption instead of applying
+  // it invisibly. This holds the info needed to show that note and let the
+  // user flip it with one click if the file was actually millimeters.
+  const [stlUnitNotice, setStlUnitNotice] = React.useState<{
+    zone: "confident-in" | "ambiguous" | "confident-mm";
+    appliedAs: "in" | "mm";
+    maxDimRaw: number;
+    seed: any;
+  } | null>(null);
+
 
   const {
     layout,
@@ -3247,12 +3259,23 @@ else nextYIn = snapInches(nextYIn);
           });
           
           const geomData = await geomRes.json();
-          
-          if (geomData.ok && geomData.blockDimensions && geomData.cavities) {
+
+          const extractedLengthIn = Number(geomData?.blockDimensions?.lengthIn);
+          const extractedWidthIn = Number(geomData?.blockDimensions?.widthIn);
+          const hasRealGeometry =
+            geomData.ok &&
+            geomData.blockDimensions &&
+            geomData.cavities &&
+            Number.isFinite(extractedLengthIn) &&
+            extractedLengthIn > 0 &&
+            Number.isFinite(extractedWidthIn) &&
+            extractedWidthIn > 0;
+
+          if (hasRealGeometry) {
             const { blockDimensions, cavities } = geomData;
             const lengthIn = blockDimensions.lengthIn;
             const widthIn = blockDimensions.widthIn;
-            
+
             const confirmed = window.confirm(
               `PDF geometry extracted!\n\n` +
               `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
@@ -3312,6 +3335,21 @@ else nextYIn = snapInches(nextYIn);
               
               alert(`PDF imported! ${cavities.length} cavities added.`);
             }
+          } else if (geomData.ok === false) {
+            // The extraction pipeline itself failed (e.g. a missing server
+            // dependency) -- this is a different failure mode from "we tried
+            // and genuinely found no shapes in your PDF" and must never look
+            // the same to the user (no-silent-failures rule). The PDF itself
+            // was already saved successfully above; only geometry extraction
+            // failed.
+            const detail = geomData.detail || geomData.error || "Unknown error";
+            setUploadStatus("error");
+            setUploadError(`PDF import is currently unavailable: ${detail}`);
+            alert(
+              `PDF import is currently unavailable.\n\n${detail}\n\n` +
+                `The PDF was saved to this quote, but geometry could not be extracted. ` +
+                `Create the layout manually for now, or try again later.`,
+            );
           } else {
             alert(`PDF saved but no geometry found.\n\nCreate layout manually.`);
           }
@@ -3344,6 +3382,7 @@ else nextYIn = snapInches(nextYIn);
 
       setUploadStatus("uploading");
       setUploadError(null);
+      setStlUnitNotice(null);
 
       const fd = new FormData();
       fd.append("file", file);
@@ -3410,14 +3449,30 @@ try {
         }
 
         const importLabel = file?.name ? `DXF: ${file.name}` : "";
+        const resolvedTargetLayerId = importMode === "replace" ? activeLayerId : null;
 
         importLayerFromSeed(seed, {
           mode: importMode,
           label: importMode === "append" ? importLabel : undefined,
-          targetLayerId: importMode === "replace" ? activeLayerId : null,
+          targetLayerId: resolvedTargetLayerId,
         });
 
         setUploadError(null);
+
+        // STL-only: surface the mm-vs-inches assumption instead of applying
+        // it invisibly. unitDetection is absent for DXF/Forge output, so this
+        // is a no-op for DXF uploads.
+        const unitDetection = parsedFaces?.unitDetection;
+        if (unitDetection && (unitDetection.zone === "ambiguous" || unitDetection.zone === "confident-mm")) {
+          setStlUnitNotice({
+            zone: unitDetection.zone,
+            appliedAs: unitDetection.appliedAs,
+            maxDimRaw: Number(unitDetection.maxDimRaw),
+            seed,
+          });
+        } else {
+          setStlUnitNotice(null);
+        }
 
         console.log("Converter file loaded successfully!");
       } else {
@@ -3442,6 +3497,68 @@ return;
       inputEl.value = "";
     }
   };
+
+  // Rescales every absolute-inches dimension in an imported layout seed by a
+  // fixed factor. Cavity x/y positions are normalized (0-1) and left alone.
+  // Used to let the user correct an STL unit assumption after the fact
+  // without re-uploading.
+  const rescaleLayoutSeed = React.useCallback((seed: any, factor: number): any => {
+    const scaleNum = (n: any) => (Number.isFinite(n) ? n * factor : n);
+
+    const scaleCavity = (c: any) => ({
+      ...c,
+      lengthIn: scaleNum(c?.lengthIn),
+      widthIn: scaleNum(c?.widthIn),
+      depthIn: scaleNum(c?.depthIn),
+      cornerRadiusIn: scaleNum(c?.cornerRadiusIn),
+    });
+
+    return {
+      ...seed,
+      block: seed?.block
+        ? {
+            ...seed.block,
+            lengthIn: scaleNum(seed.block.lengthIn),
+            widthIn: scaleNum(seed.block.widthIn),
+            thicknessIn: scaleNum(seed.block.thicknessIn),
+            chamferIn: scaleNum(seed.block.chamferIn),
+          }
+        : seed?.block,
+      cavities: Array.isArray(seed?.cavities) ? seed.cavities.map(scaleCavity) : seed?.cavities,
+      stack: Array.isArray(seed?.stack)
+        ? seed.stack.map((layer: any) => ({
+            ...layer,
+            thicknessIn: scaleNum(layer?.thicknessIn),
+            cavities: Array.isArray(layer?.cavities) ? layer.cavities.map(scaleCavity) : layer?.cavities,
+          }))
+        : seed?.stack,
+    };
+  }, []);
+
+  // STL units are never certain (the format carries no unit metadata) -- this
+  // lets the user correct the assumption shown in the unit-detection banner
+  // with one click instead of re-uploading. Always targets whichever layer
+  // is currently active, since that's the layer the original upload just
+  // populated (true for both "append" and "replace" import modes).
+  const handleFlipStlUnits = React.useCallback(() => {
+    setStlUnitNotice((prev) => {
+      if (!prev) return prev;
+
+      const factor = prev.appliedAs === "in" ? 1 / 25.4 : 25.4;
+      const flippedSeed = rescaleLayoutSeed(prev.seed, factor);
+
+      importLayerFromSeed(flippedSeed, {
+        mode: "replace",
+        targetLayerId: activeLayerId,
+      });
+
+      return {
+        ...prev,
+        appliedAs: prev.appliedAs === "in" ? "mm" : "in",
+        seed: flippedSeed,
+      };
+    });
+  }, [rescaleLayoutSeed, importLayerFromSeed, activeLayerId]);
 
 /* ---------- Foam Advisor navigation ---------- */
 
@@ -4641,6 +4758,32 @@ const tenantCssVars = React.useMemo(() => {
                   </div>
                   {uploadStatus === "error" && uploadError ? (
                     <div className="mt-1 text-[11px] text-[var(--attention)]">{uploadError}</div>
+                  ) : null}
+                  {stlUnitNotice ? (
+                    <div
+                      className={`mt-1 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5 text-[11px] ${
+                        stlUnitNotice.zone === "ambiguous"
+                          ? "border-[var(--attention-border)] bg-[var(--attention-bg)] text-[var(--attention)]"
+                          : "border-[var(--border-strong)] bg-[var(--surface-subtle)] text-[var(--text-secondary)]"
+                      }`}
+                    >
+                      <span>
+                        {"This STL has no unit info. "}
+                        {stlUnitNotice.zone === "ambiguous"
+                          ? `We left dimensions as inches (largest raw dimension: ${stlUnitNotice.maxDimRaw.toFixed(2)}). ` +
+                            "If this file was actually millimeters, click to convert."
+                          : `We detected millimeters and converted to inches (largest raw dimension: ${stlUnitNotice.maxDimRaw.toFixed(
+                              2,
+                            )}mm). ` + "If this file was actually inches, click to revert."}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleFlipStlUnits}
+                        className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
+                      >
+                        {stlUnitNotice.appliedAs === "in" ? "Use millimeters instead" : "Use inches instead"}
+                      </button>
+                    </div>
                   ) : null}
                 </div>
 

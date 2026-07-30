@@ -30,6 +30,14 @@ type Loop = {
   perimeter: number;
 };
 
+type UnitZone = "confident-in" | "ambiguous" | "confident-mm" | "unknown";
+
+type UnitDetection = {
+  zone: UnitZone;
+  maxDimRaw: number;
+  appliedAs: "in" | "mm";
+};
+
 type FacesJson = {
   units: "in" | "mm";
   outerLoopIndex: number;
@@ -42,6 +50,16 @@ type FacesJson = {
     edges: number;
     points: Point2[];
   }>;
+
+  // NEW: real block thickness (already converted to inches) read from the
+  // STL mesh's own Z-height, when available. Only ever set by the STL path
+  // — DXF/PDF sources carry no Z data at all, so callers must keep treating
+  // a missing thicknessIn exactly as before (2in default).
+  thicknessIn?: number;
+
+  // NEW: how the mm-vs-inches guess was made, surfaced so the caller can
+  // show the assumption to the user instead of applying it invisibly.
+  unitDetection?: UnitDetection;
 };
 
 /* ----------------------- STL PARSING ----------------------- */
@@ -221,14 +239,37 @@ function bbox3(tris: StlTri[]) {
   return { minX, minY, minZ, maxX, maxY, maxZ, sx, sy, sz, maxDim };
 }
 
-function guessStlScaleToIn(maxDim: number): { scaleToIn: number; unitGuess: "mm" | "in" | "?" } {
-  if (!Number.isFinite(maxDim) || maxDim <= 0) return { scaleToIn: 1, unitGuess: "?" };
+// STL carries no unit metadata at all, so any inches-vs-millimeters call is a
+// guess from raw magnitude alone. A single cutoff (the old "> 50 -> mm" rule)
+// silently mangled a real 60x40x4in part into 2.38x1.63in with zero warning,
+// because a bare number like 60 is genuinely plausible as either a modest
+// inches-scale block (this catalog goes up to ~84in) or a small mm-native
+// part (60mm = 2.36in). There is no numeric threshold that can safely
+// resolve that overlap — so instead of picking a single magic number, this
+// only auto-decides the unambiguous ends of the range and marks everything
+// in between "ambiguous" so the caller can surface the assumption (and let
+// the user flip it) rather than applying it invisibly.
+const CONFIDENT_IN_MAX_DIM = 40; // below this, essentially always inches for this business
+const CONFIDENT_MM_MIN_DIM = 100; // above this, essentially never a realistic inches-scale foam block
 
-  // If model is ~100+, assume mm
-  if (maxDim > 50) return { scaleToIn: 1 / 25.4, unitGuess: "mm" };
+function classifyStlUnits(maxDim: number): { scaleToIn: number; unitGuess: "mm" | "in" | "?"; zone: UnitZone } {
+  if (!Number.isFinite(maxDim) || maxDim <= 0) {
+    return { scaleToIn: 1, unitGuess: "?", zone: "unknown" };
+  }
 
-  // If model is <50, assume inches
-  return { scaleToIn: 1, unitGuess: "in" };
+  if (maxDim > CONFIDENT_MM_MIN_DIM) {
+    return { scaleToIn: 1 / 25.4, unitGuess: "mm", zone: "confident-mm" };
+  }
+
+  if (maxDim <= CONFIDENT_IN_MAX_DIM) {
+    return { scaleToIn: 1, unitGuess: "in", zone: "confident-in" };
+  }
+
+  // Ambiguous middle zone: default to NOT rescaling. Inches is this
+  // business's native unit, and leaving a genuinely-mm file too large is far
+  // easier for a human to notice and correct than a real part silently
+  // shrunk to a fraction of its size (the bug this replaces).
+  return { scaleToIn: 1, unitGuess: "in", zone: "ambiguous" };
 }
 
 /* ----------------------- TOP FACE EXTRACTION ----------------------- */
@@ -239,7 +280,7 @@ function extractTopFaceSegmentsFromStl(tris: StlTri[]): { segments: Segment[]; d
   const bb = bbox3(tris);
   if (!bb) return { segments: [], diagnostics: { reason: "bbox_failed" } };
 
-  const { scaleToIn, unitGuess } = guessStlScaleToIn(bb.maxDim);
+  const { scaleToIn, unitGuess, zone } = classifyStlUnits(bb.maxDim);
 
   const epsXY = Math.max(1e-9, bb.maxDim * 1e-6);
   const epsZ = Math.max(1e-9, bb.maxDim * 1e-6);
@@ -343,8 +384,13 @@ function extractTopFaceSegmentsFromStl(tris: StlTri[]): { segments: Segment[]; d
       epsZ,
       maxDim: bb.maxDim,
       unitGuess,
+      zone,
       scaleToIn,
       maxDimIn: bb.maxDim * scaleToIn,
+      // Real Z-height of the mesh, converted to inches with the same scale
+      // applied to X/Y, so the caller can use it as the layer's real
+      // thickness instead of a hardcoded default.
+      thicknessIn: bb.sz * scaleToIn,
     },
   };
 }
@@ -519,6 +565,12 @@ export function stlToFacesJson(buf: Buffer): FacesJson {
 
   console.log(`[STL Processor] Outer loop identified: index=${outerIdx}, area=${loops[outerIdx].area.toFixed(6)}`);
   console.log(`[STL Processor] Cavity loops: ${loops.length - 1} (all non-outer loops)`);
+  console.log(
+    `[STL Processor] Units: zone=${res.diagnostics.zone}, appliedAs=${res.diagnostics.unitGuess}, ` +
+      `maxDimRaw=${res.diagnostics.maxDim}, thicknessIn=${res.diagnostics.thicknessIn}`,
+  );
+
+  const thicknessIn = Number(res.diagnostics.thicknessIn);
 
   return {
     units: "in",
@@ -532,5 +584,11 @@ export function stlToFacesJson(buf: Buffer): FacesJson {
       edges: l.points.length,
       points: l.points,
     })),
+    thicknessIn: Number.isFinite(thicknessIn) && thicknessIn > 0 ? thicknessIn : undefined,
+    unitDetection: {
+      zone: res.diagnostics.zone,
+      maxDimRaw: res.diagnostics.maxDim,
+      appliedAs: res.diagnostics.unitGuess === "mm" ? "mm" : "in",
+    },
   };
 }
