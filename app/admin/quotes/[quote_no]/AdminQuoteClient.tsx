@@ -50,6 +50,14 @@ type ItemRow = {
   material_family?: string | null;
   density_lb_ft3?: number | null;
 
+  // Row-classification tag written by /api/quote/layout/apply — e.g.
+  // "[PRIMARY] ...", "[LAYOUT-LAYER] Layer 1", "Requested shipping carton: ...".
+  // NOTE: quote_items.material_id on a packaging (box/mailer) row is NOT a
+  // real material — it's copied from the primary foam item purely to satisfy
+  // a NOT-NULL FK, since there's no "N/A" material row. Never display
+  // material_name for a row where isPackagingNotes(notes) is true.
+  notes?: string | null;
+
   price_unit_usd?: string | null;
   price_total_usd?: string | null;
 
@@ -119,12 +127,19 @@ type Props = {
 type RequestedBoxRow = {
   id: number; // row id from quote_box_selections
   quote_id: number;
-  box_id: number;
-  sku: string;
+  box_id: number | null; // null for custom (typed-dimension) selections
+  sku: string | null;
   vendor: string | null;
   style: string | null;
   description: string | null;
   qty: number;
+
+  // Present in /api/boxes/for-quote's response but previously untyped/unused here.
+  inside_length_in?: number | string | null;
+  inside_width_in?: number | string | null;
+  inside_height_in?: number | string | null;
+  unit_price_usd?: number | string | null;
+  extended_price_usd?: number | string | null;
 };
 
 type BoxesForQuoteOk = {
@@ -138,6 +153,81 @@ type BoxesForQuoteErr = {
 };
 
 type BoxesForQuoteResponse = BoxesForQuoteOk | BoxesForQuoteErr;
+
+/* ---------------- Line-items row classification (admin "Line items" table) ----------------
+   quote_items rows come in three flavors, distinguished only by a text tag in `notes`
+   (written by /api/quote/layout/apply):
+     - primary foam row: no packaging/layout-layer tag (first row after server-side sort)
+     - "[LAYOUT-LAYER] ..." : additional bonded foam layers, reference-only — already
+       included in the primary row's foam pricing, so price_unit_usd/price_total_usd are
+       intentionally null here (never priced a second time).
+     - "Requested shipping carton: ..." or "[PACKAGING] ...": a box/mailer line. Its
+       material_id is copied from the primary foam item purely to satisfy quote_items'
+       NOT NULL FK (there's no "N/A" material row) — it is NOT the row's real material.
+       Its real price lives on quote_box_selections, not quote_items, so
+       price_unit_usd/price_total_usd are null here too by design.
+   Mirrors isPackagingItem()/isLayoutLayerRow() in app/api/quote/print/route.ts. */
+
+function isPackagingNotes(notes: string | null | undefined): boolean {
+  const n = String(notes || "");
+  return n.includes("Requested shipping carton") || n.includes("[PACKAGING]");
+}
+
+function isLayoutLayerNotes(notes: string | null | undefined): boolean {
+  return String(notes || "").toUpperCase().includes("[LAYOUT-LAYER]");
+}
+
+// Assigns each row a display label: sequential "Layer N" for foam rows (primary +
+// layout-layer rows, in their existing sorted order), "Box/Mailer" (numbered if more
+// than one) for packaging rows.
+function buildLineLabels(items: ItemRow[]): string[] {
+  let layerNum = 0;
+  let boxNum = 0;
+  const boxCount = items.filter((it) => isPackagingNotes(it.notes)).length;
+
+  return items.map((it) => {
+    if (isPackagingNotes(it.notes)) {
+      boxNum += 1;
+      return boxCount > 1 ? `Box/Mailer ${boxNum}` : "Box/Mailer";
+    }
+    layerNum += 1;
+    return `Layer ${layerNum}`;
+  });
+}
+
+// Matches a packaging quote_items row to its real quote_box_selections row (which holds
+// the actual price) by inside dims — both are written from the same source dims at
+// Apply time, in either L/W orientation, so this is reliable for stock and custom alike.
+const BOX_DIM_MATCH_TOL_IN = 0.02;
+
+function findBoxSelectionForPackagingItem(
+  item: ItemRow,
+  boxSelections: RequestedBoxRow[] | null,
+): RequestedBoxRow | null {
+  if (!boxSelections || boxSelections.length === 0) return null;
+
+  const itemL = Number(item.length_in);
+  const itemW = Number(item.width_in);
+  const itemH = Number(item.height_in);
+
+  const closeEnough = (a: number, b: number) =>
+    Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < BOX_DIM_MATCH_TOL_IN;
+
+  for (const sel of boxSelections) {
+    const selL = Number(sel.inside_length_in);
+    const selW = Number(sel.inside_width_in);
+    const selH = Number(sel.inside_height_in);
+
+    const straight = closeEnough(itemL, selL) && closeEnough(itemW, selW) && closeEnough(itemH, selH);
+    const swapped = closeEnough(itemL, selW) && closeEnough(itemW, selL) && closeEnough(itemH, selH);
+
+    if (straight || swapped) return sel;
+  }
+
+  // Unambiguous fallback: exactly one carton on the quote, so it must be this one
+  // even if dims didn't line up (e.g. a box row edited independently after Apply).
+  return boxSelections.length === 1 ? boxSelections[0] : null;
+}
 
 function parsePriceField(raw: string | number | null | undefined): number | null {
   if (raw == null) return null;
@@ -2967,37 +3057,85 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((item, idx) => {
-                      const dims = item.length_in + " × " + item.width_in + " × " + item.height_in;
-                      const label = item.material_name || "Material #" + item.material_id;
-                      const unit = parsePriceField(item.price_unit_usd ?? null);
-                      const total = parsePriceField(item.price_total_usd ?? null);
-                      const needsSkive = Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
-                      return (
-                        <tr key={item.id} style={{ color: "var(--text-primary)" }}>
-                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{idx + 1}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
-                            <span>{label}</span>
-                            {needsSkive && (
-                              <span style={{
-                                marginLeft: 6,
-                                padding: "2px 7px",
-                                borderRadius: 999,
-                                border: "1px solid var(--status-pending-text)",
-                                background: "var(--status-pending-bg)",
-                                color: "var(--status-pending-text)",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}>Skived</span>
-                            )}
-                          </td>
-                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{dims}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{item.qty}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(unit)}</td>
-                          <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(total)}</td>
-                        </tr>
-                      );
-                    })}
+                    {(() => {
+                      const lineLabels = buildLineLabels(items);
+                      return items.map((item, idx) => {
+                        const isPackaging = isPackagingNotes(item.notes);
+                        const isLayoutLayer = isLayoutLayerNotes(item.notes);
+                        const dims = item.length_in + " × " + item.width_in + " × " + item.height_in;
+                        const lineLabel = lineLabels[idx];
+
+                        const matchedBoxSel = isPackaging ? findBoxSelectionForPackagingItem(item, boxSelections) : null;
+
+                        // Packaging rows: material_id is a borrowed FK value, not the row's
+                        // real material — never show it. Show the box's own description instead.
+                        const materialLabel = isPackaging
+                          ? matchedBoxSel?.description || "Box / mailer (see Customer requested cartons below)"
+                          : item.material_name || "Material #" + item.material_id;
+
+                        // Layout-layer rows are reference-only (already priced as part of the
+                        // primary row); packaging rows are priced on quote_box_selections, not
+                        // quote_items — pull that real price in rather than showing it as blank.
+                        const unit = isPackaging
+                          ? parsePriceField(matchedBoxSel?.unit_price_usd ?? null)
+                          : parsePriceField(item.price_unit_usd ?? null);
+                        const total = isPackaging
+                          ? parsePriceField(matchedBoxSel?.extended_price_usd ?? null)
+                          : parsePriceField(item.price_total_usd ?? null);
+
+                        const needsSkive =
+                          !isPackaging && Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
+
+                        return (
+                          <tr key={item.id} style={{ color: "var(--text-primary)" }}>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{lineLabel}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              <span>{materialLabel}</span>
+                              {needsSkive && (
+                                <span style={{
+                                  marginLeft: 6,
+                                  padding: "2px 7px",
+                                  borderRadius: 999,
+                                  border: "1px solid var(--status-pending-text)",
+                                  background: "var(--status-pending-bg)",
+                                  color: "var(--status-pending-text)",
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                }}>Skived</span>
+                              )}
+                              {isPackaging && (
+                                <span style={{
+                                  marginLeft: 6,
+                                  padding: "2px 7px",
+                                  borderRadius: 999,
+                                  border: "1px solid var(--border)",
+                                  background: "var(--surface-subtle)",
+                                  color: "var(--text-secondary)",
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                }}>Packaging</span>
+                              )}
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{dims}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{item.qty}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {isLayoutLayer ? (
+                                <span style={{ color: "var(--text-muted)" }}>Included</span>
+                              ) : (
+                                formatUsd(unit)
+                              )}
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {isLayoutLayer ? (
+                                <span style={{ color: "var(--text-muted)" }}>Included</span>
+                              ) : (
+                                formatUsd(total)
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                     {effectivePrintingUpcharge > 0 && (
                       <tr style={{ color: "var(--text-primary)" }}>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
