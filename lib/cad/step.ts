@@ -40,6 +40,16 @@
 //   STEP payload"). Now also persisted via safeLogEvent to event_logs
 //   (source "step-service") so the real detail is visible on
 //   /admin/logs without needing to manually reproduce the failure.
+//
+// NEW (warning visibility):
+// - The microservice's MIN_WALL_IN spacing guard is now warn-not-block: a
+//   SUCCESSFUL export can still carry non-fatal `warnings` (e.g. two
+//   cavities closer than the recommended minimum wall). That used to be
+//   silently discarded here -- only json.step was ever read. Every call
+//   site now gets a safeLogEvent row (source "step-service", level "warn")
+//   for record-keeping, and the optional onWarnings callback lets a caller
+//   with an actual UI moment (step-layer/route.ts's download response)
+//   surface it directly to the person downloading the file.
 
 import { safeLogEvent } from "@/app/lib/adminLog";
 
@@ -445,6 +455,12 @@ export async function buildStepFromLayout(
   // HTTP status, timeout, etc.) in addition to the safeLogEvent row --
   // existing callers that only care about the STEP string can ignore this.
   onError?: (detail: string) => void,
+  // Optional: receives non-fatal warnings from a SUCCESSFUL export (e.g. the
+  // MIN_WALL_IN spacing guard, warn-not-block as of the previous round) --
+  // every call site gets these logged via safeLogEvent regardless of whether
+  // this callback is provided; pass it when there's an actual UI moment
+  // (e.g. the step-layer download route) to surface it to a rep directly.
+  onWarnings?: (warnings: string[]) => void,
 ): Promise<string | null> {
   const baseUrl = getStepServiceUrl();
   if (!baseUrl) return null;
@@ -501,8 +517,24 @@ export async function buildStepFromLayout(
 
     const contentType = res.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; step?: unknown } | null;
-      if (json && json.ok && isNonEmptyString(json.step)) return json.step;
+      const json = (await res.json().catch(() => null)) as
+        | { ok?: boolean; step?: unknown; warnings?: unknown }
+        | null;
+      if (json && json.ok && isNonEmptyString(json.step)) {
+        const warnings = Array.isArray(json.warnings)
+          ? json.warnings.filter((w): w is string => isNonEmptyString(w))
+          : [];
+        if (warnings.length > 0) {
+          await safeLogEvent({
+            level: "warn",
+            source: "step-service",
+            summary: `STEP generated for ${quoteNo} with ${warnings.length} spacing warning(s)`,
+            detail: { quoteNo, warnings },
+          });
+          onWarnings?.(warnings);
+        }
+        return json.step;
+      }
       console.error("[STEP] Microservice JSON missing ok:true and step string.", { quoteNo, json });
       await safeLogEvent({
         level: "error",

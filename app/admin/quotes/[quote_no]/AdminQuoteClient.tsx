@@ -177,9 +177,19 @@ function isLayoutLayerNotes(notes: string | null | undefined): boolean {
   return String(notes || "").toUpperCase().includes("[LAYOUT-LAYER]");
 }
 
-// Assigns each row a display label: sequential "Layer N" for foam rows (primary +
-// layout-layer rows, in their existing sorted order), "Box/Mailer" (numbered if more
-// than one) for packaging rows.
+// Assigns each row a display label: "Primary" for the primary/total-stack
+// foam row (NOT counted as a numbered layer -- it represents the combined
+// stack, not any one real cutting layer), sequential "Layer N" for the real
+// "[LAYOUT-LAYER] ..." rows in their existing sorted order, and "Box/Mailer"
+// (numbered if more than one) for packaging rows.
+//
+// FIX: this used to count the primary row into the same sequential counter
+// as layout-layer rows, so the primary row displayed as "Layer 1" and every
+// real layer's number was shifted up by one (a 2-layer quote showed "Layer 1"
+// (primary, total stack), "Layer 2" (real Layer 1), "Layer 3" (real Layer 2)).
+// Cross-check against the "Foam layout & CAD exports" section on the same
+// page, which reads layer numbers straight from layout_json and was always
+// correct -- that's what these labels must match.
 function buildLineLabels(items: ItemRow[]): string[] {
   let layerNum = 0;
   let boxNum = 0;
@@ -189,6 +199,9 @@ function buildLineLabels(items: ItemRow[]): string[] {
     if (isPackagingNotes(it.notes)) {
       boxNum += 1;
       return boxCount > 1 ? `Box/Mailer ${boxNum}` : "Box/Mailer";
+    }
+    if (!isLayoutLayerNotes(it.notes)) {
+      return "Primary";
     }
     layerNum += 1;
     return `Layer ${layerNum}`;
@@ -1169,6 +1182,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [rebuildError, setRebuildError] = React.useState<string | null>(null);
   const [rebuildOkAt, setRebuildOkAt] = React.useState<string | null>(null);
 
+  // Non-fatal spacing warnings (MIN_WALL_IN, warn-not-block) from the most
+  // recent per-layer STEP download, keyed by layer index -- surfaced via the
+  // x-step-warnings response header so a rep sees it right when they
+  // download, not just buried in event_logs.
+  const [layerStepWarnings, setLayerStepWarnings] = React.useState<Record<number, string[]>>({});
+
   // NEW: Zip all-layers downloader state
   const [zipBusy, setZipBusy] = React.useState<boolean>(false);
   const [zipError, setZipError] = React.useState<string | null>(null);
@@ -1662,6 +1681,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
       const url = `/api/quote/layout/step-layer?quote_no=${encodeURIComponent(quoteNoValue)}&layer_index=${encodeURIComponent(String(layerIndex))}`;
 
+      // Clear any stale warning from a previous attempt at the start of this
+      // one -- it gets repopulated below on success, and should disappear
+      // (not linger showing an old result) if this attempt fails instead.
+      setLayerStepWarnings((prev) => ({ ...prev, [layerIndex]: [] }));
+
       try {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) {
@@ -1669,7 +1693,19 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
           window.open(url, "_blank", "noopener,noreferrer");
           return;
         }
-        
+
+        const warningsHeader = res.headers.get("x-step-warnings");
+        let warnings: string[] = [];
+        if (warningsHeader) {
+          try {
+            const parsed = JSON.parse(decodeURIComponent(warningsHeader));
+            if (Array.isArray(parsed)) warnings = parsed.filter((w) => typeof w === "string");
+          } catch (e) {
+            console.error("Admin: failed to parse x-step-warnings header", e);
+          }
+        }
+        setLayerStepWarnings((prev) => ({ ...prev, [layerIndex]: warnings }));
+
         const buf = await res.arrayBuffer();
         const blob = new Blob([buf], { type: "application/octet-stream" });
 
@@ -2930,6 +2966,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                     Download STEP (layer)
                                   </button>
                                 </div>
+
+                                {layerStepWarnings[idx] && layerStepWarnings[idx].length > 0 && (
+                                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--attention)" }}>
+                                    ⚠️ STEP exported, but {layerStepWarnings[idx].join(" ")}
+                                  </div>
+                                )}
 
                                 <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>Preview shows foam outline + cavity geometry (layer-specific).</div>
                               </div>

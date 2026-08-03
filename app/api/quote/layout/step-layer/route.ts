@@ -225,9 +225,18 @@ export async function GET(req: Request) {
     }
 
     let stepErrorDetail: string | null = null;
-    const stepBase = await buildStepFromLayout(sliced, quote_no, null, (detail) => {
-      stepErrorDetail = detail;
-    });
+    let stepWarnings: string[] = [];
+    const stepBase = await buildStepFromLayout(
+      sliced,
+      quote_no,
+      null,
+      (detail) => {
+        stepErrorDetail = detail;
+      },
+      (warnings) => {
+        stepWarnings = warnings;
+      },
+    );
     if (!stepBase || stepBase.trim().length === 0) {
       // This route is staff/admin-gated above, so it's safe to include the
       // real underlying reason (e.g. a validate_layout message) directly in
@@ -247,13 +256,23 @@ export async function GET(req: Request) {
 
     const filename = `${quote_no}-layer-${layer_index + 1}.step`;
 
+    const headers: Record<string, string> = {
+      "content-type": "application/step",
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "no-store",
+    };
+    // Non-fatal spacing warnings (MIN_WALL_IN, warn-not-block) ride along as a
+    // header rather than inside the STEP file itself -- the file stays a
+    // clean, untouched export; the caller (AdminQuoteClient's fetch-based
+    // download handler) reads this to show the rep something worth
+    // double-checking, right at download time.
+    if (stepWarnings.length > 0) {
+      headers["x-step-warnings"] = encodeURIComponent(JSON.stringify(stepWarnings));
+    }
+
     return new Response(stepText, {
       status: 200,
-      headers: {
-        "content-type": "application/step",
-        "content-disposition": `attachment; filename="${filename}"`,
-        "cache-control": "no-store",
-      },
+      headers,
     });
   } catch (err: any) {
     console.error("GET /api/quote/layout/step-layer error:", err);
