@@ -16,6 +16,7 @@ import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT } from "./editor/InteractiveCanvas";
 import { usePageTracker } from "@/hooks/usePageTracker";
+import { findTightCavityWalls, MIN_WALL_IN } from "./editor/spacingWarnings";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -2082,6 +2083,18 @@ function LayoutEditorHostReady(props: {
       thicknessIn?: number;
     }[];
   };
+
+  // Early warning for cavities placed closer together than
+  // alex-io-step-service's own MIN_WALL_IN guard -- the manual editor keeps
+  // hand-placed cavities 0.5in apart (see the note above the canvas), but
+  // STL-imported layers bypass that and can come in tighter (a real,
+  // physical feature of the source part, not an import bug -- see
+  // Q-AI-20260803-104756). Surfacing it here means a rep finds out while
+  // still working on the layout instead of only at STEP-export time.
+  const tightWallWarnings = React.useMemo(
+    () => findTightCavityWalls((cavities as any[]) ?? [], Number(block?.lengthIn) || 0, Number(block?.widthIn) || 0),
+    [cavities, block?.lengthIn, block?.widthIn],
+  );
 
   const guidedSteps = React.useMemo<GuidedStep[]>(
     () => [
@@ -5469,6 +5482,24 @@ const tenantCssVars = React.useMemo(() => {
                   Cavities are placed inside a 0.5&quot; wall on all sides. When a cavity is selected, the nearest
                   horizontal and vertical gaps to other cavities and to the block edges are dimensioned.
                 </p>
+
+                {tightWallWarnings.length > 0 && (
+                  <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)] space-y-1">
+                    <div className="font-medium">
+                      {tightWallWarnings.length === 1
+                        ? "One wall on this layer is thinner than recommended:"
+                        : `${tightWallWarnings.length} walls on this layer are thinner than recommended:`}
+                    </div>
+                    {tightWallWarnings.map((w, i) => (
+                      <div key={`${w.cavityIdA}-${w.cavityIdB}-${i}`}>
+                        &quot;{w.cavityLabelA}&quot; and &quot;{w.cavityLabelB}&quot; are only {Math.max(0, w.gapIn).toFixed(3)}
+                        &quot; apart (recommended minimum: {MIN_WALL_IN}&quot;). This can fail STEP export or produce a foam
+                        wall too fragile to cut cleanly -- move one of these cavities, or confirm this spacing is intentional
+                        before finalizing.
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* canvas wrapper */}
                 <div
