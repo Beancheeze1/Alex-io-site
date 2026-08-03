@@ -224,9 +224,22 @@ export async function GET(req: Request) {
       }
     }
 
-    const stepBase = await buildStepFromLayout(sliced, quote_no, null);
+    let stepErrorDetail: string | null = null;
+    const stepBase = await buildStepFromLayout(sliced, quote_no, null, (detail) => {
+      stepErrorDetail = detail;
+    });
     if (!stepBase || stepBase.trim().length === 0) {
-      return jsonErr(502, "STEP_FAILED", "STEP service did not return a STEP payload.");
+      // This route is staff/admin-gated above, so it's safe to include the
+      // real underlying reason (e.g. a validate_layout message) directly in
+      // the response instead of only a generic STEP_FAILED -- see event_logs
+      // (source "step-service") for the same detail plus a full audit trail.
+      return jsonErr(
+        502,
+        "STEP_FAILED",
+        stepErrorDetail
+          ? `STEP service rejected this layout: ${stepErrorDetail}`
+          : "STEP service did not return a STEP payload.",
+      );
     }
 
     const effectiveHash = pkg.locked ? storedHash : layoutHash;

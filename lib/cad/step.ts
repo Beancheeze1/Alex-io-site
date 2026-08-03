@@ -29,6 +29,19 @@
 //
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
+//
+// NEW (error visibility):
+// - buildStepFromLayout() used to only console.error on failure and return
+//   null, discarding the microservice's actual response body (e.g. a 400
+//   with a specific validate_layout message like "cavity[3] island[0] is
+//   not fully contained within its parent cavity's footprint"). Every
+//   caller's failure path collapses that into a generic, undiagnosable
+//   message (e.g. step-layer/route.ts's "STEP service did not return a
+//   STEP payload"). Now also persisted via safeLogEvent to event_logs
+//   (source "step-service") so the real detail is visible on
+//   /admin/logs without needing to manually reproduce the failure.
+
+import { safeLogEvent } from "@/app/lib/adminLog";
 
 export type CavityDef = {
   lengthIn: number;
@@ -428,6 +441,10 @@ export async function buildStepFromLayout(
   layout: any,
   quoteNo: string,
   materialLegend: string | null,
+  // Optional: receives the real failure detail (validate_layout message,
+  // HTTP status, timeout, etc.) in addition to the safeLogEvent row --
+  // existing callers that only care about the STEP string can ignore this.
+  onError?: (detail: string) => void,
 ): Promise<string | null> {
   const baseUrl = getStepServiceUrl();
   if (!baseUrl) return null;
@@ -461,7 +478,24 @@ export async function buildStepFromLayout(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      // FastAPI's HTTPException body is {"detail": "..."} -- pull it out so
+      // the actual validate_layout / CAD-kernel message survives, instead of
+      // just the raw (often JSON-escaped) response text.
+      let detail = text;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+      } catch {
+        // not JSON -- keep raw text
+      }
       console.error(`[STEP] Microservice HTTP ${res.status}: ${text?.slice(0, 600)}`, { quoteNo });
+      await safeLogEvent({
+        level: "error",
+        source: "step-service",
+        summary: `STEP generation failed for ${quoteNo}: HTTP ${res.status}`,
+        detail: { quoteNo, status: res.status, detail: detail?.slice(0, 2000) },
+      });
+      onError?.(detail || `HTTP ${res.status}`);
       return null;
     }
 
@@ -470,6 +504,13 @@ export async function buildStepFromLayout(
       const json = (await res.json().catch(() => null)) as { ok?: boolean; step?: unknown } | null;
       if (json && json.ok && isNonEmptyString(json.step)) return json.step;
       console.error("[STEP] Microservice JSON missing ok:true and step string.", { quoteNo, json });
+      await safeLogEvent({
+        level: "error",
+        source: "step-service",
+        summary: `STEP generation failed for ${quoteNo}: response missing ok:true/step`,
+        detail: { quoteNo, json },
+      });
+      onError?.("Microservice response was missing ok:true/step.");
       return null;
     }
 
@@ -477,9 +518,24 @@ export async function buildStepFromLayout(
     if (isNonEmptyString(text)) return text;
 
     console.error("[STEP] Microservice returned empty STEP body.", { quoteNo });
+    await safeLogEvent({
+      level: "error",
+      source: "step-service",
+      summary: `STEP generation failed for ${quoteNo}: empty STEP body`,
+      detail: { quoteNo },
+    });
+    onError?.("Microservice returned an empty STEP body.");
     return null;
   } catch (err: any) {
+    const isAbort = err?.name === "AbortError";
     console.error("[STEP] Error calling STEP microservice:", err?.name || err, { quoteNo });
+    await safeLogEvent({
+      level: "error",
+      source: "step-service",
+      summary: `STEP generation failed for ${quoteNo}: ${isAbort ? "request timed out" : err?.name || "request error"}`,
+      detail: { quoteNo, name: err?.name, message: err?.message },
+    });
+    onError?.(isAbort ? "Request to STEP microservice timed out after 25s." : `${err?.name || "Error"}: ${err?.message || err}`);
     return null;
   } finally {
     clearTimeout(t);
