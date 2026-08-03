@@ -11,6 +11,22 @@
 // NEW (Path A):
 // - Thread block-level corner metadata through unchanged (cornerStyle/chamferIn).
 //
+// NEW (islands):
+// - The microservice's Cavity schema now supports `islands`: raised, uncut
+//   bosses inside a cavity's footprint (full-height only, i.e. they rise
+//   back to the layer's original top surface). This maps 1:1 onto our own
+//   `nestedCavities` model (layoutTypes.ts / InteractiveCanvas's
+//   fill-rule="evenodd" rendering) -- island points use the same normalized
+//   [0..1], top-left-origin coordinate space as the parent cavity's own
+//   `points`, so no coordinate transform is needed here, just pass-through.
+// - The microservice now also runs pre-flight validation: an island that
+//   isn't fully inside its parent cavity, or a wall thinner than its
+//   MIN_WALL_IN guard (sibling cavities or island-to-parent-wall), comes
+//   back as an HTTP 400 with a clear message instead of silently exporting
+//   bad geometry. That guard does NOT fix the underlying boolean-cut
+//   numerical-tolerance issue for closely-spaced features (still separate,
+//   open work in alex-io-step-service) -- it only stops silent bad exports.
+//
 // ENV:
 //   STEP_SERVICE_URL = https://alex-io-step-service.onrender.com
 
@@ -30,29 +46,15 @@ export type CavityDef = {
   // NEW: polygon cavities
   points?: { x: number; y: number }[] | null;
 
+  // NEW: islands (raised, uncut bosses within this cavity's footprint)
+  islands?: { points: { x: number; y: number }[] }[] | null;
+
   // aliases for microservice
   cavityShape?: string | null;
   type?: string | null;
   radiusIn?: number | null;
   diameter?: number | null;
   r?: number | null;
-
-  // KNOWN LIMITATION (confirmed against the microservice's live OpenAPI
-  // schema at alex-io-step-service.onrender.com/openapi.json): the `Cavity`
-  // schema there has no field for a nested "island"/hole feature inside a
-  // poly cavity -- only a single outer boundary. Our own internal cavity
-  // model supports `nestedCavities` (see layoutTypes.ts / InteractiveCanvas's
-  // fill-rule="evenodd" rendering), but that data has nowhere to go here and
-  // is silently dropped from every STEP export today. Additionally, two
-  // real pockets separated by a thin wall (~0.1in in a case we debugged)
-  // can trigger a numerically unstable boolean cut in the microservice's own
-  // CSG engine -- producing either a spurious "web" face or a warped/sloped
-  // pocket floor depending on the exact boundary vertex positions, even
-  // after our own polygon is a clean, degenerate-vertex-free simple loop.
-  // Neither of these is fixable from this repo; they require changes in
-  // alex-io-step-service's own geometry kernel (adding a holes/inner-loop
-  // concept to the schema, and improving boolean-cut robustness for
-  // closely-spaced features).
 };
 
 export type FoamLayer = {
@@ -148,6 +150,38 @@ function coerceDiameterIn(c: any): number | null {
   return null;
 }
 
+function normalizePolyPoints(
+  rawPts: any,
+): { x: number; y: number }[] | null {
+  if (!Array.isArray(rawPts)) return null;
+
+  const normalized = (rawPts as any[])
+    .map((p) => {
+      const px = safeNorm01(p?.x);
+      const py = safeNorm01(p?.y);
+      if (px == null || py == null) return null;
+      return { x: px, y: py };
+    })
+    .filter((v): v is { x: number; y: number } => !!v);
+
+  return normalized.length >= 3 ? normalized : null;
+}
+
+function normalizeIslands(
+  raw: any,
+): { points: { x: number; y: number }[] }[] | null {
+  if (!Array.isArray(raw)) return null;
+
+  const islands = (raw as any[])
+    .map((isl) => {
+      const points = normalizePolyPoints(isl?.points);
+      return points ? { points } : null;
+    })
+    .filter((v): v is { points: { x: number; y: number }[] } => !!v);
+
+  return islands.length ? islands : null;
+}
+
 function normalizeCavities(raw: any[]): CavityDef[] {
   if (!Array.isArray(raw)) return [];
 
@@ -191,6 +225,16 @@ function normalizeCavities(raw: any[]): CavityDef[] {
         if (normalized.length >= 3) points = normalized;
       }
 
+      // NEW: islands (raised, uncut bosses within this cavity). Accepts our
+      // own nestedCavities field (any shape's cavity may carry islands, not
+      // just poly) plus snake_case / already-normalized aliases.
+      const islands = normalizeIslands(
+        (c as any).nestedCavities ??
+          (c as any).nested_cavities ??
+          (c as any).islands ??
+          null,
+      );
+
       const cornerRadiusIn = coerceCornerRadiusIn(c);
       const diameterIn = coerceDiameterIn(c);
 
@@ -218,6 +262,7 @@ function normalizeCavities(raw: any[]): CavityDef[] {
         diameterIn: diameterIn ?? null,
         cornerRadiusIn: cornerRadiusIn ?? null,
         points,
+        islands,
 
         // aliases for microservice
         cavityShape: shape,
