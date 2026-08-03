@@ -47,6 +47,14 @@ type DragState =
       id: string;
       offsetX: number;
       offsetY: number;
+      // Neighbors this cavity was ALREADY closer than MIN_GAP_IN to before the
+      // drag started (e.g. an STL-imported layout that's packed tighter than
+      // the manual-editor minimum). Exempted from the live drag-blocking
+      // check for this drag so the guard can't permanently freeze a cavity
+      // in place -- a rep must be able to drag it further away to actually
+      // fix a thin-wall warning. Moving INTO a new violation against a
+      // different, previously-compliant cavity is still blocked.
+      preExistingViolationIds: Set<string>;
     }
   | {
       mode: "resize";
@@ -361,11 +369,26 @@ export default function InteractiveCanvas({
     // Poly cavities can now be moved (just not resized)
     // The move logic uses lengthIn/widthIn which are the bbox dimensions
 
+    const preExistingViolationIds =
+      minGapIn > 0
+        ? findMinGapViolationIds(
+            cavity.id,
+            xNorm * block.lengthIn,
+            yNorm * block.widthIn,
+            cavity.lengthIn,
+            cavity.widthIn,
+            block,
+            cavities,
+            minGapIn,
+          )
+        : new Set<string>();
+
     setDrag({
       mode: "move",
       id: cavity.id,
       offsetX: ptX - cavX,
       offsetY: ptY - cavY,
+      preExistingViolationIds,
     });
 
     selectAction(cavity.id, {
@@ -434,10 +457,23 @@ export default function InteractiveCanvas({
       xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
-      // enforce min gap to other cavities (Basic mode only)
+      // enforce min gap to other cavities (Basic mode only) -- neighbors this
+      // cavity was already too close to before the drag started are exempt,
+      // so an already-tight (e.g. STL-imported) cavity can still be dragged
+      // instead of being permanently frozen in place.
       if (
         minGapIn > 0 &&
-        violatesMinGap(cav.id, xIn, yIn, len, wid, block, cavities, minGapIn)
+        violatesMinGap(
+          cav.id,
+          xIn,
+          yIn,
+          len,
+          wid,
+          block,
+          cavities,
+          minGapIn,
+          drag.mode === "move" ? drag.preExistingViolationIds : undefined,
+        )
       ) {
         return;
       }
@@ -869,8 +905,51 @@ function violatesMinGap(
   block: LayoutModel["block"],
   cavities: Cavity[],
   minGapIn: number,
+  exemptIds?: Set<string>,
 ): boolean {
   if (!(minGapIn > 0)) return false;
+
+  const x1 = xIn;
+  const x2 = xIn + lenIn;
+  const y1 = yIn;
+  const y2 = yIn + widIn;
+
+  for (const cav of cavities) {
+    if (cav.id === id) continue;
+    if (exemptIds?.has(cav.id)) continue;
+
+    const ox1 = safeNorm01((cav as any).x, 0.2) * block.lengthIn;
+    const ox2 = ox1 + cav.lengthIn;
+    const oy1 = safeNorm01((cav as any).y, 0.2) * block.widthIn;
+    const oy2 = oy1 + cav.widthIn;
+
+    const gapX = Math.max(0, Math.max(ox1 - x2, x1 - ox2));
+    const gapY = Math.max(0, Math.max(oy1 - y2, y1 - oy2));
+
+    if (gapX < minGapIn && gapY < minGapIn) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Which OTHER cavities is (id, xIn/yIn/lenIn/widIn) already closer than
+// minGapIn to, right now? Used once at drag-start so a cavity that's
+// already too close to a neighbor (the common STL-import case) doesn't get
+// permanently frozen by violatesMinGap -- see DragState.preExistingViolationIds.
+function findMinGapViolationIds(
+  id: string,
+  xIn: number,
+  yIn: number,
+  lenIn: number,
+  widIn: number,
+  block: LayoutModel["block"],
+  cavities: Cavity[],
+  minGapIn: number,
+): Set<string> {
+  const out = new Set<string>();
+  if (!(minGapIn > 0)) return out;
 
   const x1 = xIn;
   const x2 = xIn + lenIn;
@@ -888,12 +967,10 @@ function violatesMinGap(
     const gapX = Math.max(0, Math.max(ox1 - x2, x1 - ox2));
     const gapY = Math.max(0, Math.max(oy1 - y2, y1 - oy2));
 
-    if (gapX < minGapIn && gapY < minGapIn) {
-      return true;
-    }
+    if (gapX < minGapIn && gapY < minGapIn) out.add(cav.id);
   }
 
-  return false;
+  return out;
 }
 
 // 0.5" grid inside block

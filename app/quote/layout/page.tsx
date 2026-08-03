@@ -2870,7 +2870,10 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
         updateCavityDims(selectedCavity.id, { widthIn: snapped });
         setCavityInputs((prev) => ({ ...prev, width: String(snapped) }));
       } else if (field === "depth") {
-        updateCavityDims(selectedCavity.id, { depthIn: snapped });
+        // A human just typed this value in directly -- it's now confirmed,
+        // regardless of whether the mesh extraction found/trusted a floor.
+        // Clears the "could not be confirmed" banner for this cavity.
+        updateCavityDims(selectedCavity.id, { depthIn: snapped, depthSource: "manual" });
         setCavityInputs((prev) => ({ ...prev, depth: String(snapped) }));
       } else {
         updateCavityDims(selectedCavity.id, { cornerRadiusIn: snapped });

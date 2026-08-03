@@ -1241,6 +1241,7 @@ function normalizeCavityPatch(p: Partial<Cavity>) {
   if (p.depthIn != null) o.depthIn = safeInch(p.depthIn, 0.25);
   if (p.cornerRadiusIn != null) o.cornerRadiusIn = safeInch(p.cornerRadiusIn, 0);
   if (p.label != null) o.label = p.label;
+  if (p.depthSource != null) o.depthSource = p.depthSource;
   return o;
 }
 

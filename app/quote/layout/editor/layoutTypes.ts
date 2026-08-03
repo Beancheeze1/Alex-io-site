@@ -44,7 +44,10 @@ export type Cavity = {
   // it couldn't be confirmed -- a genuine multi-level floor, or no floor
   // data found at all ("unconfirmed"). Manually-entered/box-picker cavities
   // never set this (depth is whatever the rep typed, trusted as-is).
-  depthSource?: "mesh" | "unconfirmed";
+  // Once a rep manually edits the depth field on an "unconfirmed" (or
+  // "mesh") cavity, it flips to "manual" -- a human has now confirmed the
+  // value, so the "could not be confirmed" banner should stop flagging it.
+  depthSource?: "mesh" | "unconfirmed" | "manual";
 
   // IMPORTANT:
   // These will be assigned later by page.tsx grid placement.
