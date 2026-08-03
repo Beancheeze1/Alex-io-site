@@ -255,6 +255,76 @@ function pointInPoly(pt: Pt, poly: Pt[]): boolean {
   return inside;
 }
 
+function polySignedArea(pts: Pt[]): number {
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % pts.length];
+    s += p1.x * p2.y - p2.x * p1.y;
+  }
+  return s / 2;
+}
+
+function isLeftOrOn(a: Pt, b: Pt, p: Pt): boolean {
+  // >= 0 (with a small epsilon) treats "exactly on the edge" as inside, so a
+  // legitimately edge-touching island isn't nicked by float noise.
+  return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) >= -1e-9;
+}
+
+function segIntersect(p1: Pt, p2: Pt, a: Pt, b: Pt): Pt {
+  const x1 = p1.x,
+    y1 = p1.y,
+    x2 = p2.x,
+    y2 = p2.y;
+  const x3 = a.x,
+    y3 = a.y,
+    x4 = b.x,
+    y4 = b.y;
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-12) return p2;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+}
+
+// Sutherland-Hodgman polygon clip: trims `subject` down to the part that
+// actually lies inside `clip`. `clip` is normalized to CCW winding first --
+// exact only when `clip` is convex, but for a mildly non-convex real-world
+// cavity outline (the common case for STL-derived pockets) it still trims
+// the subject substantially toward the true footprint, which is strictly
+// more correct than passing an uncontained island through unclipped. The
+// STEP service's own validate_layout is the final authority regardless, so
+// a rare pathological non-convex case just fails loudly downstream (now
+// with a clear logged reason) instead of silently exporting bad geometry.
+function clipPolygonToParent(subject: Pt[], clip: Pt[]): Pt[] {
+  if (subject.length < 3 || clip.length < 3) return [];
+
+  const clipCcw = polySignedArea(clip) >= 0 ? clip : [...clip].reverse();
+
+  let output: Pt[] = subject;
+  for (let e = 0; e < clipCcw.length && output.length > 0; e++) {
+    const a = clipCcw[e];
+    const b = clipCcw[(e + 1) % clipCcw.length];
+    const input = output;
+    output = [];
+
+    for (let k = 0; k < input.length; k++) {
+      const cur = input[k];
+      const prev = input[(k - 1 + input.length) % input.length];
+      const curIn = isLeftOrOn(a, b, cur);
+      const prevIn = isLeftOrOn(a, b, prev);
+
+      if (curIn) {
+        if (!prevIn) output.push(segIntersect(prev, cur, a, b));
+        output.push(cur);
+      } else if (prevIn) {
+        output.push(segIntersect(prev, cur, a, b));
+      }
+    }
+  }
+
+  return output;
+}
+
 export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
   const faces = facesJson ?? {};
   const units = (faces?.units as "in" | "mm") || "in";
@@ -510,12 +580,51 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     }
 
     // STEP 4: Add nested cavities if this loop has any
+    //
+    // The STL top-face trace only tells us a nested loop's CENTROID is
+    // inside this parent (that's how nestedInside was built above) -- for a
+    // non-convex/irregular real-world pocket outline (this loop's own
+    // `pts`), the nested loop's actual vertices can still land partially
+    // outside the parent's true boundary even though its centroid is well
+    // inside. Passing that through unclipped produces an island the STEP
+    // service's validate_layout correctly rejects ("not fully contained
+    // within its parent cavity's footprint") -- a real failure seen on a
+    // production quote (Q-AI-20260803-104756) where an island vertex landed
+    // ~0.32in outside a tapered/notched parent cavity.
+    //
+    // Clip every nested loop to this cavity's own polygon (`pts`, same
+    // native coordinate space) before normalizing, so what's stored is
+    // always a genuine subset of the parent -- matching the real STL
+    // geometry instead of an unconstrained bounding shape.
     const nestedLoopIdxs = nestedInside.get(i);
     if (nestedLoopIdxs && nestedLoopIdxs.length > 0) {
       cavity.nestedCavities = nestedLoopIdxs
         .map((nestedIdx) => {
-          const nestedPts = toPts(loopsRaw[nestedIdx]);
-          const nestedNorm = normalizePoints(nestedPts);
+          const nestedPtsRaw = toPts(loopsRaw[nestedIdx]);
+          if (nestedPtsRaw.length < 3) return null;
+
+          const rawArea = Math.abs(polySignedArea(nestedPtsRaw));
+          const clippedPts = clipPolygonToParent(nestedPtsRaw, pts);
+          const clippedArea = clippedPts.length >= 3 ? Math.abs(polySignedArea(clippedPts)) : 0;
+
+          if (clippedPts.length < 3 || clippedArea < rawArea * 0.01) {
+            console.warn(
+              `⚠️ Nested loop ${nestedIdx} inside Loop ${i} was almost entirely outside its parent's real footprint after clipping (raw area=${rawArea.toFixed(
+                6
+              )}, clipped area=${clippedArea.toFixed(6)}) -- dropping this island rather than exporting degenerate geometry.`
+            );
+            return null;
+          }
+
+          if (clippedArea < rawArea * 0.98) {
+            console.warn(
+              `✂️ Nested loop ${nestedIdx} inside Loop ${i} was trimmed to fit its parent's actual (non-rectangular) footprint: raw area=${rawArea.toFixed(
+                6
+              )} -> clipped area=${clippedArea.toFixed(6)} (${units}^2).`
+            );
+          }
+
+          const nestedNorm = normalizePoints(clippedPts);
           if (!nestedNorm || nestedNorm.length < 3) return null;
           return { points: nestedNorm };
         })
