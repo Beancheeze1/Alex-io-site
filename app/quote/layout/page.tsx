@@ -17,6 +17,7 @@ import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT } from "./editor/InteractiveCanvas";
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { findTightCavityWalls, MIN_WALL_IN } from "./editor/spacingWarnings";
+import { findUnconfirmedDepthCavities } from "./editor/depthWarnings";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -2094,6 +2095,16 @@ function LayoutEditorHostReady(props: {
   const tightWallWarnings = React.useMemo(
     () => findTightCavityWalls((cavities as any[]) ?? [], Number(block?.lengthIn) || 0, Number(block?.widthIn) || 0),
     [cavities, block?.lengthIn, block?.widthIn],
+  );
+
+  // Cavities seeded from an STL upload whose depth couldn't be confirmed
+  // from the mesh (a real multi-level floor, or no floor data found) --
+  // they still have a numeric depthIn so the layout renders/exports, but
+  // it's a placeholder, not a measurement. See lib/stl/processor.ts's
+  // computeCavityFloorDepths.
+  const unconfirmedDepthWarnings = React.useMemo(
+    () => findUnconfirmedDepthCavities((cavities as any[]) ?? []),
+    [cavities],
   );
 
   const guidedSteps = React.useMemo<GuidedStep[]>(
@@ -5498,6 +5509,22 @@ const tenantCssVars = React.useMemo(() => {
                         before finalizing.
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {unconfirmedDepthWarnings.length > 0 && (
+                  <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)] space-y-1">
+                    <div className="font-medium">
+                      {unconfirmedDepthWarnings.length === 1
+                        ? "One cavity's depth could not be confirmed from the uploaded file:"
+                        : `${unconfirmedDepthWarnings.length} cavities' depth could not be confirmed from the uploaded file:`}
+                    </div>
+                    <div>
+                      {unconfirmedDepthWarnings.map((w) => `"${w.cavityLabel}"`).join(", ")} — the uploaded file's floor
+                      geometry for {unconfirmedDepthWarnings.length === 1 ? "this cavity" : "these cavities"} was either
+                      ambiguous (e.g. a multi-level floor) or not found at all. The depth shown is a placeholder, not a
+                      measurement -- please verify or set it manually before finalizing.
+                    </div>
                   </div>
                 )}
 

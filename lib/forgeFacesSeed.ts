@@ -528,15 +528,26 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
       if (!polyPoints || polyPoints.length < 3) continue;
     }
 
-    // Per-cavity floor depth isn't derived from the mesh (the STL extractor
-    // only analyzes a single top-face plane, not each cavity's own floor
-    // height), so a through-hole assumption is the most accurate available
-    // default: use the block's own real thickness when we have one (STL),
-    // which is correct for the common through-hole case and at least
-    // grounded in the actual uploaded geometry — unlike the previous flat
-    // "1 inch" default, which had no relationship to the file at all.
-    // DXF/PDF sources (no real thickness) keep the previous default exactly.
-    const depthIn = hasRealThickness ? blockThicknessIn : 1;
+    // STL sources now carry a genuine per-cavity floor depth, independently
+    // derived from the mesh's own lower-Z upward-facing surfaces (see
+    // computeCavityFloorDepths in lib/stl/processor.ts) -- it used to
+    // assume every cavity was a through-hole because "the extractor only
+    // analyzes a single top-face plane", which turned out to be an
+    // incorrect premise: real floor data exists and was simply being
+    // discarded before boundary-tracing ever ran.
+    //
+    // hasMeshDepth is false for DXF/PDF sources (no Z data at all -- keeps
+    // the exact previous fallback: block thickness if known, else 1in) and
+    // for STL cavities where the mesh genuinely couldn't confirm one depth
+    // (a real multi-level floor, or no floor data found at all) -- those
+    // keep a placeholder depth but are tagged "unconfirmed" rather than
+    // silently presented as measured.
+    const rawLoop = loopsRaw[i] as { depthIn?: number; depthSource?: "mesh" | "unconfirmed" } | undefined;
+    const hasMeshDepth =
+      typeof rawLoop?.depthIn === "number" && Number.isFinite(rawLoop.depthIn) && rawLoop.depthIn > 0;
+
+    const depthIn = hasMeshDepth ? (rawLoop!.depthIn as number) : hasRealThickness ? blockThicknessIn : 1;
+    const depthSource: "mesh" | "unconfirmed" = hasMeshDepth && rawLoop?.depthSource === "mesh" ? "mesh" : "unconfirmed";
 
     // --- REQUIRED for your new placement block: define cavCenter*_in ---
     const cavCenterX_plan = cMean.x;
@@ -570,6 +581,7 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
       lengthIn,
       widthIn,
       depthIn,
+      depthSource,
       x,
       y,
     };

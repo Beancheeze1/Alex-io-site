@@ -39,6 +39,13 @@ export type Cavity = {
   widthIn: number;
   depthIn: number;
 
+  // NEW: for STL-seeded cavities, whether depthIn was actually measured
+  // from the mesh's own floor geometry ("mesh") or is a placeholder because
+  // it couldn't be confirmed -- a genuine multi-level floor, or no floor
+  // data found at all ("unconfirmed"). Manually-entered/box-picker cavities
+  // never set this (depth is whatever the rep typed, trusted as-is).
+  depthSource?: "mesh" | "unconfirmed";
+
   // IMPORTANT:
   // These will be assigned later by page.tsx grid placement.
   x: number;

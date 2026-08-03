@@ -5,7 +5,7 @@
 
 type Vec3 = [number, number, number];
 
-type StlTri = {
+export type StlTri = {
   a: Vec3;
   b: Vec3;
   c: Vec3;
@@ -22,7 +22,7 @@ type Segment = {
   layer?: string | null;
 };
 
-type Loop = {
+export type Loop = {
   idx: number;
   points: Point2[];
   closed: boolean;
@@ -49,6 +49,15 @@ type FacesJson = {
     perimeter: number;
     edges: number;
     points: Point2[];
+
+    // NEW: per-cavity floor depth, independently derived from the mesh's
+    // own lower-Z upward-facing surfaces (see computeCavityFloorDepths) --
+    // only ever set for cavity-shaped (negative-area) loops. Absent for the
+    // outer loop and for island/positive-area loops, which don't have their
+    // own floor in this sense.
+    depthIn?: number;
+    depthSource?: "mesh" | "unconfirmed";
+    depthNote?: string;
   }>;
 
   // NEW: real block thickness (already converted to inches) read from the
@@ -561,6 +570,262 @@ function buildLoopsFromSegments(segments: Segment[], tol = 1e-6): Loop[] {
   return closedLoops;
 }
 
+/* ----------------------- PER-CAVITY FLOOR DEPTH ----------------------- */
+//
+// forgeFacesSeed.ts used to default every cavity's depth to the block's own
+// full thickness, reasoning that "the STL extractor only analyzes a single
+// top-face plane, not each cavity's own floor height." That's not actually
+// true: real per-cavity floor surfaces exist well below the top plane and
+// were simply being discarded by extractTopFaceSegmentsFromStl's
+// `zAvg < zMax - epsZ*50` filter before boundary-tracing ever ran.
+//
+// This pass runs against the SAME parsed triangle list, independently of
+// the top-face boundary trace (which stays untouched -- cavity SHAPES have
+// always been correct; only DEPTH was wrong). For each cavity loop already
+// found by the top-face trace, it looks at every near-upward-facing
+// triangle anywhere in the mesh whose centroid falls inside that cavity's
+// own footprint (excluding any nested island's footprint), groups them by
+// Z-height, and only reports a depth when one Z-level clearly dominates.
+// Genuinely ambiguous cases (a real stepped/multi-level floor, or a floor
+// that can't be found at all) are reported as such rather than guessed --
+// see DepthResult.source below.
+
+type Poly = Array<[number, number]>;
+
+// Two Z-clusters within this of each other are treated as the same real
+// surface (triangulation/tessellation noise on one physical floor), not two
+// distinct levels. ~1/8in -- comfortably above typical mesh waviness, well
+// below any real stepped-pocket depth difference seen in practice.
+const FLOOR_Z_MERGE_TOL_MM = 3.0;
+
+// A merged Z-cluster must hold at least this share of a cavity's total
+// floor-candidate area to be reported with confidence. Below this, no single
+// level clearly represents "the" floor (a real stepped pocket, most likely)
+// and the cavity is left unconfirmed rather than guessed.
+const FLOOR_DOMINANCE_RATIO = 0.8;
+
+// A cluster smaller than this fraction of the cavity's own footprint area is
+// treated as noise (a tessellation artifact, a tooling mark, a rounded
+// transition) and dropped before the dominance check -- not used to declare
+// an otherwise-clear floor "ambiguous".
+const FLOOR_MIN_RELATIVE_AREA = 0.05;
+
+// How close a wall-triangle's lowest vertex must sit to the mesh's own
+// bottom Z to corroborate "this cavity's walls actually reach the bottom",
+// i.e. a genuine through-hole -- used only when zero floor candidates were
+// found, to distinguish a real through-hole from missing/noisy data.
+const THROUGH_HOLE_BOTTOM_TOL_MM = 1.0;
+
+function pointInPolygon2(pt: [number, number], poly: Poly): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0],
+      yi = poly[i][1];
+    const xj = poly[j][0],
+      yj = poly[j][1];
+    const hit = yi > pt[1] !== yj > pt[1] && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi + 1e-18) + xi;
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonAreaAbs(poly: Poly): number {
+  let a2 = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1] = poly[i];
+    const [x2, y2] = poly[(i + 1) % poly.length];
+    a2 += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(a2) / 2;
+}
+
+function loopToNativePoly(loop: Loop, scaleToIn: number): Poly {
+  // Loop.points are already in inches (extractTopFaceSegmentsFromStl scales
+  // by scaleToIn) but in the STL's own native origin (never shifted to
+  // (0,0) in this pipeline) -- dividing back out by scaleToIn recovers the
+  // same native units the raw triangles are still in.
+  return loop.points.map((p) => [p.x / scaleToIn, p.y / scaleToIn] as [number, number]);
+}
+
+// Lightweight, self-contained nesting check: which positive-area (island)
+// loops sit inside which negative-area (cavity) loops, by centroid. Mirrors
+// facesJsonToLayoutSeed's own nesting logic (STEP 1) rather than sharing
+// code with it -- this keeps mesh-geometry analysis (this file) and editor
+// data-model construction (forgeFacesSeed.ts) independently understandable,
+// at the cost of the two implementations drifting if one changes without
+// the other. Only used here to exclude an island's own footprint from its
+// parent cavity's floor-triangle attribution -- not to build the actual
+// editor model, which forgeFacesSeed.ts still owns.
+function findIslandLoopsForCavity(
+  cavityLoopIdx: number,
+  loops: Loop[],
+  outerIdx: number,
+  polysByIdx: Map<number, Poly>,
+): Poly[] {
+  const cavityPoly = polysByIdx.get(cavityLoopIdx);
+  if (!cavityPoly) return [];
+
+  const islands: Poly[] = [];
+  for (let i = 0; i < loops.length; i++) {
+    if (i === outerIdx || i === cavityLoopIdx) continue;
+    if (loops[i].area <= 0) continue; // only positive-area (island-shaped) loops
+
+    const poly = polysByIdx.get(i);
+    if (!poly || poly.length < 3) continue;
+
+    const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+    const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+    if (pointInPolygon2([cx, cy], cavityPoly)) islands.push(poly);
+  }
+  return islands;
+}
+
+export type DepthResult = {
+  depthIn: number;
+  source: "mesh" | "unconfirmed";
+  note: string;
+};
+
+// scaleToIn converts NATIVE mesh units -> inches (e.g. 1/25.4 for an mm
+// file, 1 for an inches file). All of bb/tris/loop-native-polys below are
+// in native units; the tolerance constants above are specified in mm for
+// readability, so they need converting to native units once.
+function mmToNative(mmVal: number, scaleToIn: number): number {
+  return mmVal / 25.4 / scaleToIn;
+}
+
+export function computeCavityFloorDepths(
+  tris: StlTri[],
+  loops: Loop[],
+  outerIdx: number,
+  scaleToIn: number,
+  bb: { minZ: number; maxZ: number },
+): Map<number, DepthResult> {
+  const results = new Map<number, DepthResult>();
+
+  const cosMaxTilt = Math.cos((8 * Math.PI) / 180);
+  const zSpanNative = Math.max(bb.maxZ - bb.minZ, 1e-6);
+  const epsZ = Math.max(1e-9, zSpanNative * 1e-6);
+  // Tight band -- only excludes triangles essentially AT the true top
+  // (floating-point/tessellation noise), matching the tolerance
+  // extractTopFaceSegmentsFromStl itself uses to pick the top plane. Must
+  // stay tight: real floors can legitimately sit much closer to the top
+  // than a naive "give it some margin" tolerance would assume (e.g. this
+  // Webster file has a genuine floor candidate only 17mm/0.67in below the
+  // top -- a coarse 1in exclusion band would wrongly discard it).
+  const topBandNative = epsZ * 50;
+
+  const mergeTolNative = mmToNative(FLOOR_Z_MERGE_TOL_MM, scaleToIn);
+  const throughHoleTolNative = mmToNative(THROUGH_HOLE_BOTTOM_TOL_MM, scaleToIn);
+
+  const polysByIdx = new Map<number, Poly>();
+  for (let i = 0; i < loops.length; i++) {
+    if (i === outerIdx) continue;
+    polysByIdx.set(i, loopToNativePoly(loops[i], scaleToIn));
+  }
+
+  type TriInfo = { cx: number; cy: number; cz: number; area: number; minZ: number; upward: boolean; wall: boolean };
+  const triInfos: TriInfo[] = [];
+  for (const t of tris) {
+    const n = vnorm(t.normal && (t.normal[0] || t.normal[1] || t.normal[2]) ? t.normal : vcross(vsub(t.b, t.a), vsub(t.c, t.a)));
+    if (!Number.isFinite(n[2])) continue;
+    const area = triArea(t.a, t.b, t.c);
+    if (!(area > 0)) continue;
+    triInfos.push({
+      cx: (t.a[0] + t.b[0] + t.c[0]) / 3,
+      cy: (t.a[1] + t.b[1] + t.c[1]) / 3,
+      cz: (t.a[2] + t.b[2] + t.c[2]) / 3,
+      area,
+      minZ: Math.min(t.a[2], t.b[2], t.c[2]),
+      upward: n[2] >= cosMaxTilt,
+      wall: Math.abs(n[2]) < 0.35,
+    });
+  }
+
+  for (let cavIdx = 0; cavIdx < loops.length; cavIdx++) {
+    if (cavIdx === outerIdx) continue;
+    if (loops[cavIdx].area >= 0) continue; // only negative-area (cavity-shaped) loops get a floor
+
+    const cavPoly = polysByIdx.get(cavIdx)!;
+    const cavAreaIn2 = polygonAreaAbs(loops[cavIdx].points.map((p) => [p.x, p.y] as [number, number]));
+    const cavAreaNative2 = cavAreaIn2 / (scaleToIn * scaleToIn);
+    const islandPolys = findIslandLoopsForCavity(cavIdx, loops, outerIdx, polysByIdx);
+
+    const clusters = new Map<number, number>(); // zBin -> area
+    for (const t of triInfos) {
+      if (!t.upward) continue;
+      if (t.cz > bb.maxZ - topBandNative) continue; // the block's own top, not a floor
+      if (!pointInPolygon2([t.cx, t.cy], cavPoly)) continue;
+      if (islandPolys.some((ip) => pointInPolygon2([t.cx, t.cy], ip))) continue;
+
+      const zBin = Math.round(t.cz / epsZ) * epsZ;
+      clusters.set(zBin, (clusters.get(zBin) ?? 0) + t.area);
+    }
+
+    if (clusters.size === 0) {
+      const wallReachesBottom = triInfos.some(
+        (t) => t.wall && t.minZ <= bb.minZ + throughHoleTolNative && pointInPolygon2([t.cx, t.cy], cavPoly),
+      );
+      if (wallReachesBottom) {
+        results.set(cavIdx, {
+          depthIn: zSpanNative * scaleToIn,
+          source: "mesh",
+          note: "no floor found; walls corroborated reaching the mesh bottom -- genuine through-hole",
+        });
+      } else {
+        results.set(cavIdx, {
+          depthIn: zSpanNative * scaleToIn,
+          source: "unconfirmed",
+          note: "no upward-facing floor surface found within this cavity's footprint, and walls do not corroborate a through-hole",
+        });
+      }
+      continue;
+    }
+
+    // Merge Z-bins within FLOOR_Z_MERGE_TOL_MM of each other -- triangulation
+    // waviness on one real floor, not genuinely distinct levels.
+    const sortedZ = [...clusters.keys()].sort((a, b) => a - b);
+    type Merged = { zWeighted: number; area: number };
+    const merged: Merged[] = [];
+    for (const z of sortedZ) {
+      const area = clusters.get(z)!;
+      const last = merged[merged.length - 1];
+      if (last && Math.abs(z - last.zWeighted / last.area) <= mergeTolNative) {
+        last.zWeighted += z * area;
+        last.area += area;
+      } else {
+        merged.push({ zWeighted: z * area, area });
+      }
+    }
+
+    // Drop clusters too small to be a real competing floor candidate.
+    const significant = merged.filter((m) => m.area >= cavAreaNative2 * FLOOR_MIN_RELATIVE_AREA);
+    const pool = significant.length ? significant : merged;
+
+    const totalArea = pool.reduce((s, m) => s + m.area, 0);
+    const best = pool.reduce((a, b) => (b.area > a.area ? b : a));
+    const dominance = totalArea > 0 ? best.area / totalArea : 0;
+
+    if (pool.length === 1 || dominance >= FLOOR_DOMINANCE_RATIO) {
+      const floorZNative = best.zWeighted / best.area;
+      const depthNative = bb.maxZ - floorZNative;
+      results.set(cavIdx, {
+        depthIn: depthNative * scaleToIn,
+        source: "mesh",
+        note: `floor found at ${(dominance * 100).toFixed(1)}% dominance across ${pool.length} candidate level(s)`,
+      });
+    } else {
+      results.set(cavIdx, {
+        depthIn: zSpanNative * scaleToIn,
+        source: "unconfirmed",
+        note: `${pool.length} substantial, non-dominant floor levels found (best=${(dominance * 100).toFixed(1)}%) -- looks like a genuine multi-level floor, not resolvable to one depth automatically`,
+      });
+    }
+  }
+
+  return results;
+}
+
 /* ----------------------- PUBLIC API ----------------------- */
 
 export function stlToFacesJson(buf: Buffer): FacesJson {
@@ -604,18 +869,38 @@ export function stlToFacesJson(buf: Buffer): FacesJson {
 
   const thicknessIn = Number(res.diagnostics.thicknessIn);
 
+  const bb = bbox3(tris);
+  const scaleToIn = Number(res.diagnostics.scaleToIn) || 1;
+  const floorDepths =
+    bb && Number.isFinite(bb.minZ) && Number.isFinite(bb.maxZ)
+      ? computeCavityFloorDepths(tris, loops, outerIdx, scaleToIn, bb)
+      : new Map<number, DepthResult>();
+
+  loops.forEach((l, idx) => {
+    const fd = floorDepths.get(idx);
+    if (fd) {
+      console.log(`[STL Processor] Loop ${idx} floor depth: ${fd.depthIn.toFixed(4)}in (${fd.source}) -- ${fd.note}`);
+    }
+  });
+
   return {
     units: "in",
     outerLoopIndex: outerIdx,
     loopsCount: loops.length,
-    loops: loops.map((l) => ({
-      idx: l.idx,
-      closed: l.closed,
-      area: l.area,
-      perimeter: l.perimeter,
-      edges: l.points.length,
-      points: l.points,
-    })),
+    loops: loops.map((l) => {
+      const fd = floorDepths.get(l.idx);
+      return {
+        idx: l.idx,
+        closed: l.closed,
+        area: l.area,
+        perimeter: l.perimeter,
+        edges: l.points.length,
+        points: l.points,
+        depthIn: fd?.depthIn,
+        depthSource: fd?.source,
+        depthNote: fd?.note,
+      };
+    }),
     thicknessIn: Number.isFinite(thicknessIn) && thicknessIn > 0 ? thicknessIn : undefined,
     unitDetection: {
       zone: res.diagnostics.zone,
