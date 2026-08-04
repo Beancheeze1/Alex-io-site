@@ -932,10 +932,20 @@ export default function RepStartQuoteModal({
                         </button>
                       </div>
 
-                      <div className="mt-5">
-                        <Field label="Internal notes">
+                      <div className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
+                        <Field
+                          label={
+                            <span className="inline-flex items-center gap-1.5">
+                              <span aria-hidden="true">🔒</span>
+                              Internal notes
+                              <span className="rounded-full bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-[var(--text-muted)]">
+                                Staff only
+                              </span>
+                            </span>
+                          }
+                        >
                           <div className="mb-1 text-[11px] text-[var(--text-faint)]">
-                            Staff only — never shown to the customer.
+                            Never shown to the customer, on this quote or any other view.
                           </div>
                           <textarea
                             value={internalNotes}
@@ -947,10 +957,20 @@ export default function RepStartQuoteModal({
                         </Field>
                       </div>
 
-                      <div className="mt-5">
-                        <Field label="Notes for the customer's quote">
-                          <div className="mb-1 text-[11px] text-[var(--attention)]">
-                            This will appear on the final quote the customer sees.
+                      <div className="mt-4 rounded-lg border-2 border-[var(--attention-border)] bg-[var(--attention-bg)] p-3">
+                        <Field
+                          label={
+                            <span className="inline-flex items-center gap-1.5">
+                              <span aria-hidden="true">👁️</span>
+                              Notes for the customer&apos;s quote
+                              <span className="rounded-full bg-[var(--attention)] px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-white">
+                                Customer sees this
+                              </span>
+                            </span>
+                          }
+                        >
+                          <div className="mb-1 text-[11px] font-medium text-[var(--attention)]">
+                            This is the ONLY note the customer will see on the final quote — use this one, not Internal notes above, for anything they need to know.
                           </div>
                           <textarea
                             value={customerNotes}
@@ -1568,9 +1588,9 @@ export default function RepStartQuoteModal({
                       ) : null}
 
                       {internalNotes.trim() ? (
-                        <div className="mt-4">
+                        <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                            INTERNAL NOTES <span className="text-[var(--text-faint)]">(staff only)</span>
+                            🔒 INTERNAL NOTES <span className="text-[var(--text-faint)]">(staff only — never shown to the customer)</span>
                           </div>
                           <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">
                             {internalNotes}
@@ -1579,9 +1599,9 @@ export default function RepStartQuoteModal({
                       ) : null}
 
                       {customerNotes.trim() ? (
-                        <div className="mt-4">
-                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                            CUSTOMER-VISIBLE NOTES <span className="text-[var(--attention)]">(on the quote)</span>
+                        <div className="mt-4 rounded-lg border-2 border-[var(--attention-border)] bg-[var(--attention-bg)] p-3">
+                          <div className="text-xs font-medium tracking-widest text-[var(--attention)]">
+                            👁️ CUSTOMER-VISIBLE NOTES <span className="font-normal">(will appear on the quote)</span>
                           </div>
                           <div className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-secondary)]">
                             {customerNotes}
@@ -1640,7 +1660,7 @@ export default function RepStartQuoteModal({
 
 /* ---------- Small presentational helpers ---------- */
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
       <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">{label}</div>
