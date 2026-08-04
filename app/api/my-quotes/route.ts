@@ -63,8 +63,8 @@ export async function GET(req: NextRequest) {
     // Pre-apply quotes have no quote_items; price from Redis facts instead.
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
-    const repUser = await one<{ commission_pct: number | null }>(
-      `SELECT commission_pct FROM public.users WHERE id = $1`,
+    const repUser = await one<{ commission_pct: number | null; sales_slug: string | null }>(
+      `SELECT commission_pct, sales_slug FROM public.users WHERE id = $1`,
       [user.id],
     );
 
@@ -90,6 +90,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       quotes: rows,
+      sales_slug: repUser?.sales_slug ?? null,
       commission: {
         pct: repUser?.commission_pct ?? null,
         quotes_total_usd: quotesTotalUsd,

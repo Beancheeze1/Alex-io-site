@@ -16,6 +16,7 @@ type PayoutRow = {
 
 type ApiResponse = {
   ok: boolean; quotes?: QuoteRow[]; error?: string;
+  sales_slug?: string | null;
   commission?: { pct: number | null; quotes_total_usd: number; commission_usd: number; quote_count: number; };
 };
 
@@ -51,9 +52,11 @@ export default function MyQuotesPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [commission, setCommission] = React.useState<ApiResponse["commission"]>(undefined);
+  const [salesSlug, setSalesSlug] = React.useState<string | null>(null);
   const [payouts, setPayouts] = React.useState<PayoutRow[]>([]);
   const [payoutsLoading, setPayoutsLoading] = React.useState(true);
   const [showPayouts, setShowPayouts] = React.useState(false);
+  const [linkCopied, setLinkCopied] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -69,6 +72,7 @@ export default function MyQuotesPage() {
         if (!json.ok) throw new Error(json.error || "my-quotes API returned ok=false.");
         setQuotes(json.quotes || []);
         setCommission(json.commission);
+        setSalesSlug(json.sales_slug ?? null);
         setError(null);
       } catch (err) {
         if (active) setError("Could not load your quotes. Please try again.");
@@ -102,6 +106,22 @@ export default function MyQuotesPage() {
 
   const unpaidPayouts = payouts.filter((p) => !p.paid_at);
   const unpaidTotal = unpaidPayouts.reduce((s, p) => s + Number(p.commission_usd), 0);
+
+  const salesLink =
+    salesSlug && typeof window !== "undefined"
+      ? `${window.location.origin}/q/${encodeURIComponent(salesSlug)}`
+      : null;
+
+  async function copySalesLink() {
+    if (!salesLink) return;
+    try {
+      await navigator.clipboard.writeText(salesLink);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked; fail silently (no regressions)
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
@@ -141,6 +161,32 @@ export default function MyQuotesPage() {
             <p className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{activeCount}</p>
             <p className="mt-1 text-[11px] text-[var(--text-faint)]">Open or unlabeled quotes</p>
           </div>
+        </section>
+
+        {/* Sales link section */}
+        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-5 py-4">
+          <p className="mb-3 text-[11px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">Your sales link</p>
+          {salesLink ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <code className="flex-1 truncate rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2 text-xs text-[var(--text-primary)]">
+                {salesLink}
+              </code>
+              <button
+                type="button"
+                onClick={copySalesLink}
+                className="inline-flex shrink-0 items-center justify-center rounded-md border border-[var(--border-strong)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+              >
+                {linkCopied ? "Copied!" : "Copy link"}
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-[var(--text-faint)]">
+              You don&apos;t have a sales link set up yet. Ask an admin to assign you one from the Users page.
+            </p>
+          )}
+          <p className="mt-2 text-[11px] text-[var(--text-faint)]">
+            Share this link with prospects. Quotes started from it are automatically credited to your seat.
+          </p>
         </section>
 
         {/* Commission section */}

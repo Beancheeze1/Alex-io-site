@@ -140,6 +140,9 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
+                <Link href="/my-quotes" className="hover:text-[var(--text-primary)]">
+                  My Quotes
+                </Link>
               </>
             )}
           </nav>
