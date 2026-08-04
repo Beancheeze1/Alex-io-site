@@ -36,8 +36,9 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const limitParam = url.searchParams.get("limit");
+    const parsedLimit = limitParam != null ? Number(limitParam) : NaN;
     const limit = Math.min(
-      Number.isFinite(Number(limitParam)) ? Number(limitParam) : 100,
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 100,
       200,
     );
 

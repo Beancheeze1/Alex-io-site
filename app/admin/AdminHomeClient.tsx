@@ -813,6 +813,89 @@ function EmbedSnippetCard({
   );
 }
 
+// ---------- Mileage reimbursement rate (tenant-wide) ----------
+// One $/mile rate for the whole business, used by the expense tracker on
+// /admin/quotes to auto-calculate mileage expenses. Lives here, next to
+// commission %, since both are the "rep pay" knobs an admin tunes.
+
+function MileageRateControl() {
+  const [rate, setRate] = React.useState<string>("");
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/mileage-rate", { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (active && json?.ok) setRate(String(json.mileage_rate_usd));
+      } catch { /* silent */ }
+      finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  async function save() {
+    const n = Number(rate);
+    if (!Number.isFinite(n) || n < 0 || n > 10) {
+      setMsg("Rate must be between 0 and 10.");
+      return;
+    }
+    setSaving(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/mileage-rate", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mileage_rate_usd: n }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(json?.message || "Save failed");
+      setMsg("Saved.");
+    } catch (e: any) {
+      setMsg(e?.message || "Failed to save rate.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 shadow-sm">
+      <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-faint)]">
+        Mileage reimbursement rate
+      </div>
+      <p className="mb-3 text-xs text-[var(--text-secondary)]">
+        One $/mile rate for every rep in this business — used to auto-calculate mileage expenses on their Quotes page.
+      </p>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-[var(--text-muted)]">$</span>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          max="10"
+          disabled={loading}
+          value={rate}
+          onChange={(e) => setRate(e.target.value)}
+          className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
+        />
+        <span className="text-xs text-[var(--text-muted)]">/ mile</span>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || loading}
+          className="ml-2 inline-flex items-center rounded-full bg-[var(--action-primary)] px-3 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        {msg && <span className="text-[11px] text-[var(--text-muted)]">{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
 // ---------- Users & Roles card ----------
 
 function UsersAndRolesCard() {
@@ -1049,6 +1132,8 @@ function UsersAndRolesCard() {
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 shadow-sm">
+      <MileageRateControl />
+
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-faint)]">
           Create user

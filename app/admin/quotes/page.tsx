@@ -65,6 +65,22 @@ type PayoutRow = {
   commission_usd: string; quote_count: number; paid_at: string | null; created_at: string;
 };
 
+type ExpenseRow = {
+  id: number; expense_type: string; miles: string | null; amount_usd: string;
+  notes: string | null; created_at: string;
+};
+
+const EXPENSE_TYPES = ["mileage", "meals", "supplies", "other"] as const;
+function expenseTypeLabel(t: string) {
+  switch (t) {
+    case "mileage": return "Mileage";
+    case "meals": return "Meals";
+    case "supplies": return "Supplies";
+    case "other": return "Other";
+    default: return t;
+  }
+}
+
 function fmtUsd(n: number | string) {
   return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -95,6 +111,98 @@ export default function AdminQuotesPage() {
   const [myPayoutsLoading, setMyPayoutsLoading] = React.useState(true);
   const [showMyPayouts, setShowMyPayouts] = React.useState(false);
   const [linkCopied, setLinkCopied] = React.useState(false);
+
+  // Expense tracker -- own expenses only, mileage auto-calculated from the
+  // tenant-wide rate set in the main admin area (Users & Roles card).
+  const [expenses, setExpenses] = React.useState<ExpenseRow[]>([]);
+  const [expensesLoading, setExpensesLoading] = React.useState(true);
+  const [mileageRate, setMileageRate] = React.useState<number>(0.67);
+  const [expenseType, setExpenseType] = React.useState<string>("mileage");
+  const [expenseMiles, setExpenseMiles] = React.useState("");
+  const [expenseAmount, setExpenseAmount] = React.useState("");
+  const [expenseNotes, setExpenseNotes] = React.useState("");
+  const [expenseSubmitting, setExpenseSubmitting] = React.useState(false);
+  const [expenseError, setExpenseError] = React.useState<string | null>(null);
+  const [deletingExpenseId, setDeletingExpenseId] = React.useState<number | null>(null);
+
+  const loadExpenses = React.useCallback(async () => {
+    try {
+      const res = await fetch("/api/my-expenses?limit=100", { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (json?.ok) setExpenses(json.expenses || []);
+    } catch { /* silent */ }
+    finally { setExpensesLoading(false); }
+  }, []);
+
+  React.useEffect(() => {
+    let active = true;
+    loadExpenses();
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/mileage-rate", { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (active && json?.ok && typeof json.mileage_rate_usd === "number") {
+          setMileageRate(json.mileage_rate_usd);
+        }
+      } catch { /* silent -- form falls back to the default rate */ }
+    })();
+    return () => { active = false; };
+  }, [loadExpenses]);
+
+  const expenseMilesCalc = Number(expenseMiles);
+  const expenseMileageCalcUsd =
+    expenseType === "mileage" && Number.isFinite(expenseMilesCalc) && expenseMilesCalc > 0
+      ? Math.round(expenseMilesCalc * mileageRate * 100) / 100
+      : null;
+
+  async function submitExpense(e: React.FormEvent) {
+    e.preventDefault();
+    setExpenseError(null);
+
+    const body: any = { expense_type: expenseType, notes: expenseNotes.trim() || undefined };
+    if (expenseType === "mileage") {
+      body.miles = Number(expenseMiles);
+    } else {
+      body.amount_usd = Number(expenseAmount);
+    }
+
+    setExpenseSubmitting(true);
+    try {
+      const res = await fetch("/api/my-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.message || "Failed to add expense.");
+      }
+      setExpenseMiles("");
+      setExpenseAmount("");
+      setExpenseNotes("");
+      await loadExpenses();
+    } catch (err: any) {
+      setExpenseError(err?.message || "Failed to add expense.");
+    } finally {
+      setExpenseSubmitting(false);
+    }
+  }
+
+  async function deleteExpense(id: number) {
+    setDeletingExpenseId(id);
+    try {
+      const res = await fetch(`/api/my-expenses?id=${id}`, { method: "DELETE" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(json?.message || "Delete failed");
+      setExpenses((prev) => prev.filter((x) => x.id !== id));
+    } catch (err: any) {
+      setExpenseError(err?.message || "Failed to delete expense.");
+    } finally {
+      setDeletingExpenseId(null);
+    }
+  }
+
+  const expensesTotal = expenses.reduce((s, e) => s + Number(e.amount_usd), 0);
 
   React.useEffect(() => {
     let active = true;
@@ -641,6 +749,132 @@ export default function AdminQuotesPage() {
             )}
           </section>
         )}
+
+        {/* Expenses */}
+        <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[11px] font-medium uppercase tracking-widest text-[var(--text-secondary)]">Expenses</p>
+            <p className="text-[11px] text-[var(--text-faint)]">
+              Total: <span className="font-semibold text-[var(--text-primary)]">${fmtUsd(expensesTotal)}</span>
+            </p>
+          </div>
+
+          <form onSubmit={submitExpense} className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+            <label className="block">
+              <div className="mb-1 text-[11px] text-[var(--text-muted)]">Type</div>
+              <select
+                value={expenseType}
+                onChange={(e) => setExpenseType(e.target.value)}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+              >
+                {EXPENSE_TYPES.map((t) => (
+                  <option key={t} value={t}>{expenseTypeLabel(t)}</option>
+                ))}
+              </select>
+            </label>
+
+            {expenseType === "mileage" ? (
+              <label className="block">
+                <div className="mb-1 text-[11px] text-[var(--text-muted)]">Miles</div>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={expenseMiles}
+                  onChange={(e) => setExpenseMiles(e.target.value)}
+                  placeholder="0"
+                  className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                />
+              </label>
+            ) : (
+              <label className="block">
+                <div className="mb-1 text-[11px] text-[var(--text-muted)]">Amount ($)</div>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={expenseAmount}
+                  onChange={(e) => setExpenseAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                />
+              </label>
+            )}
+
+            <label className="block flex-1 min-w-[8rem]">
+              <div className="mb-1 text-[11px] text-[var(--text-muted)]">Notes (optional)</div>
+              <input
+                type="text"
+                value={expenseNotes}
+                onChange={(e) => setExpenseNotes(e.target.value)}
+                placeholder="e.g. client visit"
+                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+              />
+            </label>
+
+            {expenseType === "mileage" && (
+              <div className="text-[11px] text-[var(--text-faint)] sm:pb-2">
+                {expenseMileageCalcUsd != null
+                  ? `= $${fmtUsd(expenseMileageCalcUsd)} at $${fmtUsd(mileageRate)}/mi`
+                  : `$${fmtUsd(mileageRate)}/mi`}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={expenseSubmitting}
+              className="inline-flex items-center justify-center rounded-md bg-[var(--action-primary)] px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {expenseSubmitting ? "Adding…" : "Add expense"}
+            </button>
+          </form>
+
+          {expenseError && (
+            <p className="mb-3 text-xs text-[var(--attention)]">{expenseError}</p>
+          )}
+
+          {expensesLoading ? (
+            <p className="text-xs text-[var(--text-faint)]">Loading…</p>
+          ) : expenses.length === 0 ? (
+            <p className="text-xs text-[var(--text-faint)]">No expenses logged yet.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
+              <table className="min-w-full text-left text-xs">
+                <thead className="border-b border-[var(--border)] text-[var(--text-faint)]">
+                  <tr>
+                    <th className="py-2 px-3">Date</th>
+                    <th className="py-2 pr-3">Type</th>
+                    <th className="py-2 pr-3">Notes</th>
+                    <th className="py-2 pr-3 text-right">Miles</th>
+                    <th className="py-2 pr-3 text-right">Amount</th>
+                    <th className="py-2 pr-0"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenses.map((e) => (
+                    <tr key={e.id} className="border-b border-[var(--border)] last:border-0">
+                      <td className="py-2 px-3 text-[var(--text-muted)]">{new Date(e.created_at).toLocaleDateString()}</td>
+                      <td className="py-2 pr-3 text-[var(--text-primary)]">{expenseTypeLabel(e.expense_type)}</td>
+                      <td className="py-2 pr-3 text-[var(--text-secondary)]">{e.notes || "—"}</td>
+                      <td className="py-2 pr-3 text-right text-[var(--text-muted)]">{e.miles != null ? Number(e.miles).toFixed(1) : "—"}</td>
+                      <td className="py-2 pr-3 text-right font-medium text-[var(--text-primary)]">${fmtUsd(e.amount_usd)}</td>
+                      <td className="py-2 pr-0 text-right">
+                        <button
+                          type="button"
+                          onClick={() => deleteExpense(e.id)}
+                          disabled={deletingExpenseId === e.id}
+                          className="text-[11px] text-[var(--text-faint)] hover:text-[var(--attention)] disabled:opacity-50"
+                        >
+                          {deletingExpenseId === e.id ? "…" : "Remove"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
         {/* Jump to quote + summary */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
