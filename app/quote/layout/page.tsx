@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
 import { useLayoutModel } from "./editor/useLayoutModel";
-import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT } from "./editor/InteractiveCanvas";
+import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT, SNAP_IN as RESIZE_SNAP_IN } from "./editor/InteractiveCanvas";
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { findTightCavityWalls, MIN_WALL_IN } from "./editor/spacingWarnings";
 import { findUnconfirmedDepthCavities } from "./editor/depthWarnings";
@@ -2863,6 +2863,49 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
         return;
       }
 
+      // Poly (STL-imported) cavities: length/width used to only change the
+      // bbox label -- the real rendered/exported shape is drawn from
+      // points[], which this never touched, so the edit silently did
+      // nothing to the actual geometry. Fix: uniformly scale the real
+      // traced boundary (locked aspect ratio, both dims scale by the same
+      // factor) around the cavity's own anchor corner (x/y), the same
+      // fixed-corner convention rect/circle resize already uses. Non-uniform
+      // stretching isn't offered here since it would distort a shape traced
+      // from a real measured part.
+      if (
+        selectedCavity.shape === "poly" &&
+        Array.isArray((selectedCavity as any).points) &&
+        (field === "length" || field === "width")
+      ) {
+        const currentDim = field === "length" ? selectedCavity.lengthIn : selectedCavity.widthIn;
+        if (!(currentDim > 0)) {
+          resetToCurrent();
+          return;
+        }
+
+        const scale = snapped / currentDim;
+        const anchorX = (selectedCavity as any).x ?? 0;
+        const anchorY = (selectedCavity as any).y ?? 0;
+        const scaledPoints = ((selectedCavity as any).points as { x: number; y: number }[]).map((pt) => ({
+          x: anchorX + (pt.x - anchorX) * scale,
+          y: anchorY + (pt.y - anchorY) * scale,
+        }));
+        const newLengthIn = selectedCavity.lengthIn * scale;
+        const newWidthIn = selectedCavity.widthIn * scale;
+
+        updateCavityDims(selectedCavity.id, {
+          lengthIn: newLengthIn,
+          widthIn: newWidthIn,
+          points: scaledPoints,
+        });
+        setCavityInputs((prev) => ({
+          ...prev,
+          length: String(snapInches(newLengthIn)),
+          width: String(snapInches(newWidthIn)),
+        }));
+        return;
+      }
+
       if (field === "length") {
         updateCavityDims(selectedCavity.id, { lengthIn: snapped });
         setCavityInputs((prev) => ({ ...prev, length: String(snapped) }));
@@ -5551,7 +5594,9 @@ const tenantCssVars = React.useMemo(() => {
     }
     updateCavityPosition(id, xNorm, yNorm);
   }}
-  resizeAction={(id, lengthIn, widthIn) => updateCavityDims(id, { lengthIn, widthIn })}
+  resizeAction={(id, lengthIn, widthIn) =>
+    updateCavityDims(id, { lengthIn, widthIn }, { stepIn: RESIZE_SNAP_IN })
+  }
   zoom={zoom}
   croppedCorners={croppedCorners}
   roundCorners={roundCorners}

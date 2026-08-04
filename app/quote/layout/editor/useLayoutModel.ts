@@ -64,7 +64,7 @@ export type UseLayoutModelResult = {
 
   updateCavityPosition: (id: string, x: number, y: number) => void;
   updateBlockDims: (patch: Partial<BlockDims>) => void;
-  updateCavityDims: (id: string, patch: Partial<Cavity>) => void;
+  updateCavityDims: (id: string, patch: Partial<Cavity>, opts?: { stepIn?: number }) => void;
 
   addCavity: (shape: CavityShape, size?: any) => void;
   deleteCavity: (id: string) => void;
@@ -391,7 +391,7 @@ const didInitActiveLayerRef = useRef(false);
     }));
   }, []);
 
-  const updateCavityDims = useCallback((id: string, patch: Partial<Cavity>) => {
+  const updateCavityDims = useCallback((id: string, patch: Partial<Cavity>, opts?: { stepIn?: number }) => {
     setState((prev) => {
       const nextStack = prev.layout.stack.map((layer) =>
         layer.id !== prev.activeLayerId
@@ -401,7 +401,7 @@ const didInitActiveLayerRef = useRef(false);
               cavities: layer.cavities.map((c) => {
                 if (c.id !== id) return c;
 
-                const next = { ...c, ...normalizeCavityPatch(patch) } as Cavity;
+                const next = { ...c, ...normalizeCavityPatch(patch, opts?.stepIn) } as Cavity;
 
                 // ✅ Path-A: keep sidebar labels in sync with live dims
                 // Only auto-generate when the user didn't explicitly set a label in this patch.
@@ -1206,10 +1206,10 @@ function clamp01OrPreserve(v: any, prior: any, fallback = 0.2) {
 }
 
 
-function safeInch(v: number | undefined, min: number) {
+function safeInch(v: number | undefined, min: number, stepIn: number = 0.125) {
   const n = Number(v);
   if (!Number.isFinite(n)) return min;
-  return Math.max(min, Math.round(n * 8) / 8);
+  return Math.max(min, Math.round(n / stepIn) * stepIn);
 }
 
 function normalizeBlockPatch(p: Partial<BlockDims>) {
@@ -1234,14 +1234,24 @@ function normalizeBlockPatch(p: Partial<BlockDims>) {
   return o;
 }
 
-function normalizeCavityPatch(p: Partial<Cavity>) {
+function normalizeCavityPatch(p: Partial<Cavity>, stepIn: number = 0.125) {
   const o: Partial<Cavity> = {};
-  if (p.lengthIn != null) o.lengthIn = safeInch(p.lengthIn, 0.25);
-  if (p.widthIn != null) o.widthIn = safeInch(p.widthIn, 0.25);
-  if (p.depthIn != null) o.depthIn = safeInch(p.depthIn, 0.25);
-  if (p.cornerRadiusIn != null) o.cornerRadiusIn = safeInch(p.cornerRadiusIn, 0);
+  if (p.lengthIn != null) o.lengthIn = safeInch(p.lengthIn, 0.25, stepIn);
+  if (p.widthIn != null) o.widthIn = safeInch(p.widthIn, 0.25, stepIn);
+  if (p.depthIn != null) o.depthIn = safeInch(p.depthIn, 0.25, stepIn);
+  if (p.cornerRadiusIn != null) o.cornerRadiusIn = safeInch(p.cornerRadiusIn, 0, stepIn);
   if (p.label != null) o.label = p.label;
   if (p.depthSource != null) o.depthSource = p.depthSource;
+  // Poly (STL-imported) cavities: a length/width edit that uniformly scales
+  // the real traced boundary passes the transformed points along in the
+  // same patch, so bbox dims and the actual render/export geometry update
+  // atomically together (see commitCavityField's poly branch in page.tsx).
+  if (Array.isArray((p as any).points)) {
+    o.points = (p as any).points.map((pt: any) => ({
+      x: Math.max(0, Math.min(1, Number(pt?.x))),
+      y: Math.max(0, Math.min(1, Number(pt?.y))),
+    }));
+  }
   return o;
 }
 

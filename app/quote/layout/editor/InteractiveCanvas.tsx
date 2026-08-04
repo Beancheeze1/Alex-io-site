@@ -74,8 +74,11 @@ const HEADER_BAND = 80;
 
 const PADDING = 32;
 const WALL_IN = 0.5;
-// Snap for movement / resize = 1/16"
-const SNAP_IN = 0.0625;
+// Snap for movement / resize = 1/16" -- exported so the resize-commit call
+// site (page.tsx) can request this same precision from updateCavityDims,
+// instead of re-rounding to the coarser 1/8" default every other dimension
+// edit uses. Keeps the live drag preview and the committed value in sync.
+export const SNAP_IN = 0.0625;
 const MIN_GAP_IN = 0.5;
 
 // Color palette used for cavity outlines / handles.
