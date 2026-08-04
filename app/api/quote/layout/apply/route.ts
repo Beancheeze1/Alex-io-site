@@ -1531,30 +1531,42 @@ export async function POST(req: NextRequest) {
     // Every successful Apply is definitionally its own staging revision — same way
     // every Lock/RFM is definitionally its own released revision. No arming needed.
     // IMPORTANT: bump BEFORE tagging notes/packages so the package carries the current revision.
+    //
+    // GUARD: only bump while the quote is still unlocked (staging). A locked
+    // (RFM/released) quote can legitimately hit this Apply route again for a
+    // non-geometry change (customer info, notes, carton pick) — the earlier
+    // lock check above only blocks a geometry MISMATCH, not a same-geometry
+    // re-Apply. Without this guard, that re-Apply would silently relabel a
+    // released quote back to an "S" (staging) revision while leaving it
+    // locked=true — the two signals drifting out of sync (locked quotes are
+    // the only thing commission payouts key off; this bump never touched
+    // that gate, but it made a paid/released quote LOOK unreleased).
     let factsForRev: any = null;
-    try {
-      factsForRev = await loadFacts(String(quoteNo));
+    if (!quote.locked) {
+      try {
+        factsForRev = await loadFacts(String(quoteNo));
 
-      // Do NOT default a missing stage to "AS" here — nextStageRev's own
-      // "no prior revision" handling correctly produces "AS" for a quote's
-      // very first Apply. Defaulting to "AS" here would skip straight to "BS".
-      //
-      // Prefer `revision` over `stage_rev`: the RFM release-mint logic
-      // (app/api/admin/quotes/lock/route.ts) resets `revision` to the fresh
-      // released letter (e.g. "A") but does NOT touch `stage_rev`, which is
-      // left holding whatever staging letter was reached before release
-      // (e.g. "CS"). Reading stage_rev first would resume from that stale
-      // value instead of correctly starting the next stage from the letter
-      // that was just released.
-      const curStage = factsForRev?.revision || factsForRev?.stage_rev || null;
-      const nextStage = nextStageRev(curStage);
+        // Do NOT default a missing stage to "AS" here — nextStageRev's own
+        // "no prior revision" handling correctly produces "AS" for a quote's
+        // very first Apply. Defaulting to "AS" here would skip straight to "BS".
+        //
+        // Prefer `revision` over `stage_rev`: the RFM release-mint logic
+        // (app/api/admin/quotes/lock/route.ts) resets `revision` to the fresh
+        // released letter (e.g. "A") but does NOT touch `stage_rev`, which is
+        // left holding whatever staging letter was reached before release
+        // (e.g. "CS"). Reading stage_rev first would resume from that stale
+        // value instead of correctly starting the next stage from the letter
+        // that was just released.
+        const curStage = factsForRev?.revision || factsForRev?.stage_rev || null;
+        const nextStage = nextStageRev(curStage);
 
-      factsForRev.stage_rev = nextStage;
-      factsForRev.revision = nextStage;
+        factsForRev.stage_rev = nextStage;
+        factsForRev.revision = nextStage;
 
-      await saveFacts(String(quoteNo), factsForRev);
-    } catch {
-      // Non-fatal: apply must succeed even if revision update fails
+        await saveFacts(String(quoteNo), factsForRev);
+      } catch {
+        // Non-fatal: apply must succeed even if revision update fails
+      }
     }
     // --- END STAGING REV BUMP ---
 
