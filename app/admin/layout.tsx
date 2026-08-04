@@ -49,7 +49,12 @@ export default async function AdminLayout({ children }: Props) {
     redirect("/");
   }
 
-  const showTenants = role === "admin" && canSeeTenantsLink(user);
+  // Gates every nav link that points at platform-wide (not tenant-scoped)
+  // data: Tenants, Traffic, Products, Templates, Logs, Leads. Matches the
+  // server-side isPlatformOwner() enforcement each of those pages/APIs has
+  // independently -- this just keeps a regular tenant admin from seeing a
+  // link to somewhere they can't actually go.
+  const showOwnerOnlyLinks = role === "admin" && canSeeTenantsLink(user);
 
   // Tenant-aware admin header label:
   // - Core host (api.alex-io.com) -> "Alex-IO Admin"
@@ -88,7 +93,7 @@ export default async function AdminLayout({ children }: Props) {
                   Dashboard
                 </Link>
 
-                {showTenants ? (
+                {showOwnerOnlyLinks ? (
                   <Link href="/admin/tenants" className="hover:text-[var(--text-primary)]">
                     Tenants
                   </Link>
@@ -106,18 +111,28 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/boxes" className="hover:text-[var(--text-primary)]">
                   Boxes
                 </Link>
-                <Link href="/admin/products" className="hover:text-[var(--text-primary)]">
-                  Products
-                </Link>
-                <Link href="/admin/templates" className="hover:text-[var(--text-primary)]">
-                  Templates
-                </Link>
+
+                {showOwnerOnlyLinks ? (
+                  <Link href="/admin/products" className="hover:text-[var(--text-primary)]">
+                    Products
+                  </Link>
+                ) : null}
+                {showOwnerOnlyLinks ? (
+                  <Link href="/admin/templates" className="hover:text-[var(--text-primary)]">
+                    Templates
+                  </Link>
+                ) : null}
+
                 <Link href="/admin/commissions" className="hover:text-[var(--text-primary)]">
                   Commissions
                 </Link>
-                <Link href="/admin/logs" className="hover:text-[var(--text-primary)]">
-                  Logs
-                </Link>
+
+                {showOwnerOnlyLinks ? (
+                  <Link href="/admin/logs" className="hover:text-[var(--text-primary)]">
+                    Logs
+                  </Link>
+                ) : null}
+
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
@@ -125,15 +140,17 @@ export default async function AdminLayout({ children }: Props) {
                   Cleanup
                 </Link>
 
-                {showTenants ? (
+                {showOwnerOnlyLinks ? (
                   <Link href="/admin/traffic" className="hover:text-[var(--text-primary)]">
                     Traffic
                   </Link>
                 ) : null}
 
-                <Link href="/admin/leads" className="hover:text-[var(--text-primary)]">
-                  Leads
-                </Link>
+                {showOwnerOnlyLinks ? (
+                  <Link href="/admin/leads" className="hover:text-[var(--text-primary)]">
+                    Leads
+                  </Link>
+                ) : null}
               </>
             ) : (
               <>

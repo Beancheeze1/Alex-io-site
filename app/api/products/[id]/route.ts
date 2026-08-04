@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
-import { requireAdmin } from "@/lib/admin-auth";
+import { requireOwner } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ function getPool() {
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const deny = await requireAdmin(req);
+  const deny = await requireOwner(req);
   if (deny) return deny;
 
   try {

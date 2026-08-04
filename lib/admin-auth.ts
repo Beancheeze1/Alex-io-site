@@ -55,3 +55,44 @@ export function adminOnly(handler: (req: NextRequest) => Promise<NextResponse>) 
     return handler(req);
   };
 }
+
+// Platform-owner-only gate, for data that isn't tenant-scoped at all
+// (shared product catalog, shared email templates, cross-tenant event log)
+// — a regular tenant admin has never had a legitimate reason to reach these,
+// unlike everything else behind requireAdmin/adminOnly which is scoped to
+// their own tenant. Keeps the same x-admin-key bypass as requireAdmin for
+// internal tooling/scripts, since that's a trusted mechanism independent of
+// any specific user's tenant.
+export async function requireOwner(req: NextRequest): Promise<NextResponse | null> {
+  const providedKey = req.headers.get("x-admin-key") || req.headers.get("admin-key");
+  if (providedKey && providedKey === env.ADMIN_KEY) {
+    logger.info("Owner access granted via key", { path: req.nextUrl.pathname });
+    return null;
+  }
+
+  const user = await getCurrentUserFromRequest(req);
+  if (user && isRoleAllowed(user, ["admin"]) && isPlatformOwner(user)) {
+    logger.info("Owner access granted via session", { path: req.nextUrl.pathname, userId: user.id });
+    return null;
+  }
+
+  logger.warn("Owner access denied", {
+    ip: req.headers.get("x-forwarded-for")?.split(",")[0] || "unknown",
+    path: req.nextUrl.pathname,
+    hasKey: !!providedKey,
+    hasSession: !!user,
+  });
+
+  return NextResponse.json(
+    { ok: false, error: "owner_access_required" },
+    { status: 403 },
+  );
+}
+
+export function ownerOnly(handler: (req: NextRequest) => Promise<NextResponse>) {
+  return async (req: NextRequest) => {
+    const authError = await requireOwner(req);
+    if (authError) return authError;
+    return handler(req);
+  };
+}

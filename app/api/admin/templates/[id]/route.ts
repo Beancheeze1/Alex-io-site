@@ -8,13 +8,14 @@
 // destructured it synchronously ({ params }: { params: { id: string } }),
 // so params.id was always undefined. Awaited properly below.
 //
-// Uses requireAdmin() inline rather than the adminOnly() wrapper, since
-// adminOnly only forwards the request to the handler and would drop the
-// route's { params } context argument.
+// Uses requireOwner() inline rather than the ownerOnly() wrapper, since
+// ownerOnly only forwards the request to the handler and would drop the
+// route's { params } context argument. Owner-only (not just admin-only):
+// templates are a shared, platform-wide resource, not tenant-scoped.
 
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
-import { requireAdmin } from "@/lib/admin-auth";
+import { requireOwner } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ function getPool() {
 type ParamsCtx = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, ctx: ParamsCtx) {
-  const deny = await requireAdmin(req);
+  const deny = await requireOwner(req);
   if (deny) return deny;
 
   const { id } = await ctx.params;
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest, ctx: ParamsCtx) {
 }
 
 export async function PUT(req: NextRequest, ctx: ParamsCtx) {
-  const deny = await requireAdmin(req);
+  const deny = await requireOwner(req);
   if (deny) return deny;
 
   const { id } = await ctx.params;
@@ -109,7 +110,7 @@ export async function PUT(req: NextRequest, ctx: ParamsCtx) {
 }
 
 export async function DELETE(req: NextRequest, ctx: ParamsCtx) {
-  const deny = await requireAdmin(req);
+  const deny = await requireOwner(req);
   if (deny) return deny;
 
   const { id } = await ctx.params;
@@ -124,7 +125,7 @@ export async function DELETE(req: NextRequest, ctx: ParamsCtx) {
  * - Convenience endpoint to toggle active status
  */
 export async function PATCH(req: NextRequest, ctx: ParamsCtx) {
-  const deny = await requireAdmin(req);
+  const deny = await requireOwner(req);
   if (deny) return deny;
 
   const { id } = await ctx.params;

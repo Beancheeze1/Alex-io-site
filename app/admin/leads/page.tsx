@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserFromCookies } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
 import { q } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -46,7 +47,7 @@ const TIER_BADGE_CLS = "bg-[var(--surface-subtle)] text-[var(--text-secondary)] 
 
 export default async function LeadsPage() {
   const user = await getCurrentUserFromCookies();
-  if (!user || user.role !== "admin") redirect("/login");
+  if (!user || user.role !== "admin" || !isPlatformOwner(user)) redirect("/login");
 
   const leads = await q<LeadRow>(
     `SELECT id, tier, name, email, company, phone, quote_no,

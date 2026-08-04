@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
-import { adminOnly } from "@/lib/admin-auth";
+import { ownerOnly } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,7 @@ function getPool() {
   return global.__TEMPLATE_DB_POOL__;
 }
 
-export const GET = adminOnly(async (_req: NextRequest) => {
+export const GET = ownerOnly(async (_req: NextRequest) => {
   try {
     const pool = getPool();
     const { rows } = await pool.query(
@@ -42,7 +42,7 @@ export const GET = adminOnly(async (_req: NextRequest) => {
   }
 });
 
-export const POST = adminOnly(async (req: NextRequest) => {
+export const POST = ownerOnly(async (req: NextRequest) => {
   try {
     const body = await req.json().catch(() => ({}));
     const {
