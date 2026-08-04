@@ -56,7 +56,7 @@ const next = searchParams.get("next");
             ? "/admin/quotes"
             : role === "sales"
               ? "/admin/quotes"
-              : "/my-quotes";
+              : "/";
 
       const dest = next || fallback;
 
