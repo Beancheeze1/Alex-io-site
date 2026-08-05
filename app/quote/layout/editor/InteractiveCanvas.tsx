@@ -82,6 +82,17 @@ const WALL_IN = 0.5;
 export const SNAP_IN = 0.0625;
 const MIN_GAP_IN = 0.5;
 
+// Distance (in on-screen pixels, independent of zoom) within which a dragged
+// cavity's edge/center will snap -- and show a dashed guide -- against
+// another cavity's edge/center or the block's own edge/center. Figma/
+// PowerPoint-style: converted to inches via the current scale so the feel is
+// consistent whether zoomed in or out.
+const ALIGN_SNAP_PX = 6;
+// After the interactive snap above sets an edge to exactly match a
+// reference, this is the (much tighter) tolerance used at render time to
+// decide "is this edge currently aligned" for drawing the guide line.
+const ALIGN_EPS_IN = 0.0005;
+
 // Color palette used for cavity outlines / handles.
 // These are intentionally bright enough to read on the slate background.
 const CAVITY_COLORS = [
@@ -461,6 +472,15 @@ export default function InteractiveCanvas({
       xIn = clamp(xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       yIn = clamp(yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
+      // Alignment snap: pull onto a nearby cavity/block edge or center,
+      // Figma/PowerPoint-style, when within a small on-screen distance --
+      // takes priority over the plain grid snap above when it applies.
+      const alignRefs = buildAlignRefs(cav.id, cavities, block);
+      const alignThresholdIn = ALIGN_SNAP_PX / scale;
+      const aligned = applyAlignmentSnap(xIn, yIn, len, wid, alignRefs, alignThresholdIn);
+      xIn = clamp(aligned.xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
+      yIn = clamp(aligned.yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
+
       // enforce min gap to other cavities (Basic mode only) -- neighbors this
       // cavity was already too close to before the drag started are exempt,
       // so an already-tight (e.g. STL-imported) cavity can still be dragged
@@ -572,6 +592,15 @@ export default function InteractiveCanvas({
     drag && spacingCavity
       ? nearestGapForCavity(spacingCavity, cavities, block.lengthIn, block.widthIn)
       : null;
+
+  // Alignment guides: only for the cavity actually being MOVED (not merely
+  // selected, and not during a resize) -- re-derived from its current
+  // committed position each render, see findActiveAlignGuides above.
+  const draggedCavity =
+    drag && drag.mode === "move" ? cavities.find((c) => c.id === drag.id) || null : null;
+  const alignGuides = draggedCavity
+    ? findActiveAlignGuides(draggedCavity, cavities, block, ALIGN_EPS_IN)
+    : [];
 
   const liveGapCavXNorm = spacingCavity ? safeNorm01((spacingCavity as any).x, 0.2) : 0;
   const liveGapCavYNorm = spacingCavity ? safeNorm01((spacingCavity as any).y, 0.2) : 0;
@@ -778,6 +807,9 @@ export default function InteractiveCanvas({
               </g>
             );
           })}
+
+          {/* alignment guides while actively moving a cavity */}
+          {alignGuides.length > 0 && drawAlignGuides(alignGuides, block, blockPx, blockOffset)}
 
           {/* spacing dims for selected cavity */}
           {spacing && drawSpacing(spacing)}
@@ -1179,6 +1211,168 @@ function drawRulersWithLabel(
   );
 
   return <g>{group}</g>;
+}
+
+// ===== alignment guides (Figma/PowerPoint-style snap while dragging) =====
+//
+// Bbox-based (x/y/lengthIn/widthIn), same convention computeSpacing already
+// uses for every shape including poly -- a true poly centroid/edge snap is
+// a separate, later feature (bbox center is a reasonable stand-in until then).
+
+type AlignRef = { valueIn: number };
+
+function buildAlignRefs(
+  excludeId: string,
+  others: Cavity[],
+  block: LayoutModel["block"],
+): { xs: AlignRef[]; ys: AlignRef[] } {
+  const xs: AlignRef[] = [
+    { valueIn: 0 },
+    { valueIn: block.lengthIn },
+    { valueIn: block.lengthIn / 2 },
+  ];
+  const ys: AlignRef[] = [
+    { valueIn: 0 },
+    { valueIn: block.widthIn },
+    { valueIn: block.widthIn / 2 },
+  ];
+
+  for (const other of others) {
+    if (other.id === excludeId) continue;
+    const ox = safeNorm01((other as any).x, 0.2) * block.lengthIn;
+    const oy = safeNorm01((other as any).y, 0.2) * block.widthIn;
+    xs.push({ valueIn: ox }, { valueIn: ox + other.lengthIn }, { valueIn: ox + other.lengthIn / 2 });
+    ys.push({ valueIn: oy }, { valueIn: oy + other.widthIn }, { valueIn: oy + other.widthIn / 2 });
+  }
+
+  return { xs, ys };
+}
+
+// Applied live during a move drag: if the candidate position puts an edge or
+// center within thresholdIn of a reference line, pull that edge exactly onto
+// it (picking the single closest match per axis so we don't fight ourselves
+// between two nearby references).
+function applyAlignmentSnap(
+  xIn: number,
+  yIn: number,
+  lenIn: number,
+  widIn: number,
+  refs: { xs: AlignRef[]; ys: AlignRef[] },
+  thresholdIn: number,
+): { xIn: number; yIn: number } {
+  const myXEdges = [xIn, xIn + lenIn, xIn + lenIn / 2];
+  let bestXDelta: number | null = null;
+  for (const edge of myXEdges) {
+    for (const ref of refs.xs) {
+      const delta = ref.valueIn - edge;
+      if (Math.abs(delta) < thresholdIn && (bestXDelta === null || Math.abs(delta) < Math.abs(bestXDelta))) {
+        bestXDelta = delta;
+      }
+    }
+  }
+
+  const myYEdges = [yIn, yIn + widIn, yIn + widIn / 2];
+  let bestYDelta: number | null = null;
+  for (const edge of myYEdges) {
+    for (const ref of refs.ys) {
+      const delta = ref.valueIn - edge;
+      if (Math.abs(delta) < thresholdIn && (bestYDelta === null || Math.abs(delta) < Math.abs(bestYDelta))) {
+        bestYDelta = delta;
+      }
+    }
+  }
+
+  return {
+    xIn: bestXDelta !== null ? xIn + bestXDelta : xIn,
+    yIn: bestYDelta !== null ? yIn + bestYDelta : yIn,
+  };
+}
+
+type AlignGuide = { orientation: "vertical" | "horizontal"; posIn: number };
+
+// Re-derives, from the cavity's CURRENT committed position, which reference
+// lines it's presently sitting exactly on -- run at render time (after
+// applyAlignmentSnap has already moved it there) so the drawn guides always
+// match the real, committed state rather than a stale mid-event snapshot.
+function findActiveAlignGuides(
+  cav: Cavity,
+  others: Cavity[],
+  block: LayoutModel["block"],
+  epsilonIn: number,
+): AlignGuide[] {
+  const xIn = safeNorm01((cav as any).x, 0.2) * block.lengthIn;
+  const yIn = safeNorm01((cav as any).y, 0.2) * block.widthIn;
+  const refs = buildAlignRefs(cav.id, others, block);
+
+  const myXEdges = [xIn, xIn + cav.lengthIn, xIn + cav.lengthIn / 2];
+  const myYEdges = [yIn, yIn + cav.widthIn, yIn + cav.widthIn / 2];
+
+  const guides: AlignGuide[] = [];
+  const seenX = new Set<number>();
+  const seenY = new Set<number>();
+
+  for (const edge of myXEdges) {
+    for (const ref of refs.xs) {
+      if (Math.abs(ref.valueIn - edge) < epsilonIn) {
+        const key = Math.round(ref.valueIn * 1000);
+        if (!seenX.has(key)) {
+          seenX.add(key);
+          guides.push({ orientation: "vertical", posIn: ref.valueIn });
+        }
+      }
+    }
+  }
+
+  for (const edge of myYEdges) {
+    for (const ref of refs.ys) {
+      if (Math.abs(ref.valueIn - edge) < epsilonIn) {
+        const key = Math.round(ref.valueIn * 1000);
+        if (!seenY.has(key)) {
+          seenY.add(key);
+          guides.push({ orientation: "horizontal", posIn: ref.valueIn });
+        }
+      }
+    }
+  }
+
+  return guides;
+}
+
+function drawAlignGuides(
+  guides: AlignGuide[],
+  block: LayoutModel["block"],
+  blockPx: { width: number; height: number },
+  blockOffset: { x: number; y: number },
+) {
+  return (
+    <g>
+      {guides.map((g, i) =>
+        g.orientation === "vertical" ? (
+          <line
+            key={`ag-v-${i}`}
+            x1={blockOffset.x + (g.posIn / block.lengthIn) * blockPx.width}
+            y1={blockOffset.y}
+            x2={blockOffset.x + (g.posIn / block.lengthIn) * blockPx.width}
+            y2={blockOffset.y + blockPx.height}
+            stroke="#ef4444"
+            strokeDasharray="5 4"
+            strokeWidth={1}
+          />
+        ) : (
+          <line
+            key={`ag-h-${i}`}
+            x1={blockOffset.x}
+            y1={blockOffset.y + (g.posIn / block.widthIn) * blockPx.height}
+            x2={blockOffset.x + blockPx.width}
+            y2={blockOffset.y + (g.posIn / block.widthIn) * blockPx.height}
+            stroke="#ef4444"
+            strokeDasharray="5 4"
+            strokeWidth={1}
+          />
+        ),
+      )}
+    </g>
+  );
 }
 
 // ===== spacing calcs (edges + nearest neighbor) =====
