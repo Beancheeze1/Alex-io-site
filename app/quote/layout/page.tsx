@@ -2457,6 +2457,14 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
 
   const [zoom, setZoom] = React.useState(1);
 
+  // Warnings flyout: tight-wall / unconfirmed-depth warnings surface as a
+  // small badge over the canvas (count of active issues) instead of a
+  // banner in normal document flow, since both are recomputed live on every
+  // mousemove during a drag and previously reflowed whatever sat below/above
+  // them. Click the badge to open an overlay with the full text; closes
+  // manually so a rep can read it without losing their place in the canvas.
+  const [warningsFlyoutOpen, setWarningsFlyoutOpen] = React.useState(false);
+
   // --- Auto-fit-to-view for the canvas zoom ---
   // Measures the real pixel space available for the canvas (independent of
   // InteractiveCanvas's fixed CANVAS_WIDTH/CANVAS_HEIGHT reference size) and
@@ -5540,40 +5548,6 @@ const tenantCssVars = React.useMemo(() => {
                   horizontal and vertical gaps to other cavities and to the block edges are dimensioned.
                 </p>
 
-                {tightWallWarnings.length > 0 && (
-                  <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)] space-y-1">
-                    <div className="font-medium">
-                      {tightWallWarnings.length === 1
-                        ? "One wall on this layer is thinner than recommended:"
-                        : `${tightWallWarnings.length} walls on this layer are thinner than recommended:`}
-                    </div>
-                    {tightWallWarnings.map((w, i) => (
-                      <div key={`${w.cavityIdA}-${w.cavityIdB}-${i}`}>
-                        &quot;{w.cavityLabelA}&quot; and &quot;{w.cavityLabelB}&quot; are only {Math.max(0, w.gapIn).toFixed(3)}
-                        &quot; apart (recommended minimum: {MIN_WALL_IN}&quot;). This can fail STEP export or produce a foam
-                        wall too fragile to cut cleanly -- move one of these cavities, or confirm this spacing is intentional
-                        before finalizing.
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {unconfirmedDepthWarnings.length > 0 && (
-                  <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)] space-y-1">
-                    <div className="font-medium">
-                      {unconfirmedDepthWarnings.length === 1
-                        ? "One cavity's depth could not be confirmed from the uploaded file:"
-                        : `${unconfirmedDepthWarnings.length} cavities' depth could not be confirmed from the uploaded file:`}
-                    </div>
-                    <div>
-                      {unconfirmedDepthWarnings.map((w) => `"${w.cavityLabel}"`).join(", ")} — the uploaded file's floor
-                      geometry for {unconfirmedDepthWarnings.length === 1 ? "this cavity" : "these cavities"} was either
-                      ambiguous (e.g. a multi-level floor) or not found at all. The depth shown is a placeholder, not a
-                      measurement -- please verify or set it manually before finalizing.
-                    </div>
-                  </div>
-                )}
-
                 {/* canvas wrapper */}
                 <div
                   ref={canvasContainerRef}
@@ -5582,7 +5556,7 @@ const tenantCssVars = React.useMemo(() => {
                   <div className="relative p-4 overflow-auto">
                   <InteractiveCanvas
   layout={layout}
-  
+
   selectedIds={selectedIds}
   selectAction={selectCavity}
   moveAction={(id, xNorm, yNorm) => {
@@ -5604,6 +5578,85 @@ const tenantCssVars = React.useMemo(() => {
 />
 
                   </div>
+
+                  {/* Warnings badge + flyout -- both warning types are recomputed
+                      live on every mousemove during a drag (they key off the same
+                      cavities state InteractiveCanvas mutates mid-drag). Living in
+                      normal document flow (above OR below the canvas) meant a
+                      changing line count reflowed the canvas itself, reading as the
+                      editor "glitching" during a fast drag; requiring a scroll to
+                      the bottom of a long page to even see them wasn't much
+                      better. A small floating badge (count only, fixed size,
+                      absolutely positioned so it never affects canvas layout) with
+                      a click-to-open flyout keeps both problems solved: nothing
+                      about the canvas ever moves, and the warnings are still one
+                      click away instead of a scroll away. */}
+                  {(tightWallWarnings.length > 0 || unconfirmedDepthWarnings.length > 0) && (
+                    <div className="absolute top-3 right-3 z-10">
+                      <button
+                        type="button"
+                        onClick={() => setWarningsFlyoutOpen((v) => !v)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-1.5 text-[11px] font-medium text-[var(--attention)] shadow-sm hover:brightness-95"
+                        title="View layout warnings"
+                      >
+                        <span aria-hidden="true">⚠️</span>
+                        {tightWallWarnings.length + unconfirmedDepthWarnings.length} warning
+                        {tightWallWarnings.length + unconfirmedDepthWarnings.length !== 1 ? "s" : ""}
+                      </button>
+
+                      {warningsFlyoutOpen && (
+                        <div className="absolute right-0 mt-2 w-96 max-h-80 overflow-y-auto rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] p-3 shadow-lg space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--attention)]">
+                              Layout warnings
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setWarningsFlyoutOpen(false)}
+                              className="text-[var(--attention)] hover:opacity-70"
+                              title="Close"
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          {tightWallWarnings.length > 0 && (
+                            <div className="text-[11px] text-[var(--attention)] space-y-1">
+                              <div className="font-medium">
+                                {tightWallWarnings.length === 1
+                                  ? "One wall on this layer is thinner than recommended:"
+                                  : `${tightWallWarnings.length} walls on this layer are thinner than recommended:`}
+                              </div>
+                              {tightWallWarnings.map((w, i) => (
+                                <div key={`${w.cavityIdA}-${w.cavityIdB}-${i}`}>
+                                  &quot;{w.cavityLabelA}&quot; and &quot;{w.cavityLabelB}&quot; are only {Math.max(0, w.gapIn).toFixed(3)}
+                                  &quot; apart (recommended minimum: {MIN_WALL_IN}&quot;). This can fail STEP export or produce a foam
+                                  wall too fragile to cut cleanly -- move one of these cavities, or confirm this spacing is intentional
+                                  before finalizing.
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {unconfirmedDepthWarnings.length > 0 && (
+                            <div className="text-[11px] text-[var(--attention)] space-y-1">
+                              <div className="font-medium">
+                                {unconfirmedDepthWarnings.length === 1
+                                  ? "One cavity's depth could not be confirmed from the uploaded file:"
+                                  : `${unconfirmedDepthWarnings.length} cavities' depth could not be confirmed from the uploaded file:`}
+                              </div>
+                              <div>
+                                {unconfirmedDepthWarnings.map((w) => `"${w.cavityLabel}"`).join(", ")} — the uploaded file's floor
+                                geometry for {unconfirmedDepthWarnings.length === 1 ? "this cavity" : "these cavities"} was either
+                                ambiguous (e.g. a multi-level floor) or not found at all. The depth shown is a placeholder, not a
+                                measurement -- please verify or set it manually before finalizing.
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Box suggester preview + bottom cartons row (hidden for now, JSX preserved) */}
