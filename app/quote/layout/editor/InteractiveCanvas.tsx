@@ -477,7 +477,7 @@ export default function InteractiveCanvas({
       // takes priority over the plain grid snap above when it applies.
       const alignRefs = buildAlignRefs(cav.id, cavities, block);
       const alignThresholdIn = ALIGN_SNAP_PX / scale;
-      const aligned = applyAlignmentSnap(xIn, yIn, len, wid, alignRefs, alignThresholdIn);
+      const aligned = applyAlignmentSnap(cav, block, xIn, yIn, alignRefs, alignThresholdIn);
       xIn = clamp(aligned.xIn, Math.min(minXIn, maxXIn), Math.max(minXIn, maxXIn));
       yIn = clamp(aligned.yIn, Math.min(minYIn, maxYIn), Math.max(minYIn, maxYIn));
 
@@ -1215,11 +1215,72 @@ function drawRulersWithLabel(
 
 // ===== alignment guides (Figma/PowerPoint-style snap while dragging) =====
 //
-// Bbox-based (x/y/lengthIn/widthIn), same convention computeSpacing already
-// uses for every shape including poly -- a true poly centroid/edge snap is
-// a separate, later feature (bbox center is a reasonable stand-in until then).
+// Left/right/top/bottom edges are bbox-based (x/y/lengthIn/widthIn), same
+// convention computeSpacing already uses for every shape including poly --
+// there's no single unambiguous "edge" for an arbitrary polygon beyond its
+// bbox. "Center" is different: for a poly (STL-imported) cavity, bbox center
+// is often visually wrong for a non-symmetric pocket, so poly cavities use
+// their true area centroid (shoelace formula) instead.
 
 type AlignRef = { valueIn: number };
+
+// Shoelace centroid of a poly cavity's own points (normalized, top-left
+// space per layoutTypes.ts -- same convention buildPolyPathD renders with,
+// no y-flip; that's a separate CAD-space flip spacingWarnings.ts applies
+// for its own STEP-mirroring purposes and doesn't apply here). Returns null
+// for a degenerate (near-zero-area) polygon.
+function polyCentroidIn(
+  points: { x: number; y: number }[],
+  block: LayoutModel["block"],
+): { cx: number; cy: number } | null {
+  if (!points || points.length < 3) return null;
+  const pts =
+    points.length > 1 &&
+    points[0].x === points[points.length - 1].x &&
+    points[0].y === points[points.length - 1].y
+      ? points.slice(0, -1)
+      : points;
+  if (pts.length < 3) return null;
+
+  const inPts = pts.map((p) => ({ x: p.x * block.lengthIn, y: p.y * block.widthIn }));
+
+  let signedArea2 = 0;
+  let cxSum = 0;
+  let cySum = 0;
+  for (let i = 0; i < inPts.length; i++) {
+    const a = inPts[i];
+    const b = inPts[(i + 1) % inPts.length];
+    const cross = a.x * b.y - b.x * a.y;
+    signedArea2 += cross;
+    cxSum += (a.x + b.x) * cross;
+    cySum += (a.y + b.y) * cross;
+  }
+
+  if (Math.abs(signedArea2) < 1e-9) return null;
+  return { cx: cxSum / (3 * signedArea2), cy: cySum / (3 * signedArea2) };
+}
+
+// Cavity's center at a given (candidate or current) bbox-left position. For
+// poly cavities this is the true centroid, translated by however far the
+// candidate position is from the cavity's own committed x/y (translating a
+// polygon translates its centroid by the same delta) -- for every other
+// shape it's the plain bbox center.
+function cavityCenterIn(
+  cav: Cavity,
+  block: LayoutModel["block"],
+  xIn: number,
+  yIn: number,
+): { cx: number; cy: number } {
+  if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
+    const centroid = polyCentroidIn((cav as any).points, block);
+    if (centroid) {
+      const origXIn = safeNorm01((cav as any).x, 0.2) * block.lengthIn;
+      const origYIn = safeNorm01((cav as any).y, 0.2) * block.widthIn;
+      return { cx: centroid.cx + (xIn - origXIn), cy: centroid.cy + (yIn - origYIn) };
+    }
+  }
+  return { cx: xIn + cav.lengthIn / 2, cy: yIn + cav.widthIn / 2 };
+}
 
 function buildAlignRefs(
   excludeId: string,
@@ -1241,8 +1302,9 @@ function buildAlignRefs(
     if (other.id === excludeId) continue;
     const ox = safeNorm01((other as any).x, 0.2) * block.lengthIn;
     const oy = safeNorm01((other as any).y, 0.2) * block.widthIn;
-    xs.push({ valueIn: ox }, { valueIn: ox + other.lengthIn }, { valueIn: ox + other.lengthIn / 2 });
-    ys.push({ valueIn: oy }, { valueIn: oy + other.widthIn }, { valueIn: oy + other.widthIn / 2 });
+    const center = cavityCenterIn(other, block, ox, oy);
+    xs.push({ valueIn: ox }, { valueIn: ox + other.lengthIn }, { valueIn: center.cx });
+    ys.push({ valueIn: oy }, { valueIn: oy + other.widthIn }, { valueIn: center.cy });
   }
 
   return { xs, ys };
@@ -1253,14 +1315,15 @@ function buildAlignRefs(
 // it (picking the single closest match per axis so we don't fight ourselves
 // between two nearby references).
 function applyAlignmentSnap(
+  cav: Cavity,
+  block: LayoutModel["block"],
   xIn: number,
   yIn: number,
-  lenIn: number,
-  widIn: number,
   refs: { xs: AlignRef[]; ys: AlignRef[] },
   thresholdIn: number,
 ): { xIn: number; yIn: number } {
-  const myXEdges = [xIn, xIn + lenIn, xIn + lenIn / 2];
+  const center = cavityCenterIn(cav, block, xIn, yIn);
+  const myXEdges = [xIn, xIn + cav.lengthIn, center.cx];
   let bestXDelta: number | null = null;
   for (const edge of myXEdges) {
     for (const ref of refs.xs) {
@@ -1271,7 +1334,7 @@ function applyAlignmentSnap(
     }
   }
 
-  const myYEdges = [yIn, yIn + widIn, yIn + widIn / 2];
+  const myYEdges = [yIn, yIn + cav.widthIn, center.cy];
   let bestYDelta: number | null = null;
   for (const edge of myYEdges) {
     for (const ref of refs.ys) {
@@ -1303,9 +1366,10 @@ function findActiveAlignGuides(
   const xIn = safeNorm01((cav as any).x, 0.2) * block.lengthIn;
   const yIn = safeNorm01((cav as any).y, 0.2) * block.widthIn;
   const refs = buildAlignRefs(cav.id, others, block);
+  const center = cavityCenterIn(cav, block, xIn, yIn);
 
-  const myXEdges = [xIn, xIn + cav.lengthIn, xIn + cav.lengthIn / 2];
-  const myYEdges = [yIn, yIn + cav.widthIn, yIn + cav.widthIn / 2];
+  const myXEdges = [xIn, xIn + cav.lengthIn, center.cx];
+  const myYEdges = [yIn, yIn + cav.widthIn, center.cy];
 
   const guides: AlignGuide[] = [];
   const seenX = new Set<number>();
