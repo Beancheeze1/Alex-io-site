@@ -175,6 +175,73 @@ export type TightWallWarning = {
   gapIn: number;
 };
 
+export type NearestGapInfo = {
+  gapIn: number;
+  label: string; // the other cavity's label, or "block edge"
+  isBlockEdge: boolean;
+};
+
+// Perpendicular distance from a footprint to the block's own 4 edges. Simpler
+// than segSegDist since these "edges" are effectively infinite axis-aligned
+// lines (x=0, x=blockLengthIn, y=0, y=blockWidthIn) from the footprint's
+// perspective -- the footprint is always on one side of each.
+function distanceToBlockEdges(fp: Footprint, blockLengthIn: number, blockWidthIn: number): number {
+  if (fp.type === "circle") {
+    return Math.min(
+      fp.cx - fp.r,
+      blockLengthIn - (fp.cx + fp.r),
+      fp.cy - fp.r,
+      blockWidthIn - (fp.cy + fp.r),
+    );
+  }
+  let best = Infinity;
+  for (const p of fp.pts) {
+    best = Math.min(best, p.x, blockLengthIn - p.x, p.y, blockWidthIn - p.y);
+  }
+  return best;
+}
+
+/**
+ * Live "gap to nearest thing" readout for one cavity (the one currently
+ * being dragged, or selected) -- distinct from findTightCavityWalls, which
+ * only reports pairs already BELOW the warning threshold. This always
+ * returns the single nearest distance, whether that's another cavity's
+ * real (polygon/circle-accurate) footprint or the block's own edge, so the
+ * UI can show a live number while dragging rather than only a pass/fail
+ * warning after the fact.
+ */
+export function nearestGapForCavity(
+  candidate: Cavity,
+  others: Cavity[],
+  blockLengthIn: number,
+  blockWidthIn: number,
+): NearestGapInfo | null {
+  const fp = cavityFootprintIn(candidate, blockLengthIn, blockWidthIn);
+  if (!fp) return null;
+
+  let best: NearestGapInfo = {
+    gapIn: distanceToBlockEdges(fp, blockLengthIn, blockWidthIn),
+    label: "block edge",
+    isBlockEdge: true,
+  };
+
+  for (const other of others) {
+    if (other.id === candidate.id) continue;
+    const otherFp = cavityFootprintIn(other, blockLengthIn, blockWidthIn);
+    if (!otherFp) continue;
+    // Nested (e.g. a stepped pocket) is a legitimate, intentional layout --
+    // same exemption findTightCavityWalls already applies.
+    if (footprintFullyInside(fp, otherFp) || footprintFullyInside(otherFp, fp)) continue;
+
+    const gap = minGapIn(fp, otherFp);
+    if (gap < best.gapIn) {
+      best = { gapIn: gap, label: other.label, isBlockEdge: false };
+    }
+  }
+
+  return best;
+}
+
 /**
  * Returns every pair of cavities on this layer whose footprints are closer
  * than MIN_WALL_IN -- the same heuristic alex-io-step-service's

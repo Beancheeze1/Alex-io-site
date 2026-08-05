@@ -25,6 +25,7 @@
 import { useRef, useState, useEffect, MouseEvent } from "react";
 
 import { LayoutModel, Cavity, formatCavityLabel } from "./layoutTypes";
+import { nearestGapForCavity, MIN_WALL_IN } from "./spacingWarnings";
 
 type Props = {
   layout: LayoutModel;
@@ -563,6 +564,24 @@ export default function InteractiveCanvas({
       )
     : null;
 
+  // Live nearest-gap readout (polygon/circle-accurate, works for rect and
+  // poly/STL cavities alike) -- only rendered while actively dragging, so it
+  // reads as "here's your live number" rather than duplicating the existing
+  // per-edge dimension lines that already show for a merely-selected cavity.
+  const liveGap =
+    drag && spacingCavity
+      ? nearestGapForCavity(spacingCavity, cavities, block.lengthIn, block.widthIn)
+      : null;
+
+  const liveGapCavXNorm = spacingCavity ? safeNorm01((spacingCavity as any).x, 0.2) : 0;
+  const liveGapCavYNorm = spacingCavity ? safeNorm01((spacingCavity as any).y, 0.2) : 0;
+  const liveGapPx = spacingCavity
+    ? {
+        x: blockOffset.x + liveGapCavXNorm * blockPx.width,
+        y: blockOffset.y + liveGapCavYNorm * blockPx.height,
+      }
+    : null;
+
   // NEW (Path A): prevent rendering duplicate cavities that are geometrically identical.
   // This does NOT change layout state or selection – it only skips drawing duplicates.
   const seenRenderSigs = new Set<string>();
@@ -762,6 +781,23 @@ export default function InteractiveCanvas({
 
           {/* spacing dims for selected cavity */}
           {spacing && drawSpacing(spacing)}
+
+          {/* Live nearest-gap readout while dragging -- polygon/circle-accurate
+              (same calc as the tight-wall warning), color-shifts red once the
+              gap drops below MIN_WALL_IN so a rep sees the problem forming
+              live instead of only after releasing the drag. */}
+          {liveGap && liveGapPx && (
+            <text
+              x={liveGapPx.x}
+              y={Math.max(12, liveGapPx.y - 10)}
+              textAnchor="start"
+              className={`text-[11px] font-semibold ${
+                liveGap.gapIn < MIN_WALL_IN ? "fill-red-600" : "fill-emerald-600"
+              }`}
+            >
+              {liveGap.gapIn.toFixed(3)}&quot; to {liveGap.label}
+            </text>
+          )}
         </svg>
       </div>
     </div>
