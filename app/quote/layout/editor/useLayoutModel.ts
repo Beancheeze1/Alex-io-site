@@ -193,9 +193,9 @@ const didInitActiveLayerRef = useRef(false);
       setSelectedIds((prev) => {
         if (!additive) return [id];
         if (prev.includes(id)) return prev.filter((x) => x !== id);
-        if (prev.length === 0) return [id];
-        if (prev.length === 1) return [prev[0], id];
-        return [prev[0], id];
+        // No cap: 3+ selections are needed for Distribute (shift/ctrl-click
+        // is Advanced-only already, per the caller in InteractiveCanvas.tsx).
+        return [...prev, id];
       });
     },
     [],

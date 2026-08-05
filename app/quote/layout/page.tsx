@@ -11,7 +11,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { CavityShape, LayoutModel } from "./editor/layoutTypes";
+import { Cavity, CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT, SNAP_IN as RESIZE_SNAP_IN } from "./editor/InteractiveCanvas";
@@ -3225,6 +3225,60 @@ else nextYIn = snapInches(nextYIn);
     ],
   );
 
+  // Advanced-only: given 3+ selected cavities, evenly space the GAPS between
+  // them along one axis (Figma/PowerPoint "distribute spacing"), based on
+  // their current bounding order. The first and last (by position along the
+  // axis) stay put -- they define the span -- only the ones in between move.
+  // Bbox-based (x/y/lengthIn/widthIn) for every shape including poly, same
+  // convention the align/alignment-guide features already use.
+  const distributeSelected = React.useCallback(
+    (axis: "horizontal" | "vertical") => {
+      if (editorMode !== "advanced") return;
+      if (selectedIds.length < 3) return;
+      if (!block.lengthIn || !block.widthIn) return;
+
+      const selected = selectedIds
+        .map((id) => cavities.find((c) => c.id === id))
+        .filter((c): c is Cavity => !!c);
+      if (selected.length < 3) return;
+
+      const items = selected
+        .map((c) => {
+          const startIn =
+            axis === "horizontal"
+              ? (Number(c.x) || 0) * block.lengthIn
+              : (Number(c.y) || 0) * block.widthIn;
+          const sizeIn = axis === "horizontal" ? Number(c.lengthIn) || 0 : Number(c.widthIn) || 0;
+          return { cav: c, startIn, sizeIn };
+        })
+        .sort((a, b) => a.startIn - b.startIn);
+
+      const first = items[0];
+      const last = items[items.length - 1];
+
+      const totalSpan = last.startIn + last.sizeIn - first.startIn;
+      const totalSize = items.reduce((sum, it) => sum + it.sizeIn, 0);
+      const gapIn = (totalSpan - totalSize) / (items.length - 1);
+
+      let cursor = first.startIn + first.sizeIn;
+      for (let i = 1; i < items.length - 1; i++) {
+        const it = items[i];
+        const newStartIn = snapInches(cursor + gapIn);
+        const newStartNorm =
+          axis === "horizontal" ? newStartIn / block.lengthIn : newStartIn / block.widthIn;
+
+        if (axis === "horizontal") {
+          updateCavityPosition(it.cav.id, newStartNorm, Number(it.cav.y) || 0);
+        } else {
+          updateCavityPosition(it.cav.id, Number(it.cav.x) || 0, newStartNorm);
+        }
+
+        cursor = newStartIn + it.sizeIn;
+      }
+    },
+    [editorMode, selectedIds, cavities, block.lengthIn, block.widthIn, updateCavityPosition],
+  );
+
   const duplicateSelected = React.useCallback(() => {
     if (!selectedCavity) return;
 
@@ -4831,6 +4885,30 @@ const tenantCssVars = React.useMemo(() => {
                           Align Bottom
                         </button>
                       </div>
+
+                      {selectedIds.length >= 3 && (
+                        <>
+                          <div className="mt-2 text-[var(--text-muted)]">
+                            {selectedIds.length} selected -- distribute evenly:
+                          </div>
+                          <div className="mt-1 grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => distributeSelected("horizontal")}
+                              className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+                            >
+                              Distribute Horizontally
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => distributeSelected("vertical")}
+                              className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+                            >
+                              Distribute Vertically
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
