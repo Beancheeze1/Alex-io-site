@@ -101,6 +101,8 @@ export async function POST(req: Request) {
       materialsExcludedByThicknessConstraint,
       anyMaterialMeetsTarget,
       bestOptionBeyondConstraint,
+      mostEconomicalMaterialId,
+      smallestFootprintMaterialId,
     } = await recommendMaterials({
       weightLb,
       contactAreaIn2,
@@ -131,6 +133,8 @@ export async function POST(req: Request) {
       materialsExcludedByThicknessConstraint,
       anyMaterialMeetsTarget,
       bestOptionBeyondConstraint,
+      mostEconomicalMaterialId,
+      smallestFootprintMaterialId,
       reference: {
         fragilityTiers: FRAGILITY_TIERS,
         dropHeightTable: DROP_HEIGHT_TABLE,

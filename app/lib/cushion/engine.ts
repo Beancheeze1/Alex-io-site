@@ -180,7 +180,36 @@ export type MaterialRow = {
   density_lb_ft3: number | null;
   price_per_bf: number | null;
   min_charge_usd: number | null;
+  price_per_cuin: number | null;
+  cost_per_ci_usd: number | null;
 };
+
+/**
+ * Real material cost per cubic inch, using the SAME fallback chain the real
+ * quoting engine uses (see computePricing() in app/lib/pricing/compute.ts):
+ * price_per_cuin directly, else price_per_bf / 144 (1 board-foot = 144 in^3),
+ * else cost_per_ci_usd * 1.35 (cost -> price at the same markup ratio that
+ * fallback uses there). Unlike the quote engine, this does NOT fall through
+ * to a global settings-based default rate when a material has none of these
+ * three fields -- that fallback exists there to always produce a quote, but
+ * here it would mean fabricating a price for a material with no real price
+ * data on file. Returns null in that case; the caller excludes it from
+ * cost-based picks rather than treating it as free or average-priced.
+ */
+function realPricePerCubicInch(mat: MaterialRow): number | null {
+  if (mat.price_per_cuin != null && Number.isFinite(Number(mat.price_per_cuin))) {
+    return Number(mat.price_per_cuin);
+  }
+  if (mat.price_per_bf != null && Number.isFinite(Number(mat.price_per_bf))) {
+    return Number(mat.price_per_bf) / 144;
+  }
+  if (mat.cost_per_ci_usd != null && Number.isFinite(Number(mat.cost_per_ci_usd))) {
+    return Number(mat.cost_per_ci_usd) * 1.35;
+  }
+  return null;
+}
+
+export type CostTier = "$" | "$$" | "$$$";
 
 /**
  * Linear interpolation of G-level at `operatingPsi` from a set of tested
@@ -571,6 +600,20 @@ export type MaterialCandidate = {
   // representative; these are folded in rather than shown as separate,
   // near-identical cards. Empty when this material's curve data is unique.
   also_available_as: string[];
+
+  // Relative cost tier only -- NEVER a real dollar figure. Computed from
+  // estimated material cost (bearing area x thickness x real price-per-
+  // cubic-inch) but the actual number is never attached to this object or
+  // serialized to the client; see realPricePerCubicInch(). null when this
+  // material has no price data on file at all (never treated as free or
+  // average-priced -- excluded from cost-based comparison instead).
+  cost_tier: CostTier | null;
+
+  // True when this candidate passes but with less than a 10% buffer below
+  // the fragility target (margin_g < 0.10 * fragilityGMax) -- flagged so a
+  // cost-driven "most economical" pick is never presented as an unqualified
+  // best choice when it's actually cutting it close.
+  thin_safety_margin: boolean;
 };
 
 /**
@@ -625,11 +668,20 @@ export async function recommendMaterials(input: {
   materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[];
   anyMaterialMeetsTarget: boolean;
   bestOptionBeyondConstraint: BestOptionBeyondConstraint | null;
+  // material_id of the passing candidate with the lowest real estimated
+  // cost (never a material with no price data). Null when nothing passes
+  // or none of what passes has price data on file.
+  mostEconomicalMaterialId: number | null;
+  // material_id of the passing candidate with the thinnest verified
+  // thickness -- already candidates[0] among passing entries given the
+  // ranking order, exposed explicitly so the UI never has to re-derive it.
+  smallestFootprintMaterialId: number | null;
 }> {
   const staticPsi = input.weightLb / input.contactAreaIn2;
 
   const materials = await q<MaterialRow>(`
-    SELECT id, name, material_family, density_lb_ft3, price_per_bf, min_charge_usd
+    SELECT id, name, material_family, density_lb_ft3, price_per_bf, min_charge_usd,
+           price_per_cuin, cost_per_ci_usd
     FROM materials
     WHERE is_active IS NOT FALSE
     ORDER BY material_family, name;
@@ -683,6 +735,13 @@ export async function recommendMaterials(input: {
   // the loop (see sameUnderlyingCurveData) -- color/tint SKU variants of the
   // same underlying vendor curve get folded into one representative there.
   const thicknessCurvesByMaterialId = new Map<number, ThicknessCurve[]>();
+
+  // Real estimated material cost per material_id (bearing area x verified
+  // thickness x real price-per-cubic-inch) -- an internal number ONLY, used
+  // to pick "most economical" and bin cost_tier below. Never attached to a
+  // MaterialCandidate or returned from this function; null when the
+  // material has no real price data (see realPricePerCubicInch).
+  const costPerMaterialId = new Map<number, number | null>();
 
   for (const mat of materials) {
     const rawPoints = curvesByMaterial.get(mat.id);
@@ -945,7 +1004,16 @@ export async function recommendMaterials(input: {
       caveats,
       thicker_alternative_in_same_material: thickerAlternativeInSameMaterial,
       also_available_as: [],
+      cost_tier: null, // filled in after dedup, once the full candidate set is known
+      thin_safety_margin:
+        interp.g <= input.fragilityGMax && input.fragilityGMax - interp.g < 0.1 * input.fragilityGMax,
     });
+
+    const pricePerCuIn = realPricePerCubicInch(mat);
+    costPerMaterialId.set(
+      mat.id,
+      pricePerCuIn != null ? input.contactAreaIn2 * verifyCurve.thickness_in * pricePerCuIn : null,
+    );
   }
 
   // Dedup: fold color/tint SKU variants that share the same underlying
@@ -1037,6 +1105,43 @@ export async function recommendMaterials(input: {
 
   const anyMaterialMeetsTarget = dedupedCandidates.some((c) => c.meets_fragility_target);
 
+  // Cost tiers: percentile-based over every candidate with real price data
+  // (not just passing ones), so a browsed failing option still shows a
+  // relative tier while missing-price materials stay untiered (null)
+  // rather than being lumped into a bucket they have no real data for.
+  const costValues = dedupedCandidates
+    .map((c) => costPerMaterialId.get(c.material_id))
+    .filter((v): v is number => v != null)
+    .sort((a, b) => a - b);
+  if (costValues.length > 0) {
+    const p33 = costValues[Math.floor(costValues.length * 0.33)];
+    const p67 = costValues[Math.floor(costValues.length * 0.67)];
+    for (const c of dedupedCandidates) {
+      const cost = costPerMaterialId.get(c.material_id);
+      if (cost == null) continue;
+      c.cost_tier = cost <= p33 ? "$" : cost <= p67 ? "$$" : "$$$";
+    }
+  }
+
+  // Dual picks. Smallest footprint = thinnest passing thickness, which is
+  // already how passing candidates are ranked -- the first one in the
+  // sorted list. Most economical = real lowest cost among PASSING
+  // candidates that actually have price data; a material with no price
+  // data is never picked here no matter how good the fit, per the
+  // never-fabricate-a-price rule.
+  const passingCandidates = dedupedCandidates.filter((c) => c.meets_fragility_target);
+  const smallestFootprintMaterialId = passingCandidates[0]?.material_id ?? null;
+  let mostEconomicalMaterialId: number | null = null;
+  let mostEconomicalCost: number | null = null;
+  for (const c of passingCandidates) {
+    const cost = costPerMaterialId.get(c.material_id);
+    if (cost == null) continue;
+    if (mostEconomicalCost == null || cost < mostEconomicalCost) {
+      mostEconomicalCost = cost;
+      mostEconomicalMaterialId = c.material_id;
+    }
+  }
+
   return {
     staticPsi,
     candidates: dedupedCandidates,
@@ -1045,6 +1150,8 @@ export async function recommendMaterials(input: {
     materialsWithoutRequestedThickness,
     materialsExcludedByThicknessConstraint,
     anyMaterialMeetsTarget,
+    mostEconomicalMaterialId,
+    smallestFootprintMaterialId,
     // Non-null whenever nothing in THIS result set passes -- whether that's
     // because of a maxThicknessIn ceiling, a requestedThicknessIn exact
     // check, or no constraint at all -- so every "nothing here passes" UI

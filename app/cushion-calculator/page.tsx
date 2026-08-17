@@ -31,6 +31,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { usePageTracker } from "@/hooks/usePageTracker";
 
 // ── Types (mirror /api/foam-advisor/recommend's real response shape) ──────
 
@@ -87,6 +88,8 @@ type MaterialCandidate = {
     g_at_operating_psi: number;
   } | null;
   also_available_as: string[];
+  cost_tier: "$" | "$$" | "$$$" | null;
+  thin_safety_margin: boolean;
 };
 
 type MaterialWithoutRequestedThickness = {
@@ -122,6 +125,8 @@ type ApiResult = {
   materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[];
   anyMaterialMeetsTarget: boolean;
   bestOptionBeyondConstraint: BestOptionBeyondConstraint | null;
+  mostEconomicalMaterialId: number | null;
+  smallestFootprintMaterialId: number | null;
 };
 
 // ── Plain-language mappings -> real engine inputs ──────────────────────────
@@ -221,6 +226,44 @@ function toPositiveNumber(raw: string): number | null {
   const v = Number(raw);
   if (!Number.isFinite(v) || v <= 0) return null;
   return v;
+}
+
+// ── Real quote prefill (reuses the SAME payload shape buildPrefillPayload()
+// in components/SplashChatWidget.tsx builds for the chat widget -> quote
+// handoff, and the SAME ?prefill= URL param StartQuoteModal already parses
+// at /start-quote -- no new prefill mechanism, just this tool's inputs
+// mapped into the existing one). shipMode/insertType are set to "box"/
+// "single" so layerThicknesses actually gets consumed (StartQuoteModal only
+// seeds thickness on the complete_pack path) -- box outer dimensions are
+// deliberately left blank rather than guessed from product size, since the
+// real box needs extra clearance for the foam wall this tool doesn't know.
+function buildQuotePrefillUrl(candidate: MaterialCandidate, result: ApiResult): string {
+  const payload = {
+    source: "cushion-calculator",
+    createdAtIso: new Date().toISOString(),
+    outside: { l: "", w: "", h: "", units: "in" },
+    qty: "1",
+    shipMode: "box",
+    insertType: "single",
+    pocketsOn: "",
+    holding: "",
+    pocketCount: "",
+    material: {
+      mode: "known",
+      text: candidate.name,
+      id: candidate.material_id,
+    },
+    packagingSku: "",
+    packagingChoice: null,
+    printed: false,
+    layerCount: "1",
+    layerThicknesses: [String(candidate.verify_thickness_in)],
+    cavities: "",
+    customerName: "",
+    customerEmail: "",
+    notes: `From the cushion curve calculator: ${result.fragilityGMax}G target (${result.fragilityTier.label}), ${result.staticLoadPsi.toFixed(3)} psi static load.`,
+  };
+  return `/start-quote?prefill=${encodeURIComponent(JSON.stringify(payload))}`;
 }
 
 // ── Small shared UI bits ───────────────────────────────────────────────────
@@ -451,12 +494,58 @@ function CushionCurveChart({
   );
 }
 
+// Relative cost indicator only -- never a real dollar figure (none is ever
+// sent by the API in the first place; see cost_tier in engine.ts).
+function CostTierBadge({ tier }: { tier: "$" | "$$" | "$$$" | null }) {
+  if (!tier) return null;
+  return (
+    <span
+      title="Relative material cost among these options -- not a quoted price"
+      className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-page)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]"
+    >
+      {tier}
+    </span>
+  );
+}
+
+function PickCard({ c }: { c: MaterialCandidate }) {
+  return (
+    <div className="mt-1">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-[var(--text-primary)]">{c.name}</span>
+        <CostTierBadge tier={c.cost_tier} />
+      </div>
+      <div className="mt-0.5 text-xs text-[var(--text-secondary)]">
+        {c.verify_thickness_in}in thick -- {c.g_at_operating_psi.toFixed(1)}G at your footprint
+      </div>
+      {c.thin_safety_margin && (
+        <div className="mt-1.5 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-2 py-1 text-[11px] text-[var(--attention)]">
+          Passes, but with a thin safety margin (within 10% of your target) --
+          consider a thicker option if you have the room.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DisclaimerBanner() {
   return (
     <div className="rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-3 text-sm text-[var(--attention)]">
-      <span className="font-medium">Estimate only.</span> This tool is a starting point
-      based on real cushion-curve data, not a substitute for real-world drop testing on
-      your actual product and packaging before you ship.
+      <p>
+        <span className="font-medium">Estimate only.</span> This tool is a starting point
+        based on real cushion-curve data, not a substitute for real-world drop testing on
+        your actual product and packaging before you ship.
+      </p>
+      <ul className="mt-2 list-inside list-disc space-y-0.5 text-xs text-[var(--attention)]">
+        <li>
+          Models cushioning for the product's primary bearing/impact face -- most real
+          designs also need a matching layer on the opposite face.
+        </li>
+        <li>
+          Covers drop/shock protection only. Vibration protection during transit is a
+          separate design consideration this tool doesn't address.
+        </li>
+      </ul>
     </div>
   );
 }
@@ -481,6 +570,14 @@ function rankByRecommendationOnly(candidates: MaterialCandidate[]): MaterialCand
 type Mode = "simple" | "advanced";
 
 export default function CushionCalculatorPage() {
+  // Reuses the SAME page_events pipeline /landing already tracks through
+  // (session id, UTM params, device, page_view/scroll_50 auto-fired) --
+  // no new tracking table or endpoint. event_type stays within the
+  // existing ALLOWED_EVENTS whitelist in /api/track (form_submit for a
+  // completed recommendation, cta_click for either quote handoff link) so
+  // no schema/whitelist change was needed either.
+  const { trackEvent } = usePageTracker("/cushion-calculator");
+
   const [mode, setMode] = React.useState<Mode>("simple");
 
   // Shared state across both modes
@@ -520,6 +617,17 @@ export default function CushionCalculatorPage() {
   }, [lengthIn, widthIn]);
 
   const hasRealArea = contactAreaIn2 != null;
+
+  // Distinguishes "not filled in" (fine, optional) from "typed something
+  // invalid" (zero, negative, non-numeric) -- both leave hasRealArea false,
+  // but only the second deserves a warning instead of silently falling
+  // back to the no-area placeholder without explanation.
+  const lengthEnteredInvalid = lengthIn.trim() !== "" && toPositiveNumber(lengthIn) == null;
+  const widthEnteredInvalid = widthIn.trim() !== "" && toPositiveNumber(widthIn) == null;
+  const dimensionsInvalid = lengthEnteredInvalid || widthEnteredInvalid;
+  const weightEnteredInvalid = weightLb.trim() !== "" && toPositiveNumber(weightLb) == null;
+  const fragilityEnteredInvalid =
+    mode === "advanced" && fragilityGMax.trim() !== "" && toPositiveNumber(fragilityGMax) == null;
 
   // Auto-suggest drop height from weight, unless the user has manually
   // touched the field (Advanced mode) -- mirrors the internal tool.
@@ -571,7 +679,15 @@ export default function CushionCalculatorPage() {
       });
       const json = await res.json();
       if (!res.ok || !json?.ok) {
-        setError("Couldn't calculate a recommendation for those inputs. Try adjusting them.");
+        const specificMessages: Record<string, string> = {
+          invalid_weight: "Weight must be a number greater than zero.",
+          invalid_area: "Contact area must be greater than zero -- check the length/width you entered.",
+          invalid_json: "That request didn't go through correctly. Please try again.",
+        };
+        setError(
+          specificMessages[json?.error] ??
+            "Couldn't calculate a recommendation for those inputs. Try adjusting them.",
+        );
         setResult(null);
         return;
       }
@@ -591,14 +707,27 @@ export default function CushionCalculatorPage() {
           : [],
         anyMaterialMeetsTarget: json.anyMaterialMeetsTarget !== false,
         bestOptionBeyondConstraint: json.bestOptionBeyondConstraint ?? null,
+        mostEconomicalMaterialId: json.mostEconomicalMaterialId ?? null,
+        smallestFootprintMaterialId: json.smallestFootprintMaterialId ?? null,
       });
+      trackEvent("form_submit");
     } catch {
       setError("Something went wrong reaching the calculator. Please try again.");
       setResult(null);
     } finally {
       setLoading(false);
     }
-  }, [weightLb, fragilityGMax, dropHeightIn, hasRealArea, contactAreaIn2, thicknessIn, mode, maxThicknessIn]);
+  }, [
+    weightLb,
+    fragilityGMax,
+    dropHeightIn,
+    hasRealArea,
+    contactAreaIn2,
+    thicknessIn,
+    mode,
+    maxThicknessIn,
+    trackEvent,
+  ]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -751,12 +880,18 @@ export default function CushionCalculatorPage() {
                     />
                   </label>
                 </div>
-                <p className="mt-1.5 text-xs text-[var(--text-faint)]">
-                  {hasRealArea
-                    ? `The face that'll sit on the foam, roughly ${contactAreaIn2!.toFixed(
-                        1,
-                      )} in² -- this unlocks a real check against your target below.`
-                    : "The face of the product that'll actually sit on the foam -- not the whole box. Optional, but skipping it means we can only suggest a thickness, not confirm it works for your load."}
+                <p
+                  className={`mt-1.5 text-xs ${
+                    dimensionsInvalid ? "text-[var(--attention)]" : "text-[var(--text-faint)]"
+                  }`}
+                >
+                  {dimensionsInvalid
+                    ? "Length and width must be greater than zero -- ignoring that for now and showing recommendations without a footprint check."
+                    : hasRealArea
+                      ? `The face that'll sit on the foam, roughly ${contactAreaIn2!.toFixed(
+                          1,
+                        )} in² -- this unlocks a real check against your target below.`
+                      : "The face of the product that'll actually sit on the foam -- not the whole box. Optional, but skipping it means we can only suggest a thickness, not confirm it works for your load."}
                 </p>
 
                 <label className="mt-5 block">
@@ -869,10 +1004,16 @@ export default function CushionCalculatorPage() {
                     />
                   </label>
                 </div>
-                <p className="mt-1.5 text-xs text-[var(--text-faint)]">
-                  {hasRealArea
-                    ? `Contact area: ${contactAreaIn2!.toFixed(2)} in² -- unlocks real static-load verification below.`
-                    : "Optional -- without this we can only show thickness recommendations, not verify an exact operating load."}
+                <p
+                  className={`mt-1.5 text-xs ${
+                    dimensionsInvalid ? "text-[var(--attention)]" : "text-[var(--text-faint)]"
+                  }`}
+                >
+                  {dimensionsInvalid
+                    ? "Contact length and width must be greater than zero -- ignoring that for now and showing recommendations without static-load verification."
+                    : hasRealArea
+                      ? `Contact area: ${contactAreaIn2!.toFixed(2)} in² -- unlocks real static-load verification below.`
+                      : "Optional -- without this we can only show thickness recommendations, not verify an exact operating load."}
                 </p>
 
                 <label className="mt-5 block">
@@ -977,10 +1118,20 @@ export default function CushionCalculatorPage() {
               {loading ? "Calculating…" : "Get recommendation"}
             </button>
             {!canSubmit && (
-              <p className="mt-2 text-center text-xs text-[var(--text-faint)]">
-                {mode === "simple"
-                  ? "Enter weight and pick a fragility level."
-                  : "Enter weight and a fragility G-target."}
+              <p
+                className={`mt-2 text-center text-xs ${
+                  weightEnteredInvalid || fragilityEnteredInvalid
+                    ? "text-[var(--attention)]"
+                    : "text-[var(--text-faint)]"
+                }`}
+              >
+                {weightEnteredInvalid
+                  ? "Weight must be greater than zero."
+                  : fragilityEnteredInvalid
+                    ? "Fragility target (G) must be greater than zero."
+                    : mode === "simple"
+                      ? "Enter weight and pick a fragility level."
+                      : "Enter weight and a fragility G-target."}
               </p>
             )}
             {error && (
@@ -1150,6 +1301,48 @@ export default function CushionCalculatorPage() {
                     </div>
                   )}
 
+                {hasRealArea && !result.requestedThicknessIn && result.anyMaterialMeetsTarget && (() => {
+                  const economical = result.candidates.find(
+                    (c) => c.material_id === result.mostEconomicalMaterialId,
+                  );
+                  const smallest = result.candidates.find(
+                    (c) => c.material_id === result.smallestFootprintMaterialId,
+                  );
+                  if (!economical && !smallest) return null;
+                  const merged = !!economical && !!smallest && economical.material_id === smallest.material_id;
+                  return (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {merged ? (
+                        <div className="rounded-xl border-2 border-[var(--action-primary)] bg-[var(--action-primary)]/5 p-4 sm:col-span-2">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--action-primary)]">
+                            Best overall -- smallest footprint and most economical
+                          </div>
+                          <PickCard c={economical!} />
+                        </div>
+                      ) : (
+                        <>
+                          {smallest && (
+                            <div className="rounded-xl border-2 border-[var(--action-primary)] bg-[var(--action-primary)]/5 p-4">
+                              <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--action-primary)]">
+                                Smallest footprint
+                              </div>
+                              <PickCard c={smallest} />
+                            </div>
+                          )}
+                          {economical && (
+                            <div className="rounded-xl border-2 border-[var(--status-success-text)] bg-[var(--status-success-bg)]/40 p-4">
+                              <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--status-success-text)]">
+                                Most economical
+                              </div>
+                              <PickCard c={economical} />
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {displayCandidates.length === 0 ? (
                   <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 text-sm text-[var(--text-secondary)]">
                     No materials with cushion-curve data matched this combination. Try a
@@ -1170,6 +1363,9 @@ export default function CushionCalculatorPage() {
                             <span className="text-sm font-medium text-[var(--text-primary)]">
                               {c.name}
                             </span>
+                            {hasRealArea && !result.requestedThicknessIn && (
+                              <CostTierBadge tier={c.cost_tier} />
+                            )}
                           </div>
                           <div className="mt-1 text-xs text-[var(--text-muted)]">
                             {c.material_family ?? "Uncategorized"}
@@ -1278,6 +1474,14 @@ export default function CushionCalculatorPage() {
                           ))}
                         </ul>
                       )}
+
+                      <Link
+                        href={buildQuotePrefillUrl(c, result)}
+                        onClick={() => trackEvent("cta_click")}
+                        className="mt-3 inline-flex items-center text-xs font-medium text-[var(--action-primary)] hover:underline"
+                      >
+                        Use this material -- start a real quote →
+                      </Link>
                     </div>
                   ))
                 )}
@@ -1288,7 +1492,12 @@ export default function CushionCalculatorPage() {
                     Want a real, priced quote using this?
                   </div>
                   <Link
-                    href="/landing#sample-quote"
+                    href={
+                      displayCandidates[0]
+                        ? buildQuotePrefillUrl(displayCandidates[0], result)
+                        : "/landing#sample-quote"
+                    }
+                    onClick={() => trackEvent("cta_click")}
                     className="mt-3 inline-flex rounded-md bg-[var(--action-primary)] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
                   >
                     Build your layout in Alex-IO →
