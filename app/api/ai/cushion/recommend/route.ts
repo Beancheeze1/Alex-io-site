@@ -1,19 +1,24 @@
 // app/api/ai/cushion/recommend/route.ts
+//
+// Real cushion recommender. Previously returned a hardcoded, fabricated
+// candidates array (ids 59/60/71, invented prices) baked directly into
+// source -- that has been removed. This now delegates to the same
+// cushion_curves-backed engine as /api/foam-advisor/recommend and returns
+// real catalog materials with real prices.
+
 import { NextRequest, NextResponse } from "next/server";
+import { recommendMaterials, suggestDropHeightIn } from "@/app/lib/cushion/engine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Simple heuristic recommender. We’ll wire this to your cushion-curve
- * DB later; for now it returns a consistent, test-friendly shape.
- *
  * INPUT (examples):
  *  {
  *    "dims": { "L":12, "W":9, "H":2, "units":"in" },
- *    "weight_lb": 8,               // optional
- *    "drop_height_in": 24,         // optional
- *    "fragility": "low|med|high"   // optional
+ *    "weight_lb": 8,               // optional, default 5
+ *    "drop_height_in": 24,         // optional, defaults to the standard weight-based table
+ *    "fragility_g_max": 60         // optional numeric G target, default 60 ("Fragile" tier ceiling)
  *  }
  */
 type Units = "in" | "mm";
@@ -28,70 +33,71 @@ export async function POST(req: NextRequest) {
       dims: { L: number; W: number; H: number; units?: Units };
       weight_lb?: number;
       drop_height_in?: number;
-      fragility?: "low" | "med" | "high";
+      fragility_g_max?: number;
     }>;
 
     const dims = body?.dims;
     if (!dims) {
-      return NextResponse.json(
-        { ok: false, error: "dims required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "dims required" }, { status: 400 });
     }
     const u = (dims.units ?? "in") as Units;
     const L = toInches(Number(dims.L || 0), u);
     const W = toInches(Number(dims.W || 0), u);
     const H = toInches(Number(dims.H || 0), u);
     if (!(L > 0 && W > 0 && H > 0)) {
-      return NextResponse.json(
-        { ok: false, error: "invalid dims" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, error: "invalid dims" }, { status: 400 });
     }
 
-    // Heuristic density choice
-    const weight = Number(body.weight_lb ?? 5);
-    const drop = Number(body.drop_height_in ?? 24);
-    const frag = body.fragility ?? "med";
+    const weightLb = Number(body.weight_lb ?? 5);
+    const contactAreaIn2 = L * W;
+    const fragilityGMax =
+      Number.isFinite(Number(body.fragility_g_max)) && Number(body.fragility_g_max) > 0
+        ? Number(body.fragility_g_max)
+        : 60;
+    const dropHeightIn =
+      Number.isFinite(Number(body.drop_height_in)) && Number(body.drop_height_in) > 0
+        ? Number(body.drop_height_in)
+        : suggestDropHeightIn(weightLb);
 
-    // Rough heuristic:
-    // - heavier or higher drop or "high" fragility pushes density upward.
-    let score = 0;
-    score += Math.min(3, Math.max(0, weight / 10)); // 0..3
-    score += Math.min(2, Math.max(0, drop / 24 - 1)); // 0..2
-    if (frag === "high") score += 2;
-    else if (frag === "med") score += 1;
+    const { staticPsi, candidates } = await recommendMaterials({
+      weightLb,
+      contactAreaIn2,
+      fragilityGMax,
+      dropHeightIn,
+    });
 
-    let density_pcf = 1.7;
-    if (score >= 4.5) density_pcf = 4.0;
-    else if (score >= 2.5) density_pcf = 2.2;
-
-    // Return a few candidate materials in ascending price order (placeholder ids)
-    const candidates = [
-      { id: 59, name: "EPE 1.7# White", density_pcf: 1.7, price_per_bf: 28, min_charge: 5 },
-      { id: 60, name: "EPE 2.2# Black", density_pcf: 2.2, price_per_bf: 34, min_charge: 5 },
-      { id: 71, name: "EPE 4.0#",       density_pcf: 4.0, price_per_bf: 45, min_charge: 10 },
-    ].sort((a,b)=>a.price_per_bf-b.price_per_bf);
+    const top = candidates.slice(0, 5).map((c) => ({
+      id: c.material_id,
+      name: c.name,
+      density_pcf: c.density_lb_ft3,
+      price_per_bf: c.price_per_bf,
+      min_charge: c.min_charge_usd,
+      g_at_operating_psi: c.g_at_operating_psi,
+      meets_fragility_target: c.meets_fragility_target,
+      provenance: c.curve.provenance,
+    }));
 
     const resp = {
       ok: true,
       status: 200,
-      hasHints: true,
-      recommended_density_pcf: density_pcf,
-      candidates,
+      hasHints: top.length > 0,
+      recommended_density_pcf: top[0]?.density_pcf ?? null,
+      candidates: top,
       diag: {
         dims_in: { L, W, H },
-        weight_lb: weight,
-        drop_height_in: drop,
-        fragility: frag,
-      }
+        weight_lb: weightLb,
+        contact_area_in2: contactAreaIn2,
+        static_psi: staticPsi,
+        drop_height_in: dropHeightIn,
+        fragility_g_max: fragilityGMax,
+      },
     };
 
     return NextResponse.json(resp, { status: 200 });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: String(err?.message ?? err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

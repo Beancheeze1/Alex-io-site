@@ -349,14 +349,15 @@ export async function POST(req: NextRequest) {
         const points = rows
           .map((r) => ({
             static_psi: Number(r.static_psi),
-            deflect_pct: Number(r.deflect_pct),
+            // deflect_pct is not present in the source chart for most rows;
+            // stays null rather than Number(null) silently becoming 0.
+            deflect_pct: r.deflect_pct == null ? null : Number(r.deflect_pct),
             g_level: Number(r.g_level),
             source: r.source || null,
           }))
           .filter(
             (p) =>
               Number.isFinite(p.static_psi) &&
-              Number.isFinite(p.deflect_pct) &&
               Number.isFinite(p.g_level),
           )
           .sort((a, b) => a.g_level - b.g_level || a.static_psi - b.static_psi);

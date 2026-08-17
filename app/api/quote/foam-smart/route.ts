@@ -1,5 +1,6 @@
 // app/api/quote/foam-smart/route.ts
 import { NextResponse } from "next/server";
+import { absoluteUrl } from "@/app/lib/internalFetch";
 
 export const dynamic = "force-dynamic";
 
@@ -7,9 +8,12 @@ export const dynamic = "force-dynamic";
  * Accepts the same body as /api/quote/foam plus optional:
  *  - weight_lbf, area_in2, fragility_g, drop_in
  * If height_in (thickness) is missing, we auto-call /api/cushion/recommend
- * to get a suggested thickness and forward the full body to /api/quote/foam.
+ * (real cushion_curves-backed logic, see app/lib/cushion/engine.ts) to get a
+ * suggested thickness and forward the full body to /api/quote/foam.
  *
- * Requires NEXT_PUBLIC_BASE_URL to be set (already in your project).
+ * Uses the request's own host (via absoluteUrl) rather than
+ * NEXT_PUBLIC_BASE_URL -- that env var isn't set in every environment this
+ * runs in, which silently broke both internal calls below.
  */
 export async function POST(req: Request) {
   try {
@@ -19,7 +23,7 @@ export async function POST(req: Request) {
 
     if (!hasThickness && (body?.weight_lbf && body?.area_in2)) {
       // ask cushion recommend for min thickness
-      const recRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/cushion/recommend`, {
+      const recRes = await fetch(absoluteUrl(req, "/api/cushion/recommend"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -39,7 +43,7 @@ export async function POST(req: Request) {
     }
 
     // forward to your existing /api/quote/foam
-    const quoteRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/quote/foam`, {
+    const quoteRes = await fetch(absoluteUrl(req, "/api/quote/foam"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

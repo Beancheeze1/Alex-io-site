@@ -52,12 +52,15 @@ export async function GET(req: NextRequest) {
 
     const rows = await q<{
       static_psi: string | number;
-      deflect_pct: string | number;
+      deflect_pct: string | number | null;
       g_level: string | number;
+      thickness_in: string | number | null;
+      drop_in: string | number | null;
+      provenance: string | null;
       source: string | null;
     }>(
       `
-      SELECT static_psi, deflect_pct, g_level, "source"
+      SELECT static_psi, deflect_pct, g_level, thickness_in, drop_in, provenance, "source"
       FROM cushion_curves
       WHERE material_id = $1
       ORDER BY g_level ASC, static_psi ASC
@@ -68,14 +71,18 @@ export async function GET(req: NextRequest) {
     const points = (rows || [])
       .map((r) => ({
         static_psi: Number(r.static_psi),
-        deflect_pct: Number(r.deflect_pct),
+        // deflect_pct is not present in the source charts for most rows --
+        // stays null rather than being coerced to 0 by Number(null).
+        deflect_pct: r.deflect_pct == null ? null : Number(r.deflect_pct),
         g_level: Number(r.g_level),
+        thickness_in: r.thickness_in == null ? null : Number(r.thickness_in),
+        drop_in: r.drop_in == null ? null : Number(r.drop_in),
+        provenance: r.provenance ?? null,
         source: r.source ?? null,
       }))
       .filter(
         (p) =>
           Number.isFinite(p.static_psi) &&
-          Number.isFinite(p.deflect_pct) &&
           Number.isFinite(p.g_level),
       );
 

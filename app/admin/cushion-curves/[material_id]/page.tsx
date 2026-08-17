@@ -23,8 +23,12 @@ import { useParams } from "next/navigation";
 
 type CushionPoint = {
   static_psi: number;
-  deflect_pct: number;
+  // Not present in the source chart for most rows -- null, not a guess.
+  deflect_pct: number | null;
   g_level: number;
+  thickness_in?: number | null;
+  drop_in?: number | null;
+  provenance?: "tested" | "proxy" | "unverified" | null;
   source: string | null;
 };
 
@@ -142,10 +146,16 @@ export default function CushionCurvesMaterialPage() {
         const normPoints: CushionPoint[] = rawPoints
           .map((p: any) => {
             const static_psi = Number(p.static_psi ?? p.staticPsi ?? p.psi);
-            const deflect_pct = Number(p.deflect_pct ?? p.deflectPct ?? p.deflection_pct ?? p.deflection);
             const g_level = Number(p.g_level ?? p.gLevel ?? p.g);
+            const deflectRaw = p.deflect_pct ?? p.deflectPct ?? p.deflection_pct ?? p.deflection;
+            const deflect_pct =
+              deflectRaw == null ? null : Number(deflectRaw);
 
-            if (!Number.isFinite(static_psi) || !Number.isFinite(deflect_pct) || !Number.isFinite(g_level)) {
+            if (
+              !Number.isFinite(static_psi) ||
+              !Number.isFinite(g_level) ||
+              (deflect_pct != null && !Number.isFinite(deflect_pct))
+            ) {
               return null;
             }
 
@@ -153,6 +163,9 @@ export default function CushionCurvesMaterialPage() {
               static_psi,
               deflect_pct,
               g_level,
+              thickness_in: p.thickness_in == null ? null : Number(p.thickness_in),
+              drop_in: p.drop_in == null ? null : Number(p.drop_in),
+              provenance: (p.provenance ?? null) as CushionPoint["provenance"],
               source: (p.source ?? p.src ?? null) as string | null,
             } as CushionPoint;
           })
@@ -217,14 +230,17 @@ export default function CushionCurvesMaterialPage() {
 
     const psiValues = points.map((p) => p.static_psi);
     const gValues = points.map((p) => p.g_level);
-    const deflValues = points.map((p) => p.deflect_pct);
+    const deflValues = points
+      .map((p) => p.deflect_pct)
+      .filter((d): d is number => d != null);
 
     const psiMin = Math.min(...psiValues);
     const psiMax = Math.max(...psiValues);
     const gMin = Math.min(...gValues);
     const gMax = Math.max(...gValues);
-    const deflMin = Math.min(...deflValues);
-    const deflMax = Math.max(...deflValues);
+    const deflMin = deflValues.length ? Math.min(...deflValues) : null;
+    const deflMax = deflValues.length ? Math.max(...deflValues) : null;
+    const provenance = points[0]?.provenance ?? null;
 
     return {
       best,
@@ -234,6 +250,7 @@ export default function CushionCurvesMaterialPage() {
       gMax,
       deflMin,
       deflMax,
+      provenance,
     };
   }, [points]);
 
@@ -441,7 +458,10 @@ export default function CushionCurvesMaterialPage() {
                             @ {summary.best.static_psi.toFixed(3)} psi
                           </div>
                           <div className="text-[11px] text-[var(--text-muted)]">
-                            Deflection {summary.best.deflect_pct.toFixed(1)}%
+                            Deflection{" "}
+                            {summary.best.deflect_pct != null
+                              ? `${summary.best.deflect_pct.toFixed(1)}%`
+                              : "n/a (not in source chart)"}
                           </div>
                         </div>
                       ) : (
@@ -498,6 +518,9 @@ export default function CushionCurvesMaterialPage() {
                               G-level
                             </th>
                             <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
+                              Provenance
+                            </th>
+                            <th className="px-3 py-2 text-left font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
                               Source
                             </th>
                           </tr>
@@ -516,10 +539,38 @@ export default function CushionCurvesMaterialPage() {
                                 {p.static_psi.toFixed(3)}
                               </td>
                               <td className="px-3 py-1.5 text-[var(--text-primary)] font-mono">
-                                {p.deflect_pct.toFixed(1)}
+                                {p.deflect_pct != null ? (
+                                  p.deflect_pct.toFixed(1)
+                                ) : (
+                                  <span className="text-[var(--text-faint)]" title="Not present in the source chart">
+                                    n/a
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-1.5 text-[var(--text-primary)] font-mono">
                                 {p.g_level.toFixed(1)}
+                              </td>
+                              <td className="px-3 py-1.5">
+                                {p.provenance ? (
+                                  <span
+                                    className={[
+                                      "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium",
+                                      p.provenance === "tested"
+                                        ? "bg-[var(--status-success-bg)] border-[var(--status-success-text)]/30 text-[var(--status-success-text)]"
+                                        : p.provenance === "proxy"
+                                        ? "bg-[var(--attention-bg)] border-[var(--attention-border)] text-[var(--attention)]"
+                                        : "bg-[var(--status-neutral-bg)] border-[var(--border-strong)] text-[var(--status-neutral-text)]",
+                                    ].join(" ")}
+                                  >
+                                    {p.provenance === "tested"
+                                      ? "Tested"
+                                      : p.provenance === "proxy"
+                                      ? "Proxy"
+                                      : "Unverified"}
+                                  </span>
+                                ) : (
+                                  <span className="text-[var(--text-faint)]">—</span>
+                                )}
                               </td>
                           <td className="px-3 py-1.5 text-[var(--text-secondary)] break-words max-w-[360px]">
                                 {p.source || (
@@ -548,8 +599,16 @@ export default function CushionCurvesMaterialPage() {
                       Deflection span
                     </div>
                     <div className="text-xs text-[var(--text-primary)] mb-2">
-                      {summary.deflMin.toFixed(1)}% –{" "}
-                      {summary.deflMax.toFixed(1)}%
+                      {summary.deflMin != null && summary.deflMax != null ? (
+                        <>
+                          {summary.deflMin.toFixed(1)}% –{" "}
+                          {summary.deflMax.toFixed(1)}%
+                        </>
+                      ) : (
+                        <span className="text-[var(--text-faint)]">
+                          n/a (not in source chart)
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-[var(--text-muted)] mb-1">
                       Points in curve
@@ -639,7 +698,12 @@ export default function CushionCurvesMaterialPage() {
                     </div>
 
                     <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
-                      Deflection <span className="font-mono text-[var(--text-secondary)]">{operating.nearest.deflect_pct.toFixed(1)}%</span>{" "}
+                      Deflection{" "}
+                      <span className="font-mono text-[var(--text-secondary)]">
+                        {operating.nearest.deflect_pct != null
+                          ? `${operating.nearest.deflect_pct.toFixed(1)}%`
+                          : "n/a"}
+                      </span>{" "}
                        Δpsi <span className="font-mono text-[var(--text-secondary)]">{operating.nearestDelta.toFixed(3)}</span>
                     </div>
                   </div>

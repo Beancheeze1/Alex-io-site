@@ -25,40 +25,72 @@
 import * as React from "react";
 
 type EnvironmentOption = "normal" | "cold_chain" | "vibration";
-type FragilityOption = "very_fragile" | "moderate" | "rugged";
+
+type FragilityTier = {
+  key: string;
+  label: string;
+  gMin: number;
+  gMax: number | null;
+};
+
+// Mirrors app/lib/cushion/engine.ts FRAGILITY_TIERS -- standard, generic
+// industry tiers, kept in sync with the API response's `reference.fragilityTiers`.
+const DEFAULT_FRAGILITY_TIERS: FragilityTier[] = [
+  { key: "very_delicate", label: "Extremely / Very Delicate", gMin: 0, gMax: 25 },
+  { key: "delicate", label: "Delicate", gMin: 25, gMax: 40 },
+  { key: "fragile", label: "Fragile", gMin: 40, gMax: 60 },
+  { key: "moderately_fragile", label: "Moderately Fragile", gMin: 60, gMax: 85 },
+  { key: "rugged", label: "Rugged", gMin: 85, gMax: 100 },
+  { key: "very_rugged", label: "Very Rugged", gMin: 100, gMax: null },
+];
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
 
-type AdvisorRecommendation = {
-  key: string;
-  family: string;
-  label: string;
-  confidence: "primary" | "alternative" | "stretch";
-  notes: string;
-  targetDensityMin?: number;
-  targetDensityMax?: number;
+type CurveProvenance = "tested" | "proxy" | "unverified" | null;
+
+type MaterialCandidate = {
+  material_id: number;
+  name: string;
+  material_family: string | null;
+  density_lb_ft3: number | null;
+  price_per_bf: number | null;
+  min_charge_usd: number | null;
+  operating_psi: number;
+  g_at_operating_psi: number;
+  extrapolated_beyond_tested_range: boolean;
+  meets_fragility_target: boolean;
+  margin_g: number;
+  curve: {
+    point_count: number;
+    provenance: CurveProvenance;
+    thickness_in: number | null;
+    drop_in: number | null;
+    source: string | null;
+    nearest_tested_psi: number;
+  };
+  caveats: string[];
 };
 
 type AdvisorResult = {
   staticLoadPsi: number;
   staticLoadPsiLabel: string;
   environmentLabel: string;
-  fragilityLabel: string;
-  recommendations: AdvisorRecommendation[];
-};
-
-type MaterialOption = {
-  id: number;
-  name: string;
-  family: string;
-  density_lb_ft3: number | null;
+  fragilityGMax: number;
+  fragilityTier: { key: string; label: string };
+  dropHeightIn: number;
+  dropHeightSuggested: boolean;
+  candidates: MaterialCandidate[];
+  materialsConsidered: number;
+  materialsWithoutCurveData: number;
 };
 
 type CushionPoint = {
   static_psi: number;
-  deflect_pct: number;
+  // Not available from the source charts for the vast majority of the
+  // catalog (see cushion_curves.deflect_note) -- null, not a guessed value.
+  deflect_pct: number | null;
   g_level: number;
   source: string | null;
 };
@@ -86,8 +118,28 @@ type FoamAdvisorStoredState = {
   productContactWidthIn?: string;
   contactAreaIn2?: string;
   environment?: EnvironmentOption;
-  fragility?: FragilityOption;
+  fragilityGMax?: string;
+  dropHeightIn?: string;
 };
+
+// Mirrors app/lib/cushion/engine.ts DROP_HEIGHT_TABLE -- standard ASTM
+// D-3332-style weight-based drop-height table (generic reference values).
+const DROP_HEIGHT_TABLE: { minLb: number; maxLb: number | null; dropIn: number }[] = [
+  { minLb: 0, maxLb: 25, dropIn: 42 },
+  { minLb: 25, maxLb: 50, dropIn: 36 },
+  { minLb: 50, maxLb: 100, dropIn: 30 },
+  { minLb: 100, maxLb: 500, dropIn: 24 },
+  { minLb: 500, maxLb: 1000, dropIn: 18 },
+  { minLb: 1000, maxLb: null, dropIn: 12 },
+];
+
+function suggestDropHeightIn(weightLb: number): number {
+  const band =
+    DROP_HEIGHT_TABLE.find(
+      (b) => weightLb >= b.minLb && (b.maxLb == null || weightLb <= b.maxLb),
+    ) ?? DROP_HEIGHT_TABLE[DROP_HEIGHT_TABLE.length - 1];
+  return band.dropIn;
+}
 
 function parseBlockDims(
   raw: string | null,
@@ -138,6 +190,42 @@ function toPositiveNumber(raw: string): number | null {
   const v = Number(raw);
   if (!Number.isFinite(v) || v <= 0) return null;
   return v;
+}
+
+// Surfaces whether a curve was actually digitized for this exact material
+// ("tested"), adapted from a nearby-density material's curve ("proxy"), or
+// has no source document on file at all ("unverified") -- see
+// cushion_curves.provenance.
+function ProvenanceBadge({ provenance }: { provenance: CurveProvenance }) {
+  if (!provenance) return null;
+  const styles: Record<string, string> = {
+    tested:
+      "bg-[var(--status-success-bg)] border-[var(--status-success-text)]/30 text-[var(--status-success-text)]",
+    proxy:
+      "bg-[var(--attention-bg)] border-[var(--attention-border)] text-[var(--attention)]",
+    unverified:
+      "bg-[var(--status-neutral-bg)] border-[var(--border-strong)] text-[var(--status-neutral-text)]",
+  };
+  const labels: Record<string, string> = {
+    tested: "Tested curve",
+    proxy: "Proxy curve",
+    unverified: "Unverified",
+  };
+  const titles: Record<string, string> = {
+    tested: "Digitized directly from a manufacturer cushion-curve chart for this material.",
+    proxy: "Adapted from a different, nearby-density material's tested curve -- not digitized for this exact material.",
+    unverified: "No source document is on file for this curve; values are unverified.",
+  };
+  return (
+    <span
+      title={titles[provenance] ?? ""}
+      className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${
+        styles[provenance] ?? ""
+      }`}
+    >
+      {labels[provenance] ?? provenance}
+    </span>
+  );
 }
 
 export default function FoamAdvisorPage({
@@ -217,8 +305,9 @@ export default function FoamAdvisorPage({
     React.useState<string>("");
   const [environment, setEnvironment] =
     React.useState<EnvironmentOption>("normal");
-  const [fragility, setFragility] =
-    React.useState<FragilityOption>("moderate");
+  const [fragilityGMax, setFragilityGMax] = React.useState<string>("60");
+  const [dropHeightIn, setDropHeightIn] = React.useState<string>("");
+  const [dropHeightTouched, setDropHeightTouched] = React.useState(false);
 
   const computedContactAreaIn2 = React.useMemo(() => {
     const L = toPositiveNumber(productContactLengthIn);
@@ -237,6 +326,16 @@ export default function FoamAdvisorPage({
     setContactAreaIn2(computedContactAreaIn2.toFixed(2));
   }, [computedContactAreaIn2]);
 
+  // Suggested drop height from the standard weight-based table. Auto-fills
+  // the input as the user types a weight, but stops overriding once they've
+  // manually edited the drop-height field themselves.
+  React.useEffect(() => {
+    if (dropHeightTouched) return;
+    const w = toPositiveNumber(weightLb);
+    if (w == null) return;
+    setDropHeightIn(String(suggestDropHeightIn(w)));
+  }, [weightLb, dropHeightTouched]);
+
   // Advisor result / status
   const [advisorResult, setAdvisorResult] =
     React.useState<AdvisorResult | null>(null);
@@ -244,18 +343,9 @@ export default function FoamAdvisorPage({
     React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState<boolean>(false);
 
-  // Which recommendation is currently driving the center canvas
+  // Which candidate material_id is currently driving the center canvas
   const [selectedRecKey, setSelectedRecKey] =
-    React.useState<string | null>(null);
-
-  // Materials catalog (from /api/materials)
-  const [materials, setMaterials] =
-    React.useState<MaterialOption[]>([]);
-  const [materialsLoading, setMaterialsLoading] =
-    React.useState<boolean>(true);
-  const [materialsError, setMaterialsError] = React.useState<
-    string | null
-  >(null);
+    React.useState<number | null>(null);
 
   // Cushion curve state for the center canvas
   const [curveMaterial, setCurveMaterial] = React.useState<{
@@ -344,8 +434,12 @@ export default function FoamAdvisorPage({
       if (parsed.environment) {
         setEnvironment(parsed.environment);
       }
-      if (parsed.fragility) {
-        setFragility(parsed.fragility);
+      if (parsed.fragilityGMax != null) {
+        setFragilityGMax(String(parsed.fragilityGMax));
+      }
+      if (parsed.dropHeightIn != null) {
+        setDropHeightIn(String(parsed.dropHeightIn));
+        setDropHeightTouched(true);
       }
     } catch {
       // ignore parse errors
@@ -362,7 +456,8 @@ export default function FoamAdvisorPage({
       productContactWidthIn,
       contactAreaIn2,
       environment,
-      fragility,
+      fragilityGMax,
+      dropHeightIn,
     };
     try {
       window.localStorage.setItem(key, JSON.stringify(payload));
@@ -376,64 +471,9 @@ export default function FoamAdvisorPage({
     productContactWidthIn,
     contactAreaIn2,
     environment,
-    fragility,
+    fragilityGMax,
+    dropHeightIn,
   ]);
-
-  // Load materials list from existing API (same one the editor uses)
-  React.useEffect(() => {
-    let cancelled = false;
-
-    async function loadMaterials() {
-      setMaterialsLoading(true);
-      setMaterialsError(null);
-
-      try {
-        const res = await fetch("/api/materials", {
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const json = await res.json();
-
-        if (!cancelled && Array.isArray(json.materials)) {
-          const mapped: MaterialOption[] = json.materials.map(
-            (m: any) => ({
-              id: m.id,
-              name:
-                (m.name ?? m.material_name ?? `Material #${m.id}`) ||
-                `Material #${m.id}`,
-              family: m.material_family || "Uncategorized",
-              density_lb_ft3:
-                typeof m.density_lb_ft3 === "number"
-                  ? m.density_lb_ft3
-                  : m.density_lb_ft3 != null
-                  ? Number(m.density_lb_ft3)
-                  : null,
-            }),
-          );
-          setMaterials(mapped);
-        }
-      } catch (err) {
-        console.error("Error loading materials for Foam Advisor", err);
-        if (!cancelled) {
-          setMaterialsError(
-            "Couldn’t load your foam catalog. Recommendations will still show, but won’t be mapped to actual materials.",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setMaterialsLoading(false);
-        }
-      }
-    }
-
-    loadMaterials();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Clear hover tooltip when curve data changes
   React.useEffect(() => {
@@ -455,6 +495,8 @@ export default function FoamAdvisorPage({
     const L = toPositiveNumber(productContactLengthIn);
     const W = toPositiveNumber(productContactWidthIn);
     const a = L != null && W != null ? L * W : NaN;
+    const gMax = toPositiveNumber(fragilityGMax);
+    const dropIn = toPositiveNumber(dropHeightIn);
 
     if (!Number.isFinite(w) || w <= 0) {
       alert("Please enter a valid product weight (lb).");
@@ -470,6 +512,10 @@ export default function FoamAdvisorPage({
       alert("Contact area could not be computed.");
       return;
     }
+    if (gMax == null) {
+      alert("Please enter a valid fragility G target.");
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -481,7 +527,8 @@ export default function FoamAdvisorPage({
           weightLb: w,
           contactAreaIn2: a,
           environment,
-          fragility,
+          fragilityGMax: gMax,
+          dropHeightIn: dropIn ?? undefined,
           quoteNo: effectiveQuoteNo || null,
           block: blockParam || null,
         }),
@@ -519,24 +566,18 @@ export default function FoamAdvisorPage({
           "Static load calculated from weight and contact area.",
         environmentLabel:
           json.environmentLabel || "Shipping environment",
-        fragilityLabel:
-          json.fragilityLabel || "Product fragility band",
-        recommendations:
-          Array.isArray(json.recommendations) &&
-          json.recommendations.length > 0
-            ? json.recommendations
-            : [],
+        fragilityGMax: Number(json.fragilityGMax) || gMax,
+        fragilityTier: json.fragilityTier ?? { key: "", label: "" },
+        dropHeightIn: Number(json.dropHeightIn) || dropIn || 24,
+        dropHeightSuggested: !!json.dropHeightSuggested,
+        candidates: Array.isArray(json.candidates) ? json.candidates : [],
+        materialsConsidered: Number(json.materialsConsidered) || 0,
+        materialsWithoutCurveData: Number(json.materialsWithoutCurveData) || 0,
       };
 
-      // Choose default recommendation for the canvas (primary, else first)
-      let defaultKey: string | null = null;
-      if (result.recommendations.length > 0) {
-        const primary =
-          result.recommendations.find(
-            (r) => r.confidence === "primary",
-          ) ?? result.recommendations[0];
-        defaultKey = primary.key;
-      }
+      // Default the canvas to the top-ranked candidate (best real match).
+      const defaultKey =
+        result.candidates.length > 0 ? result.candidates[0].material_id : null;
 
       setAdvisorResult(result);
       setSelectedRecKey(defaultKey);
@@ -550,82 +591,16 @@ export default function FoamAdvisorPage({
     }
   };
 
-  // Helper: find best catalog matches for a recommendation
-  const findMaterialsForRecommendation = React.useCallback(
-    (rec: AdvisorRecommendation): MaterialOption[] => {
-      if (!materials || materials.length === 0) return [];
-
-      const familyMatches = materials.filter((m) => {
-        if (!m.family || !rec.family) return false;
-        return (
-          m.family.toLowerCase() === rec.family.toLowerCase() &&
-          m.density_lb_ft3 != null
-        );
-      });
-
-      if (familyMatches.length === 0) return [];
-
-      let filtered = familyMatches;
-
-      if (rec.targetDensityMin != null || rec.targetDensityMax != null) {
-        filtered = familyMatches.filter((m) => {
-          const d = m.density_lb_ft3!;
-          if (
-            rec.targetDensityMin != null &&
-            d < rec.targetDensityMin
-          )
-            return false;
-          if (
-            rec.targetDensityMax != null &&
-            d > rec.targetDensityMax
-          )
-            return false;
-          return true;
-        });
-
-        if (filtered.length === 0) {
-          filtered = familyMatches;
-        }
-      }
-
-      const target =
-        rec.targetDensityMin != null &&
-        rec.targetDensityMax != null
-          ? (rec.targetDensityMin + rec.targetDensityMax) / 2
-          : rec.targetDensityMin ?? rec.targetDensityMax ?? null;
-
-      filtered.sort((a, b) => {
-        const da = a.density_lb_ft3 ?? 0;
-        const db = b.density_lb_ft3 ?? 0;
-        if (target == null) return da - db;
-        return Math.abs(da - target) - Math.abs(db - target);
-      });
-
-      return filtered.slice(0, 3);
-    },
-    [materials],
-  );
-
-  // Auto-load a cushion curve for the selected recommendation's best match
+  // Auto-load the cushion curve for the selected candidate material. Unlike
+  // the old stub, `candidates` already ARE real materials queried from
+  // cushion_curves -- no separate family/density matching step needed.
   React.useEffect(() => {
     if (!advisorResult) return;
-    if (!advisorResult.recommendations.length) return;
-    if (!materials.length) return;
+    if (!advisorResult.candidates.length) return;
     if (!selectedRecKey) return;
 
-    const rec = advisorResult.recommendations.find(
-      (r) => r.key === selectedRecKey,
-    );
-    if (!rec) return;
-
-    const matches = findMaterialsForRecommendation(rec);
-    if (!matches || matches.length === 0) return;
-
-    const best = matches[0];
-    if (!best || !best.id) return;
-
     // If we already have this material loaded, do nothing
-    if (curveMaterial && curveMaterial.id === best.id && curvePoints.length) {
+    if (curveMaterial && curveMaterial.id === selectedRecKey && curvePoints.length) {
       return;
     }
 
@@ -637,7 +612,7 @@ export default function FoamAdvisorPage({
       setHoverPoint(null);
 
       try {
-        const res = await fetch(`/api/cushion/curves/${best.id}`, {
+        const res = await fetch(`/api/cushion/curves/${selectedRecKey}`, {
           cache: "no-store",
         });
         const json: CushionCurvesApiResponse = await res.json();
@@ -674,27 +649,17 @@ export default function FoamAdvisorPage({
     return () => {
       cancelled = true;
     };
-  }, [
-    advisorResult,
-    materials,
-    selectedRecKey,
-    findMaterialsForRecommendation,
-    curveMaterial,
-    curvePoints.length,
-  ]);
+  }, [advisorResult, selectedRecKey, curveMaterial, curvePoints.length]);
 
-  // Helper to find the currently selected recommendation
-  const selectedRecommendation: AdvisorRecommendation | null =
-    React.useMemo(() => {
-      if (!advisorResult || !advisorResult.recommendations.length)
-        return null;
-      if (!selectedRecKey) return null;
-      return (
-        advisorResult.recommendations.find(
-          (r) => r.key === selectedRecKey,
-        ) ?? null
-      );
-    }, [advisorResult, selectedRecKey]);
+  // The currently selected candidate (drives the canvas + provenance badge)
+  const selectedCandidate: MaterialCandidate | null = React.useMemo(() => {
+    if (!advisorResult || !advisorResult.candidates.length) return null;
+    if (!selectedRecKey) return null;
+    return (
+      advisorResult.candidates.find((c) => c.material_id === selectedRecKey) ??
+      null
+    );
+  }, [advisorResult, selectedRecKey]);
 
   return (
     <main className="min-h-screen bg-[var(--surface-page)] flex items-stretch py-8 px-4">
@@ -880,35 +845,61 @@ export default function FoamAdvisorPage({
                       </option>
                     </select>
                     <span className="text-[10px] text-[var(--text-faint)]">
-                      Tunes recommendations toward harsher or gentler handling.
+                      Informational for now -- not yet part of the G-level
+                      calculation below.
                     </span>
                   </label>
 
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-[var(--text-secondary)]">
-                      Product fragility
+                      Drop height (in)
                     </span>
-                    <select
-                      value={fragility}
-                      onChange={(e) =>
-                        setFragility(
-                          e.target.value as FragilityOption,
-                        )
-                      }
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={dropHeightIn}
+                      onChange={(e) => {
+                        setDropHeightTouched(true);
+                        setDropHeightIn(e.target.value);
+                      }}
                       className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
-                    >
-                      <option value="very_fragile">
-                        Very fragile electronics / optics
-                      </option>
-                      <option value="moderate">
-                        General industrial components
-                      </option>
-                      <option value="rugged">
-                        Rugged hardware / tooling
-                      </option>
-                    </select>
+                    />
                     <span className="text-[10px] text-[var(--text-faint)]">
-                      Later this maps to g-level bands for curve selection.
+                      {dropHeightTouched
+                        ? "Overriding the standard weight-based suggestion."
+                        : "Suggested from the standard weight-based drop-height table -- edit to override."}
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
+                      Fragility target (max G)
+                    </span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={fragilityGMax}
+                      onChange={(e) => setFragilityGMax(e.target.value)}
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
+                    />
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {DEFAULT_FRAGILITY_TIERS.map((t) => (
+                        <button
+                          key={t.key}
+                          type="button"
+                          onClick={() => setFragilityGMax(String(t.gMax ?? t.gMin))}
+                          className="rounded-full border border-[var(--border)] bg-[var(--surface-page)] px-2 py-0.5 text-[9px] text-[var(--text-secondary)] hover:border-[var(--action-primary)] hover:text-[var(--text-primary)]"
+                          title={`${t.gMin}${t.gMax != null ? `–${t.gMax}` : "+"} G`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-[10px] text-[var(--text-faint)]">
+                      Standard industry fragility tiers. Pick one or enter a
+                      custom max-G value.
                     </span>
                   </label>
                 </div>
@@ -928,12 +919,6 @@ export default function FoamAdvisorPage({
                 {advisorError && (
                   <div className="mt-3 rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
                     {advisorError}
-                  </div>
-                )}
-
-                {materialsError && (
-                  <div className="mt-2 rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-[11px] text-[var(--attention)]">
-                    {materialsError}
                   </div>
                 )}
               </form>
@@ -1056,10 +1041,15 @@ export default function FoamAdvisorPage({
                     {/* Curve loading / error / chart */}
                     <div className="mt-3 flex-1 flex flex-col">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-[11px] font-medium text-[var(--text-primary)]">
-                          {selectedRecommendation
-                            ? `Curve preview: ${selectedRecommendation.label}`
-                            : "Primary curve preview"}
+                        <div className="text-[11px] font-medium text-[var(--text-primary)] flex items-center gap-2">
+                          {selectedCandidate
+                            ? `Curve preview: ${selectedCandidate.name}`
+                            : "Top-ranked curve preview"}
+                          {selectedCandidate?.curve.provenance && (
+                            <ProvenanceBadge
+                              provenance={selectedCandidate.curve.provenance}
+                            />
+                          )}
                         </div>
                         <div className="text-[10px] text-[var(--text-faint)]">
                           Source: public.cushion_curves
@@ -1462,14 +1452,16 @@ export default function FoamAdvisorPage({
                                           </span>{" "}
                                           psi
                                         </div>
-                                        <div>
-                                          <span className="text-sky-300 font-mono">
-                                            {hoverPoint.point.deflect_pct.toFixed(
-                                              1,
-                                            )}
-                                          </span>{" "}
-                                          % defl
-                                        </div>
+                                        {hoverPoint.point.deflect_pct != null && (
+                                          <div>
+                                            <span className="text-sky-300 font-mono">
+                                              {hoverPoint.point.deflect_pct.toFixed(
+                                                1,
+                                              )}
+                                            </span>{" "}
+                                            % defl
+                                          </div>
+                                        )}
                                         <div>
                                           <span className="text-sky-300 font-mono">
                                             {hoverPoint.point.g_level.toFixed(
@@ -1515,13 +1507,21 @@ export default function FoamAdvisorPage({
                                     {" "}
                                     ·{" "}
                                   </span>
-                                  <span className="font-mono text-[var(--text-primary)]">
-                                    {nearestCurvePoint.deflect_pct.toFixed(1)}%
-                                  </span>
-                                  <span className="text-[var(--text-faint)]">
-                                    {" "}
-                                    ·{" "}
-                                  </span>
+                                  {nearestCurvePoint.deflect_pct != null ? (
+                                    <>
+                                      <span className="font-mono text-[var(--text-primary)]">
+                                        {nearestCurvePoint.deflect_pct.toFixed(1)}%
+                                      </span>
+                                      <span className="text-[var(--text-faint)]">
+                                        {" "}
+                                        ·{" "}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-[var(--text-faint)]" title="Not present in the source chart -- see cushion_curves.deflect_note">
+                                      deflection n/a ·{" "}
+                                    </span>
+                                  )}
                                   <span className="font-mono text-[var(--text-primary)]">
                                     {nearestCurvePoint.g_level.toFixed(1)} G
                                   </span>
@@ -1561,9 +1561,19 @@ export default function FoamAdvisorPage({
                       <span className="font-medium">Environment: </span>
                       {advisorResult.environmentLabel}
                     </p>
+                    <p className="mb-1">
+                      <span className="font-medium">Fragility target: </span>
+                      {advisorResult.fragilityGMax}G
+                      {advisorResult.fragilityTier.label
+                        ? ` (${advisorResult.fragilityTier.label})`
+                        : ""}
+                    </p>
                     <p>
-                      <span className="font-medium">Fragility: </span>
-                      {advisorResult.fragilityLabel}
+                      <span className="font-medium">Drop height: </span>
+                      {advisorResult.dropHeightIn}in
+                      {advisorResult.dropHeightSuggested
+                        ? " (suggested from weight)"
+                        : ""}
                     </p>
                     {parsedBlock && (
                       <p className="mt-2 text-[10px] text-[var(--text-faint)]">
@@ -1571,73 +1581,74 @@ export default function FoamAdvisorPage({
                         × {parsedBlock.H}".
                       </p>
                     )}
+                    <p className="mt-2 text-[10px] text-[var(--text-faint)]">
+                      {advisorResult.candidates.length} of{" "}
+                      {advisorResult.materialsConsidered} active materials have
+                      cushion-curve data on file
+                      {advisorResult.materialsWithoutCurveData > 0
+                        ? ` (${advisorResult.materialsWithoutCurveData} skipped -- no curve data)`
+                        : ""}
+                      .
+                    </p>
                   </div>
 
-                  {/* Suggested foam families */}
+                  {/* Ranked real materials, from cushion_curves */}
                   <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-[11px] text-[var(--text-secondary)]">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-medium text-[var(--text-primary)]">
-                        Suggested foam families
+                        Ranked materials
                       </div>
                       <div className="text-[10px] text-[var(--text-faint)]">
-                        Using /api/materials for catalog mapping.
+                        G-level at your operating psi, from tested curves.
                       </div>
                     </div>
 
-                    {advisorResult.recommendations.length === 0 ? (
+                    {advisorResult.candidates.length === 0 ? (
                       <div className="text-[11px] text-[var(--text-secondary)]">
-                        No specific suggestions returned for this combination
-                        yet.
+                        No materials with cushion-curve data matched this
+                        combination.
                       </div>
                     ) : (
-                      advisorResult.recommendations.map((rec) => {
-                        const matchedMaterials =
-                          findMaterialsForRecommendation(rec);
-
-                        const firstMatched =
-                          matchedMaterials.length > 0
-                            ? matchedMaterials[0]
-                            : null;
-
+                      advisorResult.candidates.map((c) => {
                         const isActive =
-                          !!selectedRecKey && selectedRecKey === rec.key;
+                          selectedRecKey != null &&
+                          selectedRecKey === c.material_id;
 
                         return (
                           <div
-                            key={rec.key}
+                            key={c.material_id}
                             className={[
                               "mb-3 last:mb-0 rounded-xl border px-3 py-2 cursor-pointer transition",
                               isActive
                                 ? "border-[var(--action-primary)] bg-[var(--surface-card)] shadow-[0_0_0_1px_var(--action-primary)]"
                                 : "border-[var(--border)] bg-[var(--surface-page)] hover:border-[var(--action-primary)] hover:bg-[var(--surface-subtle)]",
                             ].join(" ")}
-                            onClick={() => setSelectedRecKey(rec.key)}
+                            onClick={() => setSelectedRecKey(c.material_id)}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div>
-                                <div className="font-medium">
-                                  {rec.label}
+                                <div className="font-medium flex items-center gap-1.5">
+                                  {c.name}
+                                  <ProvenanceBadge provenance={c.curve.provenance} />
                                 </div>
                                 <div className="text-[10px] text-[var(--text-muted)]">
-                                  {rec.family}
+                                  {c.material_family ?? "Uncategorized"}
+                                  {c.density_lb_ft3 != null
+                                    ? ` · ${c.density_lb_ft3.toFixed(1)} pcf`
+                                    : ""}
                                 </div>
                               </div>
                               <div className="flex flex-col items-end gap-1">
                                 <span
                                   className={[
                                     "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
-                                    rec.confidence === "primary"
-                                      ? "bg-[var(--action-primary)] border border-[var(--action-primary)] text-white"
-                                      : rec.confidence === "alternative"
+                                    c.meets_fragility_target
                                       ? "bg-[var(--status-success-bg)] border border-[var(--status-success-text)]/30 text-[var(--status-success-text)]"
-                                      : "bg-[var(--status-neutral-bg)] border border-[var(--border-strong)] text-[var(--status-neutral-text)]",
+                                      : "bg-[var(--attention-bg)] border border-[var(--attention-border)] text-[var(--attention)]",
                                   ].join(" ")}
                                 >
-                                  {rec.confidence === "primary"
-                                    ? "Primary pick"
-                                    : rec.confidence === "alternative"
-                                    ? "Alternative"
-                                    : "Stretch option"}
+                                  {c.g_at_operating_psi.toFixed(1)}G
+                                  {c.meets_fragility_target ? " ✓" : " over target"}
                                 </span>
                                 {isActive && (
                                   <span className="inline-flex items-center rounded-full border border-[var(--action-primary)]/50 bg-[var(--surface-subtle)] px-2 py-0.5 text-[9px] font-medium text-[var(--action-primary)]">
@@ -1646,47 +1657,44 @@ export default function FoamAdvisorPage({
                                 )}
                               </div>
                             </div>
+
                             <p className="leading-snug text-[11px] mb-1">
-                              {rec.notes}
+                              At {c.operating_psi.toFixed(3)} psi, this
+                              material's tested curve reads{" "}
+                              {c.g_at_operating_psi.toFixed(1)}G against your{" "}
+                              {advisorResult.fragilityGMax}G target
+                              {c.price_per_bf != null
+                                ? ` · $${c.price_per_bf.toFixed(2)}/bf`
+                                : ""}
+                              .
                             </p>
 
-                            {matchedMaterials.length > 0 && (
-                              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-                                <div className="font-medium text-[10px] text-[var(--text-secondary)] mb-0.5">
-                                  In your catalog:
-                                </div>
-                                <ul className="list-disc list-inside space-y-0.5">
-                                  {matchedMaterials.map((m) => (
-                                    <li key={m.id}>
-                                      {m.name}
-                                      {m.density_lb_ft3 != null
-                                        ? ` · ${m.density_lb_ft3.toFixed(
-                                            1,
-                                          )} pcf`
-                                        : ""}
-                                    </li>
-                                  ))}
-                                </ul>
+                            {c.caveats.length > 0 && (
+                              <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--text-faint)] list-disc list-inside">
+                                {c.caveats.map((note, i) => (
+                                  <li key={i}>{note}</li>
+                                ))}
+                              </ul>
+                            )}
 
-                                {firstMatched && (
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    <a
-                                      href={`/admin/cushion/curves/${firstMatched.id}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center rounded-full border border-[var(--border-strong)] px-3 py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] transition"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      View cushion curve
-                                    </a>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <a
+                                href={`/admin/cushion-curves/${c.material_id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center rounded-full border border-[var(--border-strong)] px-3 py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)] transition"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                View cushion curve
+                              </a>
 
-                                    <button
-                                      type="button"
-                                      className="inline-flex items-center rounded-full border border-[var(--status-success-text)]/30 bg-[var(--status-success-bg)] px-3 py-1 text-[10px] font-medium text-[var(--status-success-text)] hover:bg-[var(--status-success-bg)]/70 transition"
-                                      onClick={(e) => {
+                              <button
+                                type="button"
+                                className="inline-flex items-center rounded-full border border-[var(--status-success-text)]/30 bg-[var(--status-success-bg)] px-3 py-1 text-[10px] font-medium text-[var(--status-success-text)] hover:bg-[var(--status-success-bg)]/70 transition"
+                                onClick={(e) => {
   e.stopPropagation();
 
-  const mid = firstMatched.id;
+  const mid = c.material_id;
 
 // Prefer return_to if present — it contains the full editor seed
 const currentUrl = new URL(window.location.href);
@@ -1721,19 +1729,10 @@ window.location.href = editorUrl.toString();
 
 }}
 
-                                    >
-                                      Use this in layout
-                                    </button>
-                                  </div>
-                                )}
-
-                                {materialsLoading && (
-                                  <div className="mt-1 text-[10px] text-[var(--text-faint)]">
-                                    Loading materials…
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                              >
+                                Use this in layout
+                              </button>
+                            </div>
                           </div>
                         );
                       })
