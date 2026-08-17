@@ -6,23 +6,28 @@
 // (/api/foam-advisor/recommend -> app/lib/cushion/engine.ts) so results are
 // never forked or approximated separately from the verified engine.
 //
-// Simple mode deliberately does NOT ask for the product's contact area
-// (footprint) -- only weight, a plain-language fragility pick, and a
-// plain-language handling pick. Without a real contact area we cannot
-// compute a real static-stress "verify" number (G at your actual operating
-// psi), so Simple mode never shows one. What it DOES show is 100% real:
-// the engine's thickness+bearing-area recommendation only depends on the
-// fragility target and the curve itself, not on the caller's stated area
-// (see computeSafeRange in engine.ts) -- weight only enters afterward, to
-// convert the safe psi range into a real bearing-area range. So Simple mode
-// ranks and displays purely off `recommendation`, and silently sends a fixed
-// placeholder contact area to satisfy the API's required field, without ever
-// surfacing anything derived from that placeholder (g_at_operating_psi,
-// meets_fragility_target, verify caveats, etc. are simply not read).
+// Simple mode asks for product length/width (in plain "how big is it"
+// terms, not "bearing area") alongside weight and the plain-language
+// fragility/handling picks. Length/width are still OPTIONAL, same as
+// Advanced mode -- but once given, they compute a REAL contact area and
+// Simple mode gets the full result: recommended thickness, real static
+// stress, G-at-your-load, meets/fails target. This is the exact same
+// `contactAreaIn2` state Advanced mode uses (shared, not mode-gated), so
+// filling it in in one mode carries into the other.
 //
-// Advanced mode asks for real length/width (like the internal tool) and, once
-// provided, unlocks full verify-mode numbers, real ranking by margin-to-target,
-// and the exact provenance/error-caveat detail the internal tool shows.
+// If length/width are left blank (in either mode), the engine still needs
+// SOME positive contactAreaIn2 to run at all, so a fixed technical
+// placeholder is sent -- but nothing derived from that placeholder
+// (g_at_operating_psi, meets_fragility_target, verify caveats) is ever
+// read or displayed; only the engine's `recommendation` block is shown,
+// which is genuinely area-independent (see computeSafeRange in engine.ts).
+// That fallback only fires when the user has NOT provided real dimensions;
+// it is never used once real length/width are entered.
+//
+// Advanced mode additionally exposes the raw numeric fragility/drop-height
+// inputs, a specific-thickness verify field, provenance badges, and the
+// full error-caveat detail the internal tool shows -- Simple mode stays
+// deliberately lighter on that detail even once it has real area.
 
 import * as React from "react";
 import Link from "next/link";
@@ -162,12 +167,14 @@ function dropHeightForHandling(handlingKey: string, weightLb: number): number {
   return byWeight;
 }
 
-// A fixed technical placeholder ONLY -- the API requires a positive
-// contactAreaIn2 to run, but Simple mode never asks the user for one and
-// never reads/displays anything derived from it (g_at_operating_psi,
-// meets_fragility_target, extrapolation caveats). Only `recommendation` is
-// used from Simple-mode responses, which does not depend on this value.
-const SIMPLE_MODE_PLACEHOLDER_PSI = 0.5;
+// A fixed technical placeholder ONLY, used when the user hasn't (yet)
+// entered length/width in either mode -- the API requires a positive
+// contactAreaIn2 to run, but nothing derived from this placeholder
+// (g_at_operating_psi, meets_fragility_target, extrapolation caveats) is
+// ever read or displayed while it's in use. Only `recommendation` is shown
+// in that case, which does not depend on this value. As soon as real
+// length/width are provided, `hasRealArea` is true and this is never sent.
+const NO_AREA_PLACEHOLDER_PSI = 0.5;
 
 function toPositiveNumber(raw: string): number | null {
   const v = Number(raw);
@@ -224,9 +231,9 @@ function DisclaimerBanner() {
   );
 }
 
-// ── Ranking for Simple mode (recommendation-only, no real area assumed) ───
+// ── Ranking used whenever no real area is known yet (recommendation-only) ─
 
-function rankForSimpleMode(candidates: MaterialCandidate[]): MaterialCandidate[] {
+function rankByRecommendationOnly(candidates: MaterialCandidate[]): MaterialCandidate[] {
   return candidates
     .filter((c) => c.recommendation != null)
     .sort((a, b) => {
@@ -256,9 +263,12 @@ export default function CushionCalculatorPage() {
   // of truth -- see the *Selected memos below)
   const [handlingKey, setHandlingKey] = React.useState<string>("");
 
-  // Advanced-only
+  // Product footprint -- shared across both modes (Simple asks for it in
+  // plain "length x width" terms; Advanced labels it "contact length/width").
   const [lengthIn, setLengthIn] = React.useState<string>("");
   const [widthIn, setWidthIn] = React.useState<string>("");
+
+  // Advanced-only
   const [thicknessIn, setThicknessIn] = React.useState<string>("");
   const [familyFilter, setFamilyFilter] = React.useState<string>("all");
 
@@ -304,7 +314,7 @@ export default function CushionCalculatorPage() {
     if (w == null || g == null) return;
 
     const drop = toPositiveNumber(dropHeightIn) ?? suggestDropHeightIn(w);
-    const area = hasRealArea ? contactAreaIn2! : w / SIMPLE_MODE_PLACEHOLDER_PSI;
+    const area = hasRealArea ? contactAreaIn2! : w / NO_AREA_PLACEHOLDER_PSI;
     const thicknessVal = toPositiveNumber(thicknessIn);
 
     setLoading(true);
@@ -352,12 +362,12 @@ export default function CushionCalculatorPage() {
   };
 
   // Results to actually display: recommend-only ranking when we don't have a
-  // real footprint yet (true for Simple mode, and for Advanced mode before
-  // length/width are filled in); the engine's own real ranking (by margin to
-  // target) once a real area exists.
+  // real footprint yet (either mode, before length/width are filled in); the
+  // engine's own real ranking (by margin to target) once a real area exists
+  // -- in either mode, since length/width are shared state now.
   const displayCandidates = React.useMemo(() => {
     if (!result) return [];
-    let list = hasRealArea ? result.candidates : rankForSimpleMode(result.candidates);
+    let list = hasRealArea ? result.candidates : rankByRecommendationOnly(result.candidates);
     if (mode === "advanced" && familyFilter !== "all") {
       list = list.filter((c) => (c.material_family ?? "Uncategorized") === familyFilter);
     }
@@ -455,6 +465,46 @@ export default function CushionCalculatorPage() {
 
             {mode === "simple" ? (
               <>
+                <div className="mt-5 grid grid-cols-2 gap-4">
+                  <label className="block">
+                    <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">
+                      Product length (in)
+                    </div>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.1"
+                      value={lengthIn}
+                      onChange={(e) => setLengthIn(e.target.value)}
+                      placeholder="e.g. 6"
+                      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)] transition focus:border-[var(--action-primary)]"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">
+                      Product width (in)
+                    </div>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.1"
+                      value={widthIn}
+                      onChange={(e) => setWidthIn(e.target.value)}
+                      placeholder="e.g. 4"
+                      className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)] transition focus:border-[var(--action-primary)]"
+                    />
+                  </label>
+                </div>
+                <p className="mt-1.5 text-xs text-[var(--text-faint)]">
+                  {hasRealArea
+                    ? `The face that'll sit on the foam, roughly ${contactAreaIn2!.toFixed(
+                        1,
+                      )} in² -- this unlocks a real check against your target below.`
+                    : "The face of the product that'll actually sit on the foam -- not the whole box. Optional, but skipping it means we can only suggest a thickness, not confirm it works for your load."}
+                </p>
+
                 <div className="mt-5">
                   <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">
                     How fragile is it?
@@ -699,6 +749,16 @@ export default function CushionCalculatorPage() {
                         {result.fragilityGMax}G
                       </span>{" "}
                       of shock ({result.fragilityTier.label} tier).
+                      {hasRealArea && (
+                        <>
+                          {" "}
+                          At your product's footprint, that's a static load of{" "}
+                          <span className="font-medium text-[var(--text-primary)]">
+                            {result.staticLoadPsi.toFixed(3)} psi
+                          </span>
+                          .
+                        </>
+                      )}
                     </>
                   ) : (
                     <>
@@ -739,8 +799,8 @@ export default function CushionCalculatorPage() {
                   {!hasRealArea && mode === "simple" && (
                     <div className="mt-2 text-xs text-[var(--text-faint)]">
                       Showing minimum-thickness recommendations from real tested/modeled
-                      curve data. Switch to Advanced mode and enter your product's contact
-                      footprint for a full load verification.
+                      curve data. Add your product's length and width above for a full
+                      check against your fragility target.
                     </div>
                   )}
                 </div>
@@ -820,7 +880,7 @@ export default function CushionCalculatorPage() {
                         </div>
                       )}
 
-                      {mode === "advanced" && hasRealArea && !result.requestedThicknessIn && (
+                      {hasRealArea && !result.requestedThicknessIn && (
                         <div className="mt-2 text-xs text-[var(--text-secondary)]">
                           At your stated footprint ({result.staticLoadPsi.toFixed(3)} psi):{" "}
                           <span
