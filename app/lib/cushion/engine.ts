@@ -386,6 +386,83 @@ export function groupByThickness(points: CushionCurveRow[]): ThicknessCurve[] {
   return curves.sort((a, b) => a.thickness_in - b.thickness_in);
 }
 
+/**
+ * Detects when two different `materials` rows are actually the same
+ * underlying vendor curve applied to color/tint SKU variants (e.g. "1.7#
+ * Black" / "1.7# Pink Anti-Static" / "1.7# White" all digitized from the
+ * same PVP polyethylene sheet, since color doesn't change cushioning
+ * performance -- confirmed directly against cushion_curves: identical
+ * `source` document text and identical G-levels at every shared psi point).
+ *
+ * A byte-exact fingerprint over every point was tried first and rejected:
+ * real data-entry gaps exist (e.g. material 233 is missing one tested psi
+ * point that 234/235 both have, despite otherwise identical source text and
+ * numeric values everywhere they DO overlap) that would make it under-merge
+ * genuinely-identical curves.
+ *
+ * A looser "same source text + no conflicting shared points" version was
+ * tried next and ALSO rejected: some vendor spec sheets (e.g. the Amcon PDF)
+ * cover multiple distinct density grades in one document, so the same
+ * `source` string appears on genuinely different curves -- confirmed when
+ * that version incorrectly merged "PU Ether 1030" (1.3 pcf) into the 2.2 pcf
+ * PE family off a single coincidentally-matching point (both happened to
+ * read 72G at 0.25 psi). Density is therefore required to actually be close
+ * (real color variants share it near-exactly; the false-positive case did
+ * not: 1.3 vs 2.2 pcf), and a single matching point is no longer enough --
+ * at least 2 independently-confirmed matching points are required before
+ * two curves are considered the same underlying data.
+ */
+function sameUnderlyingCurveData(
+  a: ThicknessCurve[],
+  b: ThicknessCurve[],
+  densityA: number | null,
+  densityB: number | null,
+): boolean {
+  if (densityA != null && densityB != null && Math.abs(densityA - densityB) > 0.25) return false;
+  if ((densityA == null) !== (densityB == null)) return false;
+
+  const bByThickness = new Map(b.map((tc) => [tc.thickness_in, tc]));
+  let sharedThicknessCount = 0;
+  let matchedPointCount = 0;
+  for (const ca of a) {
+    const cb = bByThickness.get(ca.thickness_in);
+    if (!cb) continue;
+    sharedThicknessCount++;
+    if ((ca.provenance ?? "?") !== (cb.provenance ?? "?")) return false;
+    if ((ca.source ?? "") !== (cb.source ?? "")) return false;
+    const bPsi = new Map(cb.points.map((p) => [p.static_psi, p.g_level]));
+    for (const p of ca.points) {
+      const bg = bPsi.get(p.static_psi);
+      if (bg == null) continue;
+      if (bg !== p.g_level) return false;
+      matchedPointCount++;
+    }
+  }
+  return sharedThicknessCount > 0 && matchedPointCount >= 2;
+}
+
+/** Minimal union-find for grouping materials transitively (A~B, B~C => A~B~C). */
+class DisjointSet {
+  private parent = new Map<number, number>();
+  find(x: number): number {
+    if (!this.parent.has(x)) this.parent.set(x, x);
+    let root = x;
+    while (this.parent.get(root) !== root) root = this.parent.get(root)!;
+    let cur = x;
+    while (this.parent.get(cur) !== root) {
+      const next = this.parent.get(cur)!;
+      this.parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  }
+  union(a: number, b: number): void {
+    const ra = this.find(a);
+    const rb = this.find(b);
+    if (ra !== rb) this.parent.set(ra, rb);
+  }
+}
+
 export type ThicknessSummary = {
   thickness_in: number;
   provenance: Provenance | null;
@@ -393,7 +470,17 @@ export type ThicknessSummary = {
   min_g: number;
   min_tested_psi: number;
   max_tested_psi: number;
-  meets_target: boolean;
+  meets_target: boolean; // does this curve dip at/under target ANYWHERE on it (design-range)
+  // At the caller's actual operating psi (weight / bearing area) -- what
+  // Simple mode's per-thickness pills and Advanced mode's chart both need.
+  // null only if this thickness curve somehow has zero points (shouldn't
+  // happen post-groupByThickness).
+  g_at_operating_psi: number | null;
+  meets_target_at_operating_psi: boolean | null;
+  extrapolated_at_operating_psi: boolean | null;
+  // Raw tested/proxy/modeled points on this curve, for real charting --
+  // never fabricated, straight from cushion_curves.
+  points: { static_psi: number; g_level: number }[];
 };
 
 export type Recommendation = {
@@ -466,6 +553,13 @@ export type MaterialCandidate = {
   };
 
   caveats: string[];
+
+  // Other materials on file whose digitized curve data is identical to this
+  // one's -- color/tint SKU variants of the same density+polymer that share
+  // one underlying vendor curve. This candidate is the deduped
+  // representative; these are folded in rather than shown as separate,
+  // near-identical cards. Empty when this material's curve data is unique.
+  also_available_as: string[];
 };
 
 /**
@@ -574,6 +668,11 @@ export async function recommendMaterials(input: {
   // during this same pass (not a separate guess).
   let bestOptionBeyondConstraint: BestOptionBeyondConstraint | null = null;
 
+  // Each material's grouped thickness curves, kept for the dedup pass after
+  // the loop (see sameUnderlyingCurveData) -- color/tint SKU variants of the
+  // same underlying vendor curve get folded into one representative there.
+  const thicknessCurvesByMaterialId = new Map<number, ThicknessCurve[]>();
+
   for (const mat of materials) {
     const rawPoints = curvesByMaterial.get(mat.id);
     if (!rawPoints || !rawPoints.length) {
@@ -584,18 +683,27 @@ export async function recommendMaterials(input: {
     const thicknessCurves = groupByThickness(rawPoints);
     if (!thicknessCurves.length) continue;
 
+    thicknessCurvesByMaterialId.set(mat.id, thicknessCurves);
+
     const isMultiThickness = thicknessCurves.length > 1;
     const caveats: string[] = [];
 
-    const thicknessOptions: ThicknessSummary[] = thicknessCurves.map((tc) => ({
-      thickness_in: tc.thickness_in,
-      provenance: tc.provenance,
-      point_count: tc.points.length,
-      min_g: Math.min(...tc.points.map((p) => p.g_level)),
-      min_tested_psi: Math.min(...tc.points.map((p) => p.static_psi)),
-      max_tested_psi: Math.max(...tc.points.map((p) => p.static_psi)),
-      meets_target: Math.min(...tc.points.map((p) => p.g_level)) <= input.fragilityGMax,
-    }));
+    const thicknessOptions: ThicknessSummary[] = thicknessCurves.map((tc) => {
+      const opInterp = interpolateG(tc.points, staticPsi);
+      return {
+        thickness_in: tc.thickness_in,
+        provenance: tc.provenance,
+        point_count: tc.points.length,
+        min_g: Math.min(...tc.points.map((p) => p.g_level)),
+        min_tested_psi: Math.min(...tc.points.map((p) => p.static_psi)),
+        max_tested_psi: Math.max(...tc.points.map((p) => p.static_psi)),
+        meets_target: Math.min(...tc.points.map((p) => p.g_level)) <= input.fragilityGMax,
+        g_at_operating_psi: opInterp ? opInterp.g : null,
+        meets_target_at_operating_psi: opInterp ? opInterp.g <= input.fragilityGMax : null,
+        extrapolated_at_operating_psi: opInterp ? opInterp.extrapolated : null,
+        points: tc.points.map((p) => ({ static_psi: p.static_psi, g_level: p.g_level })),
+      };
+    });
 
     // Track the real global best (unconstrained) for the "here's what would
     // work instead" fallback, regardless of which mode we're in below.
@@ -796,27 +904,102 @@ export async function recommendMaterials(input: {
       },
 
       caveats,
+      also_available_as: [],
     });
   }
 
-  // Rank: materials that meet the fragility target first, most-efficient
-  // (closest to target from below) first; materials that don't meet target
-  // sorted by how close they come, worst last.
-  candidates.sort((a, b) => {
+  // Dedup: fold color/tint SKU variants that share the same underlying
+  // curve data (see sameUnderlyingCurveData) into ONE representative
+  // candidate per distinct cushioning profile, so the same underlying curve
+  // doesn't crowd the results under N different names. Pairwise + union-find
+  // rather than a single fingerprint string, so real data-entry gaps (a
+  // variant missing one point another has) don't block a real match. The
+  // representative is the lowest material_id in the group
+  // (stable/deterministic); the others' names are reduced to just their
+  // distinguishing suffix (common leading words stripped -- "1.7# Black" /
+  // "1.7# White" -> "Black" / "White") and surfaced via `also_available_as`.
+  const dsu = new DisjointSet();
+  for (let i = 0; i < candidates.length; i++) {
+    dsu.find(candidates[i].material_id);
+    for (let j = i + 1; j < candidates.length; j++) {
+      const curvesA = thicknessCurvesByMaterialId.get(candidates[i].material_id);
+      const curvesB = thicknessCurvesByMaterialId.get(candidates[j].material_id);
+      if (
+        curvesA &&
+        curvesB &&
+        sameUnderlyingCurveData(curvesA, curvesB, candidates[i].density_lb_ft3, candidates[j].density_lb_ft3)
+      ) {
+        dsu.union(candidates[i].material_id, candidates[j].material_id);
+      }
+    }
+  }
+  const groups = new Map<number, MaterialCandidate[]>();
+  for (const c of candidates) {
+    const key = dsu.find(c.material_id);
+    const list = groups.get(key) ?? [];
+    list.push(c);
+    groups.set(key, list);
+  }
+  const dedupedCandidates: MaterialCandidate[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      dedupedCandidates.push(group[0]);
+      continue;
+    }
+    group.sort((a, b) => a.material_id - b.material_id);
+    const [representative, ...others] = group;
+    const wordLists = group.map((c) => c.name.split(/\s+/));
+    let commonPrefixLen = 0;
+    outer: for (let i = 0; i < wordLists[0].length; i++) {
+      for (const words of wordLists) {
+        if (words.length <= i || words[i] !== wordLists[0][i]) break outer;
+      }
+      commonPrefixLen++;
+    }
+    representative.also_available_as = others
+      .map((c) => {
+        const words = c.name.split(/\s+/);
+        const rest = words.slice(commonPrefixLen).join(" ").trim();
+        return rest.length ? rest : c.name;
+      })
+      .sort((a, b) => a.localeCompare(b));
+    dedupedCandidates.push(representative);
+  }
+
+  // Rank: materials that meet the fragility target first. Among those that
+  // pass, thinnest verified thickness wins (least material for the same
+  // protection), tie-broken by data-confidence tier (tested > modeled >
+  // proxy > unverified -- prefer trustworthy real data over whichever curve
+  // happens to cut closest to the line), then by margin below target
+  // (closest to target from below = least over-engineered). Materials that
+  // don't meet target are sorted by how close they come, worst last.
+  const RANK_TIEBREAK_PROVENANCE: Record<Provenance, number> = {
+    tested: 0,
+    modeled: 1,
+    proxy: 2,
+    unverified: 3,
+  };
+  dedupedCandidates.sort((a, b) => {
     if (a.meets_fragility_target !== b.meets_fragility_target) {
       return a.meets_fragility_target ? -1 : 1;
     }
     if (a.meets_fragility_target) {
+      if (a.verify_thickness_in !== b.verify_thickness_in) {
+        return a.verify_thickness_in - b.verify_thickness_in;
+      }
+      const provA = RANK_TIEBREAK_PROVENANCE[(a.curve.provenance ?? "unverified") as Provenance];
+      const provB = RANK_TIEBREAK_PROVENANCE[(b.curve.provenance ?? "unverified") as Provenance];
+      if (provA !== provB) return provA - provB;
       return a.margin_g - b.margin_g;
     }
     return b.margin_g - a.margin_g;
   });
 
-  const anyMaterialMeetsTarget = candidates.some((c) => c.meets_fragility_target);
+  const anyMaterialMeetsTarget = dedupedCandidates.some((c) => c.meets_fragility_target);
 
   return {
     staticPsi,
-    candidates,
+    candidates: dedupedCandidates,
     materialsConsidered: materials.length,
     materialsWithoutCurveData,
     materialsWithoutRequestedThickness,

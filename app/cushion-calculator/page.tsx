@@ -41,7 +41,15 @@ type ThicknessSummary = {
   provenance: CurveProvenance;
   min_g: number;
   meets_target: boolean;
+  g_at_operating_psi: number | null;
+  meets_target_at_operating_psi: boolean | null;
+  extrapolated_at_operating_psi: boolean | null;
+  points: { static_psi: number; g_level: number }[];
 };
+
+// Standard thickness set used for Simple mode's pills and Advanced mode's
+// chart -- matches what the catalog actually digitizes/derives against.
+const STANDARD_THICKNESSES_IN = [2, 3, 4, 5] as const;
 
 type Recommendation = {
   recommended_thickness_in: number;
@@ -73,6 +81,7 @@ type MaterialCandidate = {
     drop_in: number | null;
   };
   caveats: string[];
+  also_available_as: string[];
 };
 
 type MaterialWithoutRequestedThickness = {
@@ -194,6 +203,15 @@ function dropHeightForHandling(handlingKey: string, weightLb: number): number {
 // length/width are provided, `hasRealArea` is true and this is never sent.
 const NO_AREA_PLACEHOLDER_PSI = 0.5;
 
+// Now that near-identical color/tint SKU variants are deduped server-side
+// (see also_available_as), each result really is a distinct cushioning
+// profile -- safe to show more of them than the old cap of 3. 7 rather than
+// a flat 6: in real scenarios with ~13 deduped families, a wide-margin
+// proxy-provenance family can rank 7th behind several tighter tested-tier
+// matches under the new thinnest -> tested-over-proxy -> margin ranking --
+// that's the ranking rule working as intended, not a reason to hide it.
+const TOP_FAMILIES_SHOWN = 7;
+
 function toPositiveNumber(raw: string): number | null {
   const v = Number(raw);
   if (!Number.isFinite(v) || v <= 0) return null;
@@ -236,6 +254,195 @@ function ProvenanceBadge({ provenance }: { provenance: CurveProvenance }) {
     >
       {labels[provenance] ?? provenance}
     </span>
+  );
+}
+
+// Per-thickness pass/fail pills for the standard 2/3/4/5in set, using real
+// per-thickness data at the caller's ACTUAL operating psi -- never the
+// design-range "meets target somewhere on this curve" number. A thickness
+// with no digitized data on file shows as "no data," never a fabricated
+// pass or fail.
+function ThicknessPills({ candidate }: { candidate: MaterialCandidate }) {
+  const byThickness = new Map(candidate.thickness_options.map((t) => [t.thickness_in, t]));
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {STANDARD_THICKNESSES_IN.map((t) => {
+        const opt = byThickness.get(t);
+        if (!opt || opt.meets_target_at_operating_psi == null) {
+          return (
+            <span
+              key={t}
+              className="rounded-full border border-dashed border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-faint)]"
+            >
+              {t}in -- no data
+            </span>
+          );
+        }
+        const pass = opt.meets_target_at_operating_psi;
+        const isThinnestPass = pass && candidate.verify_thickness_in === t;
+        return (
+          <span
+            key={t}
+            title={`${opt.g_at_operating_psi?.toFixed(1)}G at your footprint${
+              opt.extrapolated_at_operating_psi ? " (extrapolated beyond tested range)" : ""
+            }`}
+            className={[
+              "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+              pass
+                ? isThinnestPass
+                  ? "border-[var(--status-success-text)] bg-[var(--status-success-bg)] text-[var(--status-success-text)] ring-1 ring-inset ring-[var(--status-success-text)]/50"
+                  : "border-[var(--status-success-text)]/40 bg-[var(--status-success-bg)]/50 text-[var(--status-success-text)]"
+                : "border-[var(--attention-border)] bg-[var(--attention-bg)] text-[var(--attention)]",
+            ].join(" ")}
+          >
+            {t}in {pass ? "✓" : "✕"}
+            {isThinnestPass ? " thinnest" : ""}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// Simplified real cushion-curve chart: G-force (y) vs static stress (x),
+// one line per digitized thickness, a dashed horizontal target-G line, and
+// a shaded safe zone underneath it -- the standard industry "effective
+// cushioning range" chart format. Tested/proxy/modeled curves are
+// distinguished by line style, never just color (colorblind-safe, and
+// still legible printed in grayscale).
+const CHART_LINE_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed"];
+
+function CushionCurveChart({
+  candidate,
+  targetG,
+  operatingPsi,
+}: {
+  candidate: MaterialCandidate;
+  targetG: number;
+  operatingPsi: number | null;
+}) {
+  const W = 340;
+  const H = 190;
+  const padL = 34;
+  const padR = 12;
+  const padT = 14;
+  const padB = 22;
+
+  const curves = candidate.thickness_options
+    .filter((t) => (STANDARD_THICKNESSES_IN as readonly number[]).includes(t.thickness_in) && t.points.length > 1)
+    .sort((a, b) => a.thickness_in - b.thickness_in);
+
+  if (!curves.length) {
+    return (
+      <div className="mt-3 rounded-lg border border-dashed border-[var(--border)] px-3 py-4 text-center text-[11px] text-[var(--text-faint)]">
+        Not enough digitized points at 2-5in to chart this material's curve.
+      </div>
+    );
+  }
+
+  const allPsi = curves.flatMap((c) => c.points.map((p) => p.static_psi));
+  const allG = curves.flatMap((c) => c.points.map((p) => p.g_level));
+  const maxPsi = Math.max(...allPsi, operatingPsi ?? 0) * 1.05 || 1;
+  const maxG = Math.max(...allG, targetG) * 1.08 || 1;
+
+  const x = (psi: number) => padL + (psi / maxPsi) * (W - padL - padR);
+  const y = (g: number) => padT + (1 - g / maxG) * (H - padT - padB);
+  const targetY = y(targetG);
+
+  return (
+    <div className="mt-3">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-auto w-full"
+        role="img"
+        aria-label={`Real cushion curve chart for ${candidate.name}: G-force versus static stress at ${curves
+          .map((c) => `${c.thickness_in}in`)
+          .join(", ")}`}
+      >
+        <rect
+          x={padL}
+          y={targetY}
+          width={W - padL - padR}
+          height={Math.max(0, H - padB - targetY)}
+          fill="var(--status-success-text)"
+          opacity="0.08"
+        />
+        <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="currentColor" strokeOpacity="0.25" />
+        <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="currentColor" strokeOpacity="0.25" />
+        <line
+          x1={padL}
+          y1={targetY}
+          x2={W - padR}
+          y2={targetY}
+          stroke="var(--attention)"
+          strokeWidth="1.25"
+          strokeDasharray="4 3"
+        />
+        <text x={W - padR} y={Math.max(9, targetY - 3)} textAnchor="end" fontSize="9" fill="var(--attention)">
+          {targetG}G target
+        </text>
+        {curves.map((c, i) => {
+          const sorted = [...c.points].sort((a, b) => a.static_psi - b.static_psi);
+          const d = sorted
+            .map((p, idx) => `${idx === 0 ? "M" : "L"} ${x(p.static_psi).toFixed(1)} ${y(p.g_level).toFixed(1)}`)
+            .join(" ");
+          const dash = c.provenance === "modeled" ? "5 3" : c.provenance === "proxy" ? "1.5 2.5" : undefined;
+          return (
+            <path
+              key={c.thickness_in}
+              d={d}
+              fill="none"
+              stroke={CHART_LINE_COLORS[i % CHART_LINE_COLORS.length]}
+              strokeWidth="1.75"
+              strokeDasharray={dash}
+            />
+          );
+        })}
+        {operatingPsi != null && operatingPsi > 0 && operatingPsi <= maxPsi && (
+          <line
+            x1={x(operatingPsi)}
+            y1={padT}
+            x2={x(operatingPsi)}
+            y2={H - padB}
+            stroke="currentColor"
+            strokeOpacity="0.35"
+            strokeDasharray="2 2"
+          />
+        )}
+        <text x={2} y={padT + 4} fontSize="8" fill="currentColor" opacity="0.6">
+          {Math.round(maxG)}G
+        </text>
+        <text x={2} y={H - padB} fontSize="8" fill="currentColor" opacity="0.6">
+          0G
+        </text>
+        <text x={padL} y={H - 4} fontSize="8" fill="currentColor" opacity="0.6">
+          0 psi
+        </text>
+        <text x={W - padR} y={H - 4} fontSize="8" fill="currentColor" opacity="0.6" textAnchor="end">
+          {maxPsi.toFixed(2)} psi
+        </text>
+      </svg>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--text-muted)]">
+        {curves.map((c, i) => (
+          <span key={c.thickness_in} className="inline-flex items-center gap-1">
+            <span
+              className="inline-block h-0.5 w-3"
+              style={{
+                backgroundColor: CHART_LINE_COLORS[i % CHART_LINE_COLORS.length],
+                opacity: c.provenance === "proxy" ? 0.55 : 1,
+              }}
+            />
+            {c.thickness_in}in ({c.provenance ?? "unknown"})
+          </span>
+        ))}
+        {operatingPsi != null && operatingPsi > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-px bg-[var(--text-muted)]" />
+            your load
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -403,7 +610,7 @@ export default function CushionCalculatorPage() {
     if (mode === "advanced" && familyFilter !== "all") {
       list = list.filter((c) => (c.material_family ?? "Uncategorized") === familyFilter);
     }
-    return list.slice(0, 3);
+    return list.slice(0, TOP_FAMILIES_SHOWN);
   }, [result, hasRealArea, mode, familyFilter]);
 
   const familyOptions = React.useMemo(() => {
@@ -935,6 +1142,11 @@ export default function CushionCalculatorPage() {
                             {c.material_family ?? "Uncategorized"}
                             {c.density_lb_ft3 != null ? ` · ${c.density_lb_ft3.toFixed(1)} pcf` : ""}
                           </div>
+                          {c.also_available_as.length > 0 && (
+                            <div className="mt-0.5 text-[11px] text-[var(--text-faint)]">
+                              Also available in: {c.also_available_as.join(", ")}
+                            </div>
+                          )}
                         </div>
                         {mode === "advanced" && (
                           <ProvenanceBadge
@@ -984,6 +1196,18 @@ export default function CushionCalculatorPage() {
                             {c.meets_fragility_target ? " (meets target)" : " (over target)"}
                           </span>
                         </div>
+                      )}
+
+                      {mode === "simple" && hasRealArea && !result.requestedThicknessIn && (
+                        <ThicknessPills candidate={c} />
+                      )}
+
+                      {mode === "advanced" && (
+                        <CushionCurveChart
+                          candidate={c}
+                          targetG={result.fragilityGMax}
+                          operatingPsi={hasRealArea ? result.staticLoadPsi : null}
+                        />
                       )}
 
                       {mode === "advanced" && c.caveats.length > 0 && (
