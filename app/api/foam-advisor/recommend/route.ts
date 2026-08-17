@@ -43,6 +43,17 @@ export async function POST(req: Request) {
     thicknessInRaw != null && thicknessInRaw !== "" && Number.isFinite(Number(thicknessInRaw)) && Number(thicknessInRaw) > 0
       ? Number(thicknessInRaw)
       : null;
+  // Optional: "how much room do you have" -- a hard ceiling on thickness for
+  // the recommend/verify search. Mutually exclusive with requestedThicknessIn
+  // (the engine ignores this when a specific thickness is being verified).
+  const maxThicknessInRaw = body.maxThicknessIn;
+  const maxThicknessIn =
+    maxThicknessInRaw != null &&
+    maxThicknessInRaw !== "" &&
+    Number.isFinite(Number(maxThicknessInRaw)) &&
+    Number(maxThicknessInRaw) > 0
+      ? Number(maxThicknessInRaw)
+      : null;
 
   if (!Number.isFinite(weightLb) || weightLb <= 0) {
     return NextResponse.json(
@@ -87,12 +98,16 @@ export async function POST(req: Request) {
       materialsConsidered,
       materialsWithoutCurveData,
       materialsWithoutRequestedThickness,
+      materialsExcludedByThicknessConstraint,
+      anyMaterialMeetsTarget,
+      bestOptionBeyondConstraint,
     } = await recommendMaterials({
       weightLb,
       contactAreaIn2,
       fragilityGMax,
       dropHeightIn,
       requestedThicknessIn,
+      maxThicknessIn,
     });
 
     const response = {
@@ -108,10 +123,14 @@ export async function POST(req: Request) {
       dropHeightIn,
       dropHeightSuggested: !Number.isFinite(dropHeightInRaw) || dropHeightInRaw <= 0,
       requestedThicknessIn,
+      maxThicknessIn,
       candidates,
       materialsConsidered,
       materialsWithoutCurveData,
       materialsWithoutRequestedThickness,
+      materialsExcludedByThicknessConstraint,
+      anyMaterialMeetsTarget,
+      bestOptionBeyondConstraint,
       reference: {
         fragilityTiers: FRAGILITY_TIERS,
         dropHeightTable: DROP_HEIGHT_TABLE,

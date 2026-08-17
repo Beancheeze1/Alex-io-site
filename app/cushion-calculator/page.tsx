@@ -82,14 +82,32 @@ type MaterialWithoutRequestedThickness = {
   available_thicknesses: number[];
 };
 
+type MaterialExcludedByThicknessConstraint = {
+  material_id: number;
+  name: string;
+  material_family: string | null;
+  thinnest_available_in: number;
+};
+
+type BestOptionBeyondConstraint = {
+  material_id: number;
+  name: string;
+  thickness_in: number;
+  g_at_operating_psi: number;
+};
+
 type ApiResult = {
   staticLoadPsi: number;
   fragilityGMax: number;
   fragilityTier: { key: string; label: string };
   dropHeightIn: number;
   requestedThicknessIn: number | null;
+  maxThicknessIn: number | null;
   candidates: MaterialCandidate[];
   materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[];
+  materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[];
+  anyMaterialMeetsTarget: boolean;
+  bestOptionBeyondConstraint: BestOptionBeyondConstraint | null;
 };
 
 // ── Plain-language mappings -> real engine inputs ──────────────────────────
@@ -268,6 +286,12 @@ export default function CushionCalculatorPage() {
   const [lengthIn, setLengthIn] = React.useState<string>("");
   const [widthIn, setWidthIn] = React.useState<string>("");
 
+  // Simple-mode "how much room do you have" hard thickness ceiling. Kept as
+  // shared state (like length/width) so it survives a mode toggle, but only
+  // sent to the API in Simple mode -- Advanced mode has its own, different
+  // "verify a specific thickness" field below.
+  const [maxThicknessIn, setMaxThicknessIn] = React.useState<string>("");
+
   // Advanced-only
   const [thicknessIn, setThicknessIn] = React.useState<string>("");
   const [familyFilter, setFamilyFilter] = React.useState<string>("all");
@@ -316,6 +340,7 @@ export default function CushionCalculatorPage() {
     const drop = toPositiveNumber(dropHeightIn) ?? suggestDropHeightIn(w);
     const area = hasRealArea ? contactAreaIn2! : w / NO_AREA_PLACEHOLDER_PSI;
     const thicknessVal = toPositiveNumber(thicknessIn);
+    const maxThicknessVal = mode === "simple" ? toPositiveNumber(maxThicknessIn) : null;
 
     setLoading(true);
     setError(null);
@@ -329,6 +354,7 @@ export default function CushionCalculatorPage() {
           fragilityGMax: g,
           dropHeightIn: drop,
           thicknessIn: thicknessVal ?? undefined,
+          maxThicknessIn: maxThicknessVal ?? undefined,
         }),
       });
       const json = await res.json();
@@ -343,10 +369,16 @@ export default function CushionCalculatorPage() {
         fragilityTier: json.fragilityTier,
         dropHeightIn: json.dropHeightIn,
         requestedThicknessIn: json.requestedThicknessIn ?? null,
+        maxThicknessIn: json.maxThicknessIn ?? null,
         candidates: Array.isArray(json.candidates) ? json.candidates : [],
         materialsWithoutRequestedThickness: Array.isArray(json.materialsWithoutRequestedThickness)
           ? json.materialsWithoutRequestedThickness
           : [],
+        materialsExcludedByThicknessConstraint: Array.isArray(json.materialsExcludedByThicknessConstraint)
+          ? json.materialsExcludedByThicknessConstraint
+          : [],
+        anyMaterialMeetsTarget: json.anyMaterialMeetsTarget !== false,
+        bestOptionBeyondConstraint: json.bestOptionBeyondConstraint ?? null,
       });
     } catch {
       setError("Something went wrong reaching the calculator. Please try again.");
@@ -354,7 +386,7 @@ export default function CushionCalculatorPage() {
     } finally {
       setLoading(false);
     }
-  }, [weightLb, fragilityGMax, dropHeightIn, hasRealArea, contactAreaIn2, thicknessIn]);
+  }, [weightLb, fragilityGMax, dropHeightIn, hasRealArea, contactAreaIn2, thicknessIn, mode, maxThicknessIn]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -504,6 +536,27 @@ export default function CushionCalculatorPage() {
                       )} in² -- this unlocks a real check against your target below.`
                     : "The face of the product that'll actually sit on the foam -- not the whole box. Optional, but skipping it means we can only suggest a thickness, not confirm it works for your load."}
                 </p>
+
+                <label className="mt-5 block">
+                  <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">
+                    How much room do you have? (in) -- optional
+                  </div>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.5"
+                    value={maxThicknessIn}
+                    onChange={(e) => setMaxThicknessIn(e.target.value)}
+                    placeholder="Leave blank for the thinnest option that works"
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)] transition focus:border-[var(--action-primary)]"
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--text-faint)]">
+                    {maxThicknessIn.trim()
+                      ? `We'll only suggest materials that protect your product at or under ${maxThicknessIn}in.`
+                      : "Max cushion thickness your box or product allows. Leave blank and we'll just find the thinnest option that works."}
+                  </p>
+                </label>
 
                 <div className="mt-5">
                   <div className="mb-2 text-sm font-medium text-[var(--text-secondary)]">
@@ -804,6 +857,43 @@ export default function CushionCalculatorPage() {
                     </div>
                   )}
                 </div>
+
+                {hasRealArea && result.requestedThicknessIn == null && !result.anyMaterialMeetsTarget && (
+                  <div className="rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-5 py-4 text-sm text-[var(--attention)]">
+                    {result.maxThicknessIn != null && result.bestOptionBeyondConstraint ? (
+                      <>
+                        <div className="font-medium">
+                          Nothing fits your {result.maxThicknessIn}in limit at this fragility
+                          level.
+                        </div>
+                        <p className="mt-1 text-xs">
+                          The thinnest option that meets your {result.fragilityGMax}G target is{" "}
+                          <span className="font-medium">
+                            {result.bestOptionBeyondConstraint.thickness_in}in
+                          </span>{" "}
+                          of <span className="font-medium">{result.bestOptionBeyondConstraint.name}</span>{" "}
+                          ({result.bestOptionBeyondConstraint.g_at_operating_psi.toFixed(1)}G at your
+                          footprint).
+                        </p>
+                      </>
+                    ) : (
+                      <div className="font-medium">
+                        No material on file meets this target at your footprint -- consider
+                        increasing contact area or reducing thickness constraints.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {result.maxThicknessIn != null &&
+                  result.materialsExcludedByThicknessConstraint.length > 0 && (
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] px-5 py-4 text-xs text-[var(--text-secondary)]">
+                      {result.materialsExcludedByThicknessConstraint.length} material
+                      {result.materialsExcludedByThicknessConstraint.length === 1 ? "" : "s"} left out
+                      because {result.materialsExcludedByThicknessConstraint.length === 1 ? "its" : "their"}{" "}
+                      thinnest option on file doesn't fit your {result.maxThicknessIn}in limit.
+                    </div>
+                  )}
 
                 {result.requestedThicknessIn != null &&
                   result.materialsWithoutRequestedThickness.length > 0 && (

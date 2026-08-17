@@ -294,6 +294,48 @@ export function computeSafeRange(
   return { low, high, loBoundedByData, hiBoundedByData };
 }
 
+/**
+ * The core "does this actually work for MY load" search. Given a material's
+ * thickness curves and the caller's REAL operating psi (weight / bearing
+ * area), searches ALL of them -- not just whichever thickness a design-range
+ * search (computeSafeRange) happened to pick first -- and returns the
+ * thinnest thickness that actually meets targetG AT THAT OPERATING POINT.
+ *
+ * This exists because a thickness can have a safe psi RANGE somewhere on its
+ * curve (good for SOME footprint) without that range covering the caller's
+ * ACTUAL stated footprint -- U-shaped curves mean both too-light and
+ * too-heavy loading raise G. Picking "the thinnest thickness with any safe
+ * range at all" and then reporting pass/fail at a possibly-unrelated psi is
+ * exactly the bug this function fixes: it can silently rank a failing result
+ * above a thickness that would have genuinely passed at this operating psi.
+ *
+ * Falls back to the thickness with the lowest G at the operating psi (closest
+ * to passing) if none actually pass -- never fabricates a pass.
+ */
+export function findBestVerifyMatch(
+  thicknessCurves: ThicknessCurve[],
+  operatingPsi: number,
+  targetG: number,
+): { curve: ThicknessCurve; interp: NonNullable<ReturnType<typeof interpolateG>>; passes: boolean } | null {
+  const evaluated: { curve: ThicknessCurve; interp: NonNullable<ReturnType<typeof interpolateG>> }[] = [];
+  for (const tc of thicknessCurves) {
+    const interp = interpolateG(tc.points, operatingPsi);
+    if (interp) evaluated.push({ curve: tc, interp });
+  }
+  if (!evaluated.length) return null;
+
+  const passing = evaluated.filter((e) => e.interp.g <= targetG);
+  if (passing.length) {
+    // Thinnest passing thickness -- least material for the same protection.
+    passing.sort((a, b) => a.curve.thickness_in - b.curve.thickness_in);
+    return { ...passing[0], passes: true };
+  }
+
+  // Nothing passes: report the closest miss (lowest G), not an arbitrary one.
+  evaluated.sort((a, b) => a.interp.g - b.interp.g);
+  return { ...evaluated[0], passes: false };
+}
+
 export type ThicknessCurve = {
   thickness_in: number;
   provenance: Provenance | null;
@@ -371,6 +413,20 @@ export type MaterialWithoutRequestedThickness = {
   available_thicknesses: number[];
 };
 
+export type MaterialExcludedByThicknessConstraint = {
+  material_id: number;
+  name: string;
+  material_family: string | null;
+  thinnest_available_in: number;
+};
+
+export type BestOptionBeyondConstraint = {
+  material_id: number;
+  name: string;
+  thickness_in: number;
+  g_at_operating_psi: number;
+};
+
 export type MaterialCandidate = {
   material_id: number;
   name: string;
@@ -413,25 +469,40 @@ export type MaterialCandidate = {
 };
 
 /**
- * Query every material that has cushion-curve coverage. Two request shapes:
+ * Query every material that has cushion-curve coverage. Three request shapes:
  *
- *  - `requestedThicknessIn` omitted/null (the form's thickness field left
- *    blank): RECOMMEND mode -- find a real minimum-thickness +
- *    bearing-area recommendation when multiple digitized thicknesses exist,
- *    else verify the G-level at the caller's stated operating point on the
- *    one thickness on file.
+ *  - `requestedThicknessIn` omitted/null, `maxThicknessIn` omitted/null:
+ *    RECOMMEND/VERIFY mode -- for EACH material, search ALL of its digitized
+ *    thicknesses (via findBestVerifyMatch) for the thinnest one that
+ *    actually meets fragilityGMax AT THE CALLER'S REAL OPERATING PSI, not
+ *    just whichever thickness a design-range search happened to pick first.
+ *    This is what makes "meets_fragility_target" and ranking trustworthy --
+ *    a failing result can never outrank a passing one, and a passing option
+ *    is never missed just because a different thickness of the same
+ *    material was checked instead. `recommendation` (the safe psi RANGE +
+ *    bearing-area block) is a SEPARATE, complementary design-oriented
+ *    search over the same thickness, kept for "what footprint would this
+ *    thickness support" context -- it never substitutes for the verify
+ *    result used in ranking.
  *
- *  - `requestedThicknessIn` given (the user typed a specific under-cushion
- *    thickness): VERIFY-AT-THICKNESS mode -- for each material, look for a
- *    curve at EXACTLY that thickness (tested/proxy/modeled/unverified,
- *    whichever ranks best) and report G there. No recommendation is
- *    computed in this mode -- we're checking the user's stated thickness,
- *    not proposing a different one. A material with no curve at that exact
- *    thickness is NOT given a fabricated answer by interpolating across
- *    thicknesses (a materially different, unvalidated technique from the
- *    within-curve psi interpolation this engine already does) -- it's
- *    instead listed in `materialsWithoutRequestedThickness` along with
- *    which thicknesses ARE actually on file for it.
+ *  - `maxThicknessIn` given (no requestedThicknessIn): same search, but
+ *    restricted to thicknesses at or under the caller's stated limit ("how
+ *    much room do you have"). A material with NO digitized thickness at or
+ *    under the limit is excluded entirely and listed in
+ *    `materialsExcludedByThicknessConstraint`. If nothing within the limit
+ *    passes anywhere in the result set, `bestOptionBeyondConstraint` reports
+ *    the real thinnest thickness (unconstrained) that WOULD pass, so the
+ *    caller can say what it would take rather than just "nothing works."
+ *
+ *  - `requestedThicknessIn` given: VERIFY-AT-THICKNESS mode, UNCHANGED from
+ *    before -- for each material, look for a curve at EXACTLY that
+ *    thickness and report G there. No recommendation, no thickness search;
+ *    `maxThicknessIn` is ignored in this mode (the two are mutually
+ *    exclusive: verifying one exact thickness vs. searching under a
+ *    ceiling). A material with no curve at that exact thickness is NOT
+ *    given a fabricated answer by interpolating across thicknesses -- it's
+ *    listed in `materialsWithoutRequestedThickness` along with which
+ *    thicknesses ARE actually on file for it.
  */
 export async function recommendMaterials(input: {
   weightLb: number;
@@ -439,12 +510,16 @@ export async function recommendMaterials(input: {
   fragilityGMax: number;
   dropHeightIn: number;
   requestedThicknessIn?: number | null;
+  maxThicknessIn?: number | null;
 }): Promise<{
   staticPsi: number;
   candidates: MaterialCandidate[];
   materialsConsidered: number;
   materialsWithoutCurveData: number;
   materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[];
+  materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[];
+  anyMaterialMeetsTarget: boolean;
+  bestOptionBeyondConstraint: BestOptionBeyondConstraint | null;
 }> {
   const staticPsi = input.weightLb / input.contactAreaIn2;
 
@@ -478,10 +553,26 @@ export async function recommendMaterials(input: {
   const candidates: MaterialCandidate[] = [];
   let materialsWithoutCurveData = 0;
   const materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[] = [];
+  const materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[] = [];
   const requestedThicknessIn =
     input.requestedThicknessIn != null && Number.isFinite(input.requestedThicknessIn)
       ? input.requestedThicknessIn
       : null;
+  // Ignored when requestedThicknessIn is set -- verifying one exact
+  // thickness and constraining to a maximum are mutually exclusive asks.
+  const maxThicknessIn =
+    requestedThicknessIn == null &&
+    input.maxThicknessIn != null &&
+    Number.isFinite(input.maxThicknessIn) &&
+    input.maxThicknessIn > 0
+      ? input.maxThicknessIn
+      : null;
+
+  // Tracks the real thinnest passing thickness across the WHOLE catalog,
+  // ignoring maxThicknessIn -- used only to answer "nothing fits your
+  // limit, but here's what would work" honestly, from data actually found
+  // during this same pass (not a separate guess).
+  let bestOptionBeyondConstraint: BestOptionBeyondConstraint | null = null;
 
   for (const mat of materials) {
     const rawPoints = curvesByMaterial.get(mat.id);
@@ -506,8 +597,28 @@ export async function recommendMaterials(input: {
       meets_target: Math.min(...tc.points.map((p) => p.g_level)) <= input.fragilityGMax,
     }));
 
+    // Track the real global best (unconstrained) for the "here's what would
+    // work instead" fallback, regardless of which mode we're in below.
+    if (requestedThicknessIn == null) {
+      const unconstrainedMatch = findBestVerifyMatch(thicknessCurves, staticPsi, input.fragilityGMax);
+      if (
+        unconstrainedMatch &&
+        unconstrainedMatch.passes &&
+        (bestOptionBeyondConstraint == null ||
+          unconstrainedMatch.curve.thickness_in < bestOptionBeyondConstraint.thickness_in)
+      ) {
+        bestOptionBeyondConstraint = {
+          material_id: mat.id,
+          name: mat.name,
+          thickness_in: unconstrainedMatch.curve.thickness_in,
+          g_at_operating_psi: unconstrainedMatch.interp.g,
+        };
+      }
+    }
+
     let recommendation: Recommendation | null = null;
     let verifyCurve: ThicknessCurve;
+    let interp: NonNullable<ReturnType<typeof interpolateG>>;
 
     if (requestedThicknessIn != null) {
       // VERIFY-AT-THICKNESS: exact match only. No cross-thickness
@@ -526,55 +637,94 @@ export async function recommendMaterials(input: {
         continue;
       }
       verifyCurve = match;
-    } else if (isMultiThickness) {
-      // RECOMMEND: find the thinnest thickness whose curve dips at/under target.
-      for (const tc of thicknessCurves) {
-        const range = computeSafeRange(tc.points, input.fragilityGMax);
-        if (range) {
-          recommendation = {
-            recommended_thickness_in: tc.thickness_in,
-            provenance: tc.provenance,
-            safe_static_loading_range_psi: { low: range.low, high: range.high },
-            recommended_bearing_area_in2: input.weightLb / range.high,
-            conservative_bearing_area_in2: input.weightLb / range.low,
-            low_bound_extends_beyond_tested_data: range.loBoundedByData,
-            high_bound_extends_beyond_tested_data: range.hiBoundedByData,
-          };
-          break; // thinnest qualifying thickness wins
-        }
-      }
-      if (!recommendation) {
-        const maxThickness = thicknessCurves[thicknessCurves.length - 1].thickness_in;
-        caveats.push(
-          `None of the tested thicknesses on file (up to ${maxThickness}in) bring G at or under your ${input.fragilityGMax}G target at any tested static load.`,
-        );
-      } else {
-        if (recommendation.low_bound_extends_beyond_tested_data) {
-          caveats.push(
-            `The safe loading range's low end (${recommendation.safe_static_loading_range_psi.low.toFixed(
-              3,
-            )} psi) is the first tested point, not a curve boundary -- the true safe range may extend lower.`,
-          );
-        }
-        if (recommendation.high_bound_extends_beyond_tested_data) {
-          caveats.push(
-            `The safe loading range's high end (${recommendation.safe_static_loading_range_psi.high.toFixed(
-              3,
-            )} psi) is the last tested point, not a curve boundary -- the true safe range may extend higher.`,
-          );
-        }
-      }
-      // Curve used for the "verify at your actual footprint" numbers: the
-      // recommended thickness if we found one, else the thinnest on file.
-      verifyCurve = recommendation
-        ? thicknessCurves.find((tc) => tc.thickness_in === recommendation!.recommended_thickness_in)!
-        : thicknessCurves[0];
+      const directInterp = interpolateG(verifyCurve.points, staticPsi);
+      if (!directInterp) continue;
+      interp = directInterp;
     } else {
-      verifyCurve = thicknessCurves[0];
-    }
+      // RECOMMEND/VERIFY: restrict to thicknesses at/under the caller's
+      // stated room, if any. A material with nothing in range can't offer
+      // anything here at all.
+      const eligibleCurves =
+        maxThicknessIn != null
+          ? thicknessCurves.filter((tc) => tc.thickness_in <= maxThicknessIn)
+          : thicknessCurves;
 
-    const interp = interpolateG(verifyCurve.points, staticPsi);
-    if (!interp) continue;
+      if (maxThicknessIn != null && eligibleCurves.length === 0) {
+        materialsExcludedByThicknessConstraint.push({
+          material_id: mat.id,
+          name: mat.name,
+          material_family: mat.material_family,
+          thinnest_available_in: thicknessCurves[0].thickness_in,
+        });
+        continue;
+      }
+
+      // Design-range block: thinnest eligible thickness whose curve dips
+      // at/under target ANYWHERE on its own tested range (independent of
+      // this caller's specific operating psi -- "what footprint would this
+      // thickness support"). Complementary info only; never used for
+      // ranking or pass/fail below.
+      if (isMultiThickness) {
+        for (const tc of eligibleCurves) {
+          const range = computeSafeRange(tc.points, input.fragilityGMax);
+          if (range) {
+            recommendation = {
+              recommended_thickness_in: tc.thickness_in,
+              provenance: tc.provenance,
+              safe_static_loading_range_psi: { low: range.low, high: range.high },
+              recommended_bearing_area_in2: input.weightLb / range.high,
+              conservative_bearing_area_in2: input.weightLb / range.low,
+              low_bound_extends_beyond_tested_data: range.loBoundedByData,
+              high_bound_extends_beyond_tested_data: range.hiBoundedByData,
+            };
+            break; // thinnest qualifying eligible thickness wins
+          }
+        }
+        if (!recommendation) {
+          const maxAvailable = eligibleCurves[eligibleCurves.length - 1].thickness_in;
+          caveats.push(
+            maxThicknessIn != null
+              ? `None of the thicknesses at or under your ${maxThicknessIn}in limit (up to ${maxAvailable}in) bring G at or under your ${input.fragilityGMax}G target at any tested static load.`
+              : `None of the tested thicknesses on file (up to ${maxAvailable}in) bring G at or under your ${input.fragilityGMax}G target at any tested static load.`,
+          );
+        } else {
+          if (recommendation.low_bound_extends_beyond_tested_data) {
+            caveats.push(
+              `The safe loading range's low end (${recommendation.safe_static_loading_range_psi.low.toFixed(
+                3,
+              )} psi) is the first tested point, not a curve boundary -- the true safe range may extend lower.`,
+            );
+          }
+          if (recommendation.high_bound_extends_beyond_tested_data) {
+            caveats.push(
+              `The safe loading range's high end (${recommendation.safe_static_loading_range_psi.high.toFixed(
+                3,
+              )} psi) is the last tested point, not a curve boundary -- the true safe range may extend higher.`,
+            );
+          }
+        }
+        if (maxThicknessIn != null && eligibleCurves.length < thicknessCurves.length) {
+          caveats.push(
+            `Only ${eligibleCurves
+              .map((tc) => `${tc.thickness_in}in`)
+              .join(", ")} fit${eligibleCurves.length === 1 ? "s" : ""} at or under your ${maxThicknessIn}in limit for this material (it also has thicker options on file that don't fit).`,
+          );
+        }
+      }
+
+      // THE ACTUAL FIX: search every eligible thickness for the thinnest one
+      // that really passes AT THIS OPERATING PSI, instead of trusting
+      // whichever thickness the design-range search above happened to pick.
+      const verifyMatch = findBestVerifyMatch(eligibleCurves, staticPsi, input.fragilityGMax);
+      if (!verifyMatch) continue;
+      verifyCurve = verifyMatch.curve;
+      interp = verifyMatch.interp;
+      if (maxThicknessIn != null && !verifyMatch.passes) {
+        caveats.push(
+          `No thickness at or under your ${maxThicknessIn}in limit meets your ${input.fragilityGMax}G target for this material at your stated footprint.`,
+        );
+      }
+    }
 
     if (interp.extrapolated) {
       const psis = verifyCurve.points.map((p) => p.static_psi);
@@ -659,11 +809,19 @@ export async function recommendMaterials(input: {
     return b.margin_g - a.margin_g;
   });
 
+  const anyMaterialMeetsTarget = candidates.some((c) => c.meets_fragility_target);
+
   return {
     staticPsi,
     candidates,
     materialsConsidered: materials.length,
     materialsWithoutCurveData,
     materialsWithoutRequestedThickness,
+    materialsExcludedByThicknessConstraint,
+    anyMaterialMeetsTarget,
+    // Only meaningful (and only non-null) when a constraint was actually
+    // given and nothing within it passed -- see the tracking loop above.
+    bestOptionBeyondConstraint:
+      maxThicknessIn != null && !anyMaterialMeetsTarget ? bestOptionBeyondConstraint : null,
   };
 }
