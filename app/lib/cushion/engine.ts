@@ -554,6 +554,17 @@ export type MaterialCandidate = {
 
   caveats: string[];
 
+  // Only set in requestedThicknessIn (verify-at-thickness) mode, and only
+  // when this candidate FAILS at that exact thickness -- a real, thicker
+  // curve of this SAME material that would actually pass at this operating
+  // psi, if one exists on file. Never fabricated: null when no thicker data
+  // exists or none of it passes either.
+  thicker_alternative_in_same_material: {
+    thickness_in: number;
+    provenance: Provenance | null;
+    g_at_operating_psi: number;
+  } | null;
+
   // Other materials on file whose digitized curve data is identical to this
   // one's -- color/tint SKU variants of the same density+polymer that share
   // one underlying vendor curve. This candidate is the deduped
@@ -705,28 +716,32 @@ export async function recommendMaterials(input: {
       };
     });
 
-    // Track the real global best (unconstrained) for the "here's what would
-    // work instead" fallback, regardless of which mode we're in below.
-    if (requestedThicknessIn == null) {
-      const unconstrainedMatch = findBestVerifyMatch(thicknessCurves, staticPsi, input.fragilityGMax);
-      if (
-        unconstrainedMatch &&
-        unconstrainedMatch.passes &&
-        (bestOptionBeyondConstraint == null ||
-          unconstrainedMatch.curve.thickness_in < bestOptionBeyondConstraint.thickness_in)
-      ) {
-        bestOptionBeyondConstraint = {
-          material_id: mat.id,
-          name: mat.name,
-          thickness_in: unconstrainedMatch.curve.thickness_in,
-          g_at_operating_psi: unconstrainedMatch.interp.g,
-        };
-      }
+    // Track the real global best (fully unconstrained -- ignores
+    // maxThicknessIn AND requestedThicknessIn) for the "here's what would
+    // work instead" fallback, no matter which mode produced a failure below.
+    const unconstrainedMatch = findBestVerifyMatch(thicknessCurves, staticPsi, input.fragilityGMax);
+    if (
+      unconstrainedMatch &&
+      unconstrainedMatch.passes &&
+      (bestOptionBeyondConstraint == null ||
+        unconstrainedMatch.curve.thickness_in < bestOptionBeyondConstraint.thickness_in)
+    ) {
+      bestOptionBeyondConstraint = {
+        material_id: mat.id,
+        name: mat.name,
+        thickness_in: unconstrainedMatch.curve.thickness_in,
+        g_at_operating_psi: unconstrainedMatch.interp.g,
+      };
     }
 
     let recommendation: Recommendation | null = null;
     let verifyCurve: ThicknessCurve;
     let interp: NonNullable<ReturnType<typeof interpolateG>>;
+    let thickerAlternativeInSameMaterial: {
+      thickness_in: number;
+      provenance: Provenance | null;
+      g_at_operating_psi: number;
+    } | null = null;
 
     if (requestedThicknessIn != null) {
       // VERIFY-AT-THICKNESS: exact match only. No cross-thickness
@@ -748,6 +763,21 @@ export async function recommendMaterials(input: {
       const directInterp = interpolateG(verifyCurve.points, staticPsi);
       if (!directInterp) continue;
       interp = directInterp;
+
+      // Failing at exactly the requested thickness isn't a dead end if a
+      // THICKER curve of this SAME material (real data, never fabricated)
+      // would actually pass at this operating psi.
+      if (directInterp.g > input.fragilityGMax) {
+        const thickerCurves = thicknessCurves.filter((tc) => tc.thickness_in > requestedThicknessIn);
+        const thickerMatch = findBestVerifyMatch(thickerCurves, staticPsi, input.fragilityGMax);
+        if (thickerMatch && thickerMatch.passes) {
+          thickerAlternativeInSameMaterial = {
+            thickness_in: thickerMatch.curve.thickness_in,
+            provenance: thickerMatch.curve.provenance,
+            g_at_operating_psi: thickerMatch.interp.g,
+          };
+        }
+      }
     } else {
       // RECOMMEND/VERIFY: restrict to thicknesses at/under the caller's
       // stated room, if any. A material with nothing in range can't offer
@@ -857,6 +887,15 @@ export async function recommendMaterials(input: {
         `Only ${verifyCurve.thickness_in}in-thick curve data is on file for this material -- no thinner/thicker alternative to compare, so we can only verify your stated footprint, not recommend a thickness.`,
       );
     }
+    if (thickerAlternativeInSameMaterial) {
+      caveats.push(
+        `${requestedThicknessIn}in of this material doesn't meet your ${input.fragilityGMax}G target (${interp.g.toFixed(
+          1,
+        )}G), but its own ${thickerAlternativeInSameMaterial.thickness_in}in curve does (${thickerAlternativeInSameMaterial.g_at_operating_psi.toFixed(
+          1,
+        )}G) -- real data, same material, just thicker.`,
+      );
+    }
     if (verifyCurve.provenance === "proxy") {
       caveats.push(
         "This curve is a proxy: adapted from a different vendor's product at a similar density, not this material's own tested data.",
@@ -904,6 +943,7 @@ export async function recommendMaterials(input: {
       },
 
       caveats,
+      thicker_alternative_in_same_material: thickerAlternativeInSameMaterial,
       also_available_as: [],
     });
   }
@@ -1005,9 +1045,12 @@ export async function recommendMaterials(input: {
     materialsWithoutRequestedThickness,
     materialsExcludedByThicknessConstraint,
     anyMaterialMeetsTarget,
-    // Only meaningful (and only non-null) when a constraint was actually
-    // given and nothing within it passed -- see the tracking loop above.
-    bestOptionBeyondConstraint:
-      maxThicknessIn != null && !anyMaterialMeetsTarget ? bestOptionBeyondConstraint : null,
+    // Non-null whenever nothing in THIS result set passes -- whether that's
+    // because of a maxThicknessIn ceiling, a requestedThicknessIn exact
+    // check, or no constraint at all -- so every "nothing here passes" UI
+    // path has a real fallback to point to instead of going silent. Only
+    // null when even the fully-unconstrained catalog has nothing that
+    // passes anywhere (the genuine dead end).
+    bestOptionBeyondConstraint: !anyMaterialMeetsTarget ? bestOptionBeyondConstraint : null,
   };
 }

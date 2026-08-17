@@ -81,6 +81,11 @@ type MaterialCandidate = {
     drop_in: number | null;
   };
   caveats: string[];
+  thicker_alternative_in_same_material: {
+    thickness_in: number;
+    provenance: CurveProvenance;
+    g_at_operating_psi: number;
+  } | null;
   also_available_as: string[];
 };
 
@@ -620,6 +625,16 @@ export default function CushionCalculatorPage() {
     return Array.from(set).sort();
   }, [result]);
 
+  // For requestedThicknessIn (Advanced verify-a-specific-thickness) mode:
+  // when a material fails AT THAT EXACT thickness and has no thicker option
+  // of its own that would pass, the best real fallback to point to is
+  // whichever OTHER material in the same result set already passes at that
+  // same thickness -- already ranked first if one exists.
+  const firstPassingAtRequestedThickness = React.useMemo(() => {
+    if (!result || result.requestedThicknessIn == null) return null;
+    return result.candidates.find((c) => c.meets_fragility_target) ?? null;
+  }, [result]);
+
   const selectedFragility = SIMPLE_FRAGILITY_OPTIONS.find((o) => o.key === selectedFragilityKey);
   const selectedHandling = SIMPLE_HANDLING_OPTIONS.find((o) => o.key === handlingKey);
 
@@ -1065,7 +1080,7 @@ export default function CushionCalculatorPage() {
                   )}
                 </div>
 
-                {hasRealArea && result.requestedThicknessIn == null && !result.anyMaterialMeetsTarget && (
+                {hasRealArea && !result.anyMaterialMeetsTarget && (
                   <div className="rounded-xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-5 py-4 text-sm text-[var(--attention)]">
                     {result.maxThicknessIn != null && result.bestOptionBeyondConstraint ? (
                       <>
@@ -1083,10 +1098,28 @@ export default function CushionCalculatorPage() {
                           footprint).
                         </p>
                       </>
+                    ) : result.requestedThicknessIn != null && result.bestOptionBeyondConstraint ? (
+                      <>
+                        <div className="font-medium">
+                          None of the materials on file meet target at exactly{" "}
+                          {result.requestedThicknessIn}in.
+                        </div>
+                        <p className="mt-1 text-xs">
+                          The thinnest real option that would work is{" "}
+                          <span className="font-medium">
+                            {result.bestOptionBeyondConstraint.thickness_in}in
+                          </span>{" "}
+                          of <span className="font-medium">{result.bestOptionBeyondConstraint.name}</span>{" "}
+                          ({result.bestOptionBeyondConstraint.g_at_operating_psi.toFixed(1)}G at your
+                          footprint). Try leaving the thickness field blank to see it ranked with the
+                          rest.
+                        </p>
+                      </>
                     ) : (
                       <div className="font-medium">
-                        No material on file meets this target at your footprint -- consider
-                        increasing contact area or reducing thickness constraints.
+                        No material on file protects this product at this footprint and fragility
+                        level. Increasing the contact area (larger footprint) or reducing the
+                        fragility requirement would open up more options.
                       </div>
                     )}
                   </div>
@@ -1178,7 +1211,35 @@ export default function CushionCalculatorPage() {
                               )}G against your ${result.fragilityGMax}G target${
                                 c.meets_fragility_target ? " -- meets target." : " -- over target."
                               }`
-                            : "Only one digitized thickness on file for this material -- verification only, no thickness sweep available."}
+                            : c.mode === "verify_only"
+                              ? "Only one digitized thickness on file for this material -- verification only, no thickness sweep available."
+                              : `None of this material's thicknesses${
+                                  result.maxThicknessIn != null
+                                    ? ` at or under your ${result.maxThicknessIn}in limit`
+                                    : ""
+                                } bring it under your ${result.fragilityGMax}G target at your stated footprint. Closest: ${
+                                  c.verify_thickness_in
+                                }in at ${c.g_at_operating_psi.toFixed(1)}G.`}
+                          {result.requestedThicknessIn != null &&
+                            !c.meets_fragility_target &&
+                            (c.thicker_alternative_in_same_material ? (
+                              <span>
+                                {" "}
+                                {c.thicker_alternative_in_same_material.thickness_in}in of the same
+                                material would work (
+                                {c.thicker_alternative_in_same_material.g_at_operating_psi.toFixed(1)}
+                                G).
+                              </span>
+                            ) : firstPassingAtRequestedThickness &&
+                              firstPassingAtRequestedThickness.material_id !== c.material_id ? (
+                              <span>
+                                {" "}
+                                No thicker option on file for this material.{" "}
+                                {firstPassingAtRequestedThickness.name} already meets target at{" "}
+                                {result.requestedThicknessIn}in (
+                                {firstPassingAtRequestedThickness.g_at_operating_psi.toFixed(1)}G).
+                              </span>
+                            ) : null)}
                         </div>
                       )}
 
