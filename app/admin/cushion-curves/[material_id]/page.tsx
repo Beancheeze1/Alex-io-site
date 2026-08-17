@@ -28,7 +28,7 @@ type CushionPoint = {
   g_level: number;
   thickness_in?: number | null;
   drop_in?: number | null;
-  provenance?: "tested" | "proxy" | "unverified" | null;
+  provenance?: "tested" | "proxy" | "unverified" | "modeled" | null;
   source: string | null;
 };
 
@@ -553,12 +553,19 @@ export default function CushionCurvesMaterialPage() {
                               <td className="px-3 py-1.5">
                                 {p.provenance ? (
                                   <span
+                                    title={
+                                      p.provenance === "modeled"
+                                        ? "Mathematically derived (Burgess stress-energy method) from this material's own tested curve -- not measured. Validated accuracy: 16-45% typical error, up to 200%+ at range extremes."
+                                        : undefined
+                                    }
                                     className={[
                                       "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium",
                                       p.provenance === "tested"
                                         ? "bg-[var(--status-success-bg)] border-[var(--status-success-text)]/30 text-[var(--status-success-text)]"
                                         : p.provenance === "proxy"
                                         ? "bg-[var(--attention-bg)] border-[var(--attention-border)] text-[var(--attention)]"
+                                        : p.provenance === "modeled"
+                                        ? "bg-[var(--action-primary)]/10 border-[var(--action-primary)]/40 text-[var(--action-primary)]"
                                         : "bg-[var(--status-neutral-bg)] border-[var(--border-strong)] text-[var(--status-neutral-text)]",
                                     ].join(" ")}
                                   >
@@ -566,6 +573,8 @@ export default function CushionCurvesMaterialPage() {
                                       ? "Tested"
                                       : p.provenance === "proxy"
                                       ? "Proxy"
+                                      : p.provenance === "modeled"
+                                      ? "Modeled"
                                       : "Unverified"}
                                   </span>
                                 ) : (

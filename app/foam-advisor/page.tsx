@@ -33,6 +33,11 @@ type FragilityTier = {
   gMax: number | null;
 };
 
+// How many ranked candidates to actually display -- the API still returns
+// every material with curve data (ranked), but the list only ever showed
+// value in the top few; showing all 60+ buried the best matches.
+const TOP_CANDIDATES_SHOWN = 3;
+
 // Mirrors app/lib/cushion/engine.ts FRAGILITY_TIERS -- standard, generic
 // industry tiers, kept in sync with the API response's `reference.fragilityTiers`.
 const DEFAULT_FRAGILITY_TIERS: FragilityTier[] = [
@@ -48,7 +53,27 @@ type SearchParams = {
   [key: string]: string | string[] | undefined;
 };
 
-type CurveProvenance = "tested" | "proxy" | "unverified" | null;
+type CurveProvenance = "tested" | "proxy" | "unverified" | "modeled" | null;
+
+type ThicknessSummary = {
+  thickness_in: number;
+  provenance: CurveProvenance;
+  point_count: number;
+  min_g: number;
+  min_tested_psi: number;
+  max_tested_psi: number;
+  meets_target: boolean;
+};
+
+type Recommendation = {
+  recommended_thickness_in: number;
+  provenance: CurveProvenance;
+  safe_static_loading_range_psi: { low: number; high: number };
+  recommended_bearing_area_in2: number;
+  conservative_bearing_area_in2: number;
+  low_bound_extends_beyond_tested_data: boolean;
+  high_bound_extends_beyond_tested_data: boolean;
+};
 
 type MaterialCandidate = {
   material_id: number;
@@ -57,11 +82,15 @@ type MaterialCandidate = {
   density_lb_ft3: number | null;
   price_per_bf: number | null;
   min_charge_usd: number | null;
+  mode: "recommend" | "verify_only";
+  thickness_options: ThicknessSummary[];
   operating_psi: number;
+  verify_thickness_in: number;
   g_at_operating_psi: number;
   extrapolated_beyond_tested_range: boolean;
   meets_fragility_target: boolean;
   margin_g: number;
+  recommendation: Recommendation | null;
   curve: {
     point_count: number;
     provenance: CurveProvenance;
@@ -92,6 +121,9 @@ type CushionPoint = {
   // catalog (see cushion_curves.deflect_note) -- null, not a guessed value.
   deflect_pct: number | null;
   g_level: number;
+  thickness_in?: number | null;
+  drop_in?: number | null;
+  provenance?: CurveProvenance;
   source: string | null;
 };
 
@@ -193,9 +225,10 @@ function toPositiveNumber(raw: string): number | null {
 }
 
 // Surfaces whether a curve was actually digitized for this exact material
-// ("tested"), adapted from a nearby-density material's curve ("proxy"), or
-// has no source document on file at all ("unverified") -- see
-// cushion_curves.provenance.
+// ("tested"), adapted from a nearby-density material's curve ("proxy"), has
+// no source document on file at all ("unverified"), or is a mathematical
+// extrapolation from this material's own tested curve ("modeled", Burgess
+// stress-energy method) -- see cushion_curves.provenance.
 function ProvenanceBadge({ provenance }: { provenance: CurveProvenance }) {
   if (!provenance) return null;
   const styles: Record<string, string> = {
@@ -205,16 +238,21 @@ function ProvenanceBadge({ provenance }: { provenance: CurveProvenance }) {
       "bg-[var(--attention-bg)] border-[var(--attention-border)] text-[var(--attention)]",
     unverified:
       "bg-[var(--status-neutral-bg)] border-[var(--border-strong)] text-[var(--status-neutral-text)]",
+    modeled:
+      "bg-[var(--action-primary)]/10 border-[var(--action-primary)]/40 text-[var(--action-primary)]",
   };
   const labels: Record<string, string> = {
     tested: "Tested curve",
     proxy: "Proxy curve",
     unverified: "Unverified",
+    modeled: "Modeled from tested data",
   };
   const titles: Record<string, string> = {
     tested: "Digitized directly from a manufacturer cushion-curve chart for this material.",
     proxy: "Adapted from a different, nearby-density material's tested curve -- not digitized for this exact material.",
     unverified: "No source document is on file for this curve; values are unverified.",
+    modeled:
+      "Mathematically derived (Burgess stress-energy method) from this material's own tested curve at a different thickness -- not measured. Validated accuracy: 16-45% typical error, up to 200%+ at range extremes. Treat with more caution than tested or proxy data.",
   };
   return (
     <span
@@ -594,13 +632,28 @@ export default function FoamAdvisorPage({
   // Auto-load the cushion curve for the selected candidate material. Unlike
   // the old stub, `candidates` already ARE real materials queried from
   // cushion_curves -- no separate family/density matching step needed.
+  // Some materials now have multiple digitized thicknesses; we fetch the
+  // ONE curve the candidate is actually being evaluated on (its
+  // curve.thickness_in -- the recommended thickness in "recommend" mode, or
+  // the material's single thickness in "verify_only" mode), not a mix.
   React.useEffect(() => {
     if (!advisorResult) return;
     if (!advisorResult.candidates.length) return;
     if (!selectedRecKey) return;
 
-    // If we already have this material loaded, do nothing
-    if (curveMaterial && curveMaterial.id === selectedRecKey && curvePoints.length) {
+    const candidate = advisorResult.candidates.find(
+      (c) => c.material_id === selectedRecKey,
+    );
+    if (!candidate) return;
+    const thicknessIn = candidate.curve.thickness_in;
+
+    // If we already have this exact material+thickness loaded, do nothing
+    if (
+      curveMaterial &&
+      curveMaterial.id === selectedRecKey &&
+      curvePoints.length &&
+      curvePoints[0]?.thickness_in === thicknessIn
+    ) {
       return;
     }
 
@@ -612,7 +665,8 @@ export default function FoamAdvisorPage({
       setHoverPoint(null);
 
       try {
-        const res = await fetch(`/api/cushion/curves/${selectedRecKey}`, {
+        const qs = thicknessIn != null ? `?thickness_in=${thicknessIn}` : "";
+        const res = await fetch(`/api/cushion/curves/${selectedRecKey}${qs}`, {
           cache: "no-store",
         });
         const json: CushionCurvesApiResponse = await res.json();
@@ -1596,7 +1650,7 @@ export default function FoamAdvisorPage({
                   <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-[11px] text-[var(--text-secondary)]">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-medium text-[var(--text-primary)]">
-                        Ranked materials
+                        Top matches
                       </div>
                       <div className="text-[10px] text-[var(--text-faint)]">
                         G-level at your operating psi, from tested curves.
@@ -1609,7 +1663,18 @@ export default function FoamAdvisorPage({
                         combination.
                       </div>
                     ) : (
-                      advisorResult.candidates.map((c) => {
+                      <>
+                        {advisorResult.candidates.length > TOP_CANDIDATES_SHOWN && (
+                          <div className="mb-2 text-[10px] text-[var(--text-faint)]">
+                            Showing the top {TOP_CANDIDATES_SHOWN} of{" "}
+                            {advisorResult.candidates.length} materials with
+                            cushion-curve data that match this combination,
+                            ranked by fit to your fragility target.
+                          </div>
+                        )}
+                        {advisorResult.candidates
+                          .slice(0, TOP_CANDIDATES_SHOWN)
+                          .map((c) => {
                         const isActive =
                           selectedRecKey != null &&
                           selectedRecKey === c.material_id;
@@ -1627,9 +1692,24 @@ export default function FoamAdvisorPage({
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div>
-                                <div className="font-medium flex items-center gap-1.5">
+                                <div className="font-medium flex items-center gap-1.5 flex-wrap">
                                   {c.name}
                                   <ProvenanceBadge provenance={c.curve.provenance} />
+                                  <span
+                                    className={[
+                                      "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium",
+                                      c.mode === "recommend"
+                                        ? "bg-[var(--action-primary)]/10 border-[var(--action-primary)]/40 text-[var(--action-primary)]"
+                                        : "bg-[var(--status-neutral-bg)] border-[var(--border-strong)] text-[var(--status-neutral-text)]",
+                                    ].join(" ")}
+                                    title={
+                                      c.mode === "recommend"
+                                        ? `${c.thickness_options.length} digitized thicknesses on file -- can recommend a minimum thickness + bearing area.`
+                                        : "Only one digitized thickness on file -- can verify your stated footprint, not recommend a thickness."
+                                    }
+                                  >
+                                    {c.mode === "recommend" ? "Thickness recommend" : "Verify only"}
+                                  </span>
                                 </div>
                                 <div className="text-[10px] text-[var(--text-muted)]">
                                   {c.material_family ?? "Uncategorized"}
@@ -1659,15 +1739,46 @@ export default function FoamAdvisorPage({
                             </div>
 
                             <p className="leading-snug text-[11px] mb-1">
-                              At {c.operating_psi.toFixed(3)} psi, this
-                              material's tested curve reads{" "}
-                              {c.g_at_operating_psi.toFixed(1)}G against your{" "}
-                              {advisorResult.fragilityGMax}G target
+                              At {c.operating_psi.toFixed(3)} psi on the{" "}
+                              {c.verify_thickness_in}in curve, this material
+                              reads {c.g_at_operating_psi.toFixed(1)}G against
+                              your {advisorResult.fragilityGMax}G target
                               {c.price_per_bf != null
                                 ? ` · $${c.price_per_bf.toFixed(2)}/bf`
                                 : ""}
                               .
                             </p>
+
+                            {c.recommendation && (
+                              <div className="mb-1 rounded-lg border border-[var(--action-primary)]/30 bg-[var(--action-primary)]/5 px-2 py-1.5 text-[11px]">
+                                <div className="font-medium text-[var(--text-primary)] flex items-center gap-1.5 flex-wrap">
+                                  Recommended: {c.recommendation.recommended_thickness_in}in
+                                  thick
+                                  <ProvenanceBadge provenance={c.recommendation.provenance} />
+                                </div>
+                                <div className="text-[10px] text-[var(--text-secondary)] mt-0.5">
+                                  Safe loading range{" "}
+                                  {c.recommendation.safe_static_loading_range_psi.low.toFixed(3)}
+                                  {"–"}
+                                  {c.recommendation.safe_static_loading_range_psi.high.toFixed(3)}{" "}
+                                  psi &rarr; bearing area{" "}
+                                  {c.recommendation.recommended_bearing_area_in2.toFixed(0)}
+                                  {"–"}
+                                  {c.recommendation.conservative_bearing_area_in2.toFixed(0)} in
+                                  <sup>2</sup> (efficient end:{" "}
+                                  {c.recommendation.recommended_bearing_area_in2.toFixed(0)} in
+                                  <sup>2</sup>).
+                                </div>
+                              </div>
+                            )}
+
+                            {c.mode === "recommend" && !c.recommendation && (
+                              <p className="mb-1 text-[10px] text-[var(--attention)]">
+                                None of the {c.thickness_options.length} digitized
+                                thicknesses on file bring this material under your
+                                target at any tested load.
+                              </p>
+                            )}
 
                             {c.caveats.length > 0 && (
                               <ul className="mt-1 space-y-0.5 text-[10px] text-[var(--text-faint)] list-disc list-inside">
@@ -1735,7 +1846,8 @@ window.location.href = editorUrl.toString();
                             </div>
                           </div>
                         );
-                      })
+                        })}
+                      </>
                     )}
                   </div>
                 </>

@@ -2,6 +2,15 @@
 //
 // Read-only cushion curve lookup for a single material_id.
 // URL: /api/cushion/curves/[material_id]
+// URL: /api/cushion/curves/[material_id]?thickness_in=2  -- optional filter,
+//   used by the foam-advisor chart. Some materials now have multiple
+//   digitized thicknesses AND multiple vendor curves at the SAME thickness
+//   (e.g. this material's own tested 2in curve plus a proxy 2in point from a
+//   different vendor's multi-thickness sheet). Without a thickness filter,
+//   ALL rows are returned (raw admin view). WITH a thickness filter, only
+//   the single best-provenance curve (tested > proxy > unverified) for that
+//   thickness is returned, so a chart never blends two unrelated vendor
+//   curves into one line.
 // NOTE: We *do not* rely on Next.js params here; instead we parse
 // the material_id from the URL path to avoid any [material-id] vs
 // [material_id] / array / typing issues.
@@ -30,6 +39,13 @@ export async function GET(req: NextRequest) {
 
   if (!Number.isFinite(materialId) || materialId <= 0) {
     return bad("invalid_material_id", { material_id: rawId });
+  }
+
+  const thicknessParam = url.searchParams.get("thickness_in");
+  const thicknessFilter =
+    thicknessParam != null && thicknessParam.trim() !== "" ? Number(thicknessParam) : null;
+  if (thicknessParam != null && (thicknessFilter == null || !Number.isFinite(thicknessFilter))) {
+    return bad("invalid_thickness_in", { thickness_in: thicknessParam });
   }
 
   try {
@@ -68,7 +84,7 @@ export async function GET(req: NextRequest) {
       [materialId],
     );
 
-    const points = (rows || [])
+    let points = (rows || [])
       .map((r) => ({
         static_psi: Number(r.static_psi),
         // deflect_pct is not present in the source charts for most rows --
@@ -77,7 +93,7 @@ export async function GET(req: NextRequest) {
         g_level: Number(r.g_level),
         thickness_in: r.thickness_in == null ? null : Number(r.thickness_in),
         drop_in: r.drop_in == null ? null : Number(r.drop_in),
-        provenance: r.provenance ?? null,
+        provenance: (r.provenance ?? null) as "tested" | "proxy" | "unverified" | "modeled" | null,
         source: r.source ?? null,
       }))
       .filter(
@@ -86,10 +102,28 @@ export async function GET(req: NextRequest) {
           Number.isFinite(p.g_level),
       );
 
+    if (thicknessFilter != null) {
+      points = points.filter((p) => p.thickness_in === thicknessFilter);
+
+      // Same thickness, multiple vendor curves -- keep only the best
+      // provenance so the chart shows one clean curve, not a blended mess.
+      const PROVENANCE_RANK: Record<string, number> = { tested: 0, proxy: 1, unverified: 2, modeled: 3 };
+      let bestProvenance: string | null = null;
+      for (const p of points) {
+        const rank = PROVENANCE_RANK[p.provenance ?? "unverified"] ?? 3;
+        const bestRank = bestProvenance == null ? Infinity : PROVENANCE_RANK[bestProvenance] ?? 3;
+        if (rank < bestRank) bestProvenance = p.provenance ?? "unverified";
+      }
+      if (bestProvenance != null) {
+        points = points.filter((p) => (p.provenance ?? "unverified") === bestProvenance);
+      }
+    }
+
     return ok({
       material,
       points,
       point_count: points.length,
+      thickness_filter_applied: thicknessFilter,
     });
   } catch (err: any) {
     console.error("cushion-curves GET error:", err);
