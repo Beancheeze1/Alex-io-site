@@ -364,6 +364,13 @@ export type Recommendation = {
   high_bound_extends_beyond_tested_data: boolean;
 };
 
+export type MaterialWithoutRequestedThickness = {
+  material_id: number;
+  name: string;
+  material_family: string | null;
+  available_thicknesses: number[];
+};
+
 export type MaterialCandidate = {
   material_id: number;
   name: string;
@@ -374,6 +381,11 @@ export type MaterialCandidate = {
 
   mode: "recommend" | "verify_only";
   thickness_options: ThicknessSummary[];
+
+  // Echoes the caller's requested thickness (null when left blank -- recommend
+  // mode). When set, this candidate's curve/verify numbers are for THAT exact
+  // thickness, not a recommendation.
+  requested_thickness_in: number | null;
 
   // "Verify" numbers: G at the caller's ACTUAL stated operating psi, on the
   // recommended thickness's curve (if mode === "recommend") or the material's
@@ -401,21 +413,38 @@ export type MaterialCandidate = {
 };
 
 /**
- * Query every material that has cushion-curve coverage, and for each one
- * either (a) find a real minimum-thickness + bearing-area recommendation
- * when multiple digitized thicknesses exist, or (b) verify the G-level at
- * the caller's stated operating point on the one thickness on file.
+ * Query every material that has cushion-curve coverage. Two request shapes:
+ *
+ *  - `requestedThicknessIn` omitted/null (the form's thickness field left
+ *    blank): RECOMMEND mode -- find a real minimum-thickness +
+ *    bearing-area recommendation when multiple digitized thicknesses exist,
+ *    else verify the G-level at the caller's stated operating point on the
+ *    one thickness on file.
+ *
+ *  - `requestedThicknessIn` given (the user typed a specific under-cushion
+ *    thickness): VERIFY-AT-THICKNESS mode -- for each material, look for a
+ *    curve at EXACTLY that thickness (tested/proxy/modeled/unverified,
+ *    whichever ranks best) and report G there. No recommendation is
+ *    computed in this mode -- we're checking the user's stated thickness,
+ *    not proposing a different one. A material with no curve at that exact
+ *    thickness is NOT given a fabricated answer by interpolating across
+ *    thicknesses (a materially different, unvalidated technique from the
+ *    within-curve psi interpolation this engine already does) -- it's
+ *    instead listed in `materialsWithoutRequestedThickness` along with
+ *    which thicknesses ARE actually on file for it.
  */
 export async function recommendMaterials(input: {
   weightLb: number;
   contactAreaIn2: number;
   fragilityGMax: number;
   dropHeightIn: number;
+  requestedThicknessIn?: number | null;
 }): Promise<{
   staticPsi: number;
   candidates: MaterialCandidate[];
   materialsConsidered: number;
   materialsWithoutCurveData: number;
+  materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[];
 }> {
   const staticPsi = input.weightLb / input.contactAreaIn2;
 
@@ -448,6 +477,11 @@ export async function recommendMaterials(input: {
 
   const candidates: MaterialCandidate[] = [];
   let materialsWithoutCurveData = 0;
+  const materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[] = [];
+  const requestedThicknessIn =
+    input.requestedThicknessIn != null && Number.isFinite(input.requestedThicknessIn)
+      ? input.requestedThicknessIn
+      : null;
 
   for (const mat of materials) {
     const rawPoints = curvesByMaterial.get(mat.id);
@@ -462,8 +496,6 @@ export async function recommendMaterials(input: {
     const isMultiThickness = thicknessCurves.length > 1;
     const caveats: string[] = [];
 
-    // Try to find the thinnest thickness whose curve dips at/under target.
-    let recommendation: Recommendation | null = null;
     const thicknessOptions: ThicknessSummary[] = thicknessCurves.map((tc) => ({
       thickness_in: tc.thickness_in,
       provenance: tc.provenance,
@@ -474,7 +506,28 @@ export async function recommendMaterials(input: {
       meets_target: Math.min(...tc.points.map((p) => p.g_level)) <= input.fragilityGMax,
     }));
 
-    if (isMultiThickness) {
+    let recommendation: Recommendation | null = null;
+    let verifyCurve: ThicknessCurve;
+
+    if (requestedThicknessIn != null) {
+      // VERIFY-AT-THICKNESS: exact match only. No cross-thickness
+      // interpolation/fabrication for materials that don't have this
+      // exact thickness on file.
+      const match = thicknessCurves.find(
+        (tc) => Math.abs(tc.thickness_in - requestedThicknessIn) < 1e-6,
+      );
+      if (!match) {
+        materialsWithoutRequestedThickness.push({
+          material_id: mat.id,
+          name: mat.name,
+          material_family: mat.material_family,
+          available_thicknesses: thicknessCurves.map((tc) => tc.thickness_in),
+        });
+        continue;
+      }
+      verifyCurve = match;
+    } else if (isMultiThickness) {
+      // RECOMMEND: find the thinnest thickness whose curve dips at/under target.
       for (const tc of thicknessCurves) {
         const range = computeSafeRange(tc.points, input.fragilityGMax);
         if (range) {
@@ -511,13 +564,14 @@ export async function recommendMaterials(input: {
           );
         }
       }
+      // Curve used for the "verify at your actual footprint" numbers: the
+      // recommended thickness if we found one, else the thinnest on file.
+      verifyCurve = recommendation
+        ? thicknessCurves.find((tc) => tc.thickness_in === recommendation!.recommended_thickness_in)!
+        : thicknessCurves[0];
+    } else {
+      verifyCurve = thicknessCurves[0];
     }
-
-    // Curve used for the "verify at your actual footprint" numbers: the
-    // recommended thickness if we found one, else the thinnest on file.
-    const verifyCurve = recommendation
-      ? thicknessCurves.find((tc) => tc.thickness_in === recommendation!.recommended_thickness_in)!
-      : thicknessCurves[0];
 
     const interp = interpolateG(verifyCurve.points, staticPsi);
     if (!interp) continue;
@@ -566,6 +620,7 @@ export async function recommendMaterials(input: {
 
       mode: isMultiThickness ? "recommend" : "verify_only",
       thickness_options: thicknessOptions,
+      requested_thickness_in: requestedThicknessIn,
 
       operating_psi: staticPsi,
       verify_thickness_in: verifyCurve.thickness_in,
@@ -609,5 +664,6 @@ export async function recommendMaterials(input: {
     candidates,
     materialsConsidered: materials.length,
     materialsWithoutCurveData,
+    materialsWithoutRequestedThickness,
   };
 }

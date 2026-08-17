@@ -84,6 +84,7 @@ type MaterialCandidate = {
   min_charge_usd: number | null;
   mode: "recommend" | "verify_only";
   thickness_options: ThicknessSummary[];
+  requested_thickness_in: number | null;
   operating_psi: number;
   verify_thickness_in: number;
   g_at_operating_psi: number;
@@ -102,6 +103,13 @@ type MaterialCandidate = {
   caveats: string[];
 };
 
+type MaterialWithoutRequestedThickness = {
+  material_id: number;
+  name: string;
+  material_family: string | null;
+  available_thicknesses: number[];
+};
+
 type AdvisorResult = {
   staticLoadPsi: number;
   staticLoadPsiLabel: string;
@@ -110,9 +118,11 @@ type AdvisorResult = {
   fragilityTier: { key: string; label: string };
   dropHeightIn: number;
   dropHeightSuggested: boolean;
+  requestedThicknessIn: number | null;
   candidates: MaterialCandidate[];
   materialsConsidered: number;
   materialsWithoutCurveData: number;
+  materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[];
 };
 
 type CushionPoint = {
@@ -152,6 +162,7 @@ type FoamAdvisorStoredState = {
   environment?: EnvironmentOption;
   fragilityGMax?: string;
   dropHeightIn?: string;
+  thicknessIn?: string;
 };
 
 // Mirrors app/lib/cushion/engine.ts DROP_HEIGHT_TABLE -- standard ASTM
@@ -346,6 +357,10 @@ export default function FoamAdvisorPage({
   const [fragilityGMax, setFragilityGMax] = React.useState<string>("60");
   const [dropHeightIn, setDropHeightIn] = React.useState<string>("");
   const [dropHeightTouched, setDropHeightTouched] = React.useState(false);
+  // Optional: the product's actual/proposed under-cushion thickness. Blank
+  // -> recommend mode (find the minimum thickness that meets target).
+  // Filled in -> verify mode (check that exact thickness only).
+  const [thicknessIn, setThicknessIn] = React.useState<string>("");
 
   const computedContactAreaIn2 = React.useMemo(() => {
     const L = toPositiveNumber(productContactLengthIn);
@@ -479,6 +494,9 @@ export default function FoamAdvisorPage({
         setDropHeightIn(String(parsed.dropHeightIn));
         setDropHeightTouched(true);
       }
+      if (parsed.thicknessIn != null) {
+        setThicknessIn(String(parsed.thicknessIn));
+      }
     } catch {
       // ignore parse errors
     }
@@ -496,6 +514,7 @@ export default function FoamAdvisorPage({
       environment,
       fragilityGMax,
       dropHeightIn,
+      thicknessIn,
     };
     try {
       window.localStorage.setItem(key, JSON.stringify(payload));
@@ -510,6 +529,7 @@ export default function FoamAdvisorPage({
     contactAreaIn2,
     environment,
     fragilityGMax,
+    thicknessIn,
     dropHeightIn,
   ]);
 
@@ -535,6 +555,9 @@ export default function FoamAdvisorPage({
     const a = L != null && W != null ? L * W : NaN;
     const gMax = toPositiveNumber(fragilityGMax);
     const dropIn = toPositiveNumber(dropHeightIn);
+    // Optional -- blank means "recommend mode", a value means "verify this
+    // exact thickness". toPositiveNumber returns null for blank/invalid.
+    const thicknessInVal = toPositiveNumber(thicknessIn);
 
     if (!Number.isFinite(w) || w <= 0) {
       alert("Please enter a valid product weight (lb).");
@@ -567,6 +590,7 @@ export default function FoamAdvisorPage({
           environment,
           fragilityGMax: gMax,
           dropHeightIn: dropIn ?? undefined,
+          thicknessIn: thicknessInVal ?? undefined,
           quoteNo: effectiveQuoteNo || null,
           block: blockParam || null,
         }),
@@ -608,9 +632,16 @@ export default function FoamAdvisorPage({
         fragilityTier: json.fragilityTier ?? { key: "", label: "" },
         dropHeightIn: Number(json.dropHeightIn) || dropIn || 24,
         dropHeightSuggested: !!json.dropHeightSuggested,
+        requestedThicknessIn:
+          json.requestedThicknessIn != null ? Number(json.requestedThicknessIn) : null,
         candidates: Array.isArray(json.candidates) ? json.candidates : [],
         materialsConsidered: Number(json.materialsConsidered) || 0,
         materialsWithoutCurveData: Number(json.materialsWithoutCurveData) || 0,
+        materialsWithoutRequestedThickness: Array.isArray(
+          json.materialsWithoutRequestedThickness,
+        )
+          ? json.materialsWithoutRequestedThickness
+          : [],
       };
 
       // Default the canvas to the top-ranked candidate (best real match).
@@ -954,6 +985,26 @@ export default function FoamAdvisorPage({
                     <span className="text-[10px] text-[var(--text-faint)]">
                       Standard industry fragility tiers. Pick one or enter a
                       custom max-G value.
+                    </span>
+                  </label>
+
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[11px] text-[var(--text-secondary)]">
+                      Under-cushion thickness (in) -- optional
+                    </span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={thicknessIn}
+                      onChange={(e) => setThicknessIn(e.target.value)}
+                      placeholder="Leave blank for a recommendation"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)]"
+                    />
+                    <span className="text-[10px] text-[var(--text-faint)]">
+                      {thicknessIn.trim()
+                        ? "Verifying this exact thickness against real/modeled data -- no recommendation will be shown."
+                        : "Leave blank to get a minimum-thickness recommendation where real data supports it. Enter a value to check a specific thickness instead."}
                     </span>
                   </label>
                 </div>
@@ -1622,12 +1673,18 @@ export default function FoamAdvisorPage({
                         ? ` (${advisorResult.fragilityTier.label})`
                         : ""}
                     </p>
-                    <p>
+                    <p className="mb-1">
                       <span className="font-medium">Drop height: </span>
                       {advisorResult.dropHeightIn}in
                       {advisorResult.dropHeightSuggested
                         ? " (suggested from weight)"
                         : ""}
+                    </p>
+                    <p>
+                      <span className="font-medium">Thickness: </span>
+                      {advisorResult.requestedThicknessIn != null
+                        ? `Verifying ${advisorResult.requestedThicknessIn}in exactly (no recommendation)`
+                        : "Not specified -- showing recommended minimum where supported"}
                     </p>
                     {parsedBlock && (
                       <p className="mt-2 text-[10px] text-[var(--text-faint)]">
@@ -1645,6 +1702,49 @@ export default function FoamAdvisorPage({
                       .
                     </p>
                   </div>
+
+                  {/* Honest "no data at this exact thickness" list -- never
+                      silently dropped or fabricated across thicknesses. */}
+                  {advisorResult.requestedThicknessIn != null &&
+                    advisorResult.materialsWithoutRequestedThickness.length > 0 && (
+                      <div className="rounded-2xl border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-3 text-[11px] text-[var(--attention)]">
+                        <div className="font-medium mb-1">
+                          No data at {advisorResult.requestedThicknessIn}in for{" "}
+                          {advisorResult.materialsWithoutRequestedThickness.length}{" "}
+                          material
+                          {advisorResult.materialsWithoutRequestedThickness.length === 1
+                            ? ""
+                            : "s"}
+                        </div>
+                        <p className="text-[10px] mb-1.5">
+                          These materials have real cushion-curve data, but not at
+                          exactly {advisorResult.requestedThicknessIn}in -- rather
+                          than guess by interpolating across thicknesses, they're
+                          left out of the results below. Try one of their actual
+                          thicknesses instead:
+                        </p>
+                        <ul className="text-[10px] space-y-0.5 list-disc list-inside">
+                          {advisorResult.materialsWithoutRequestedThickness
+                            .slice(0, 8)
+                            .map((m) => (
+                              <li key={m.material_id}>
+                                {m.name} -- available:{" "}
+                                {m.available_thicknesses
+                                  .slice()
+                                  .sort((a, b) => a - b)
+                                  .map((t) => `${t}in`)
+                                  .join(", ")}
+                              </li>
+                            ))}
+                        </ul>
+                        {advisorResult.materialsWithoutRequestedThickness.length > 8 && (
+                          <p className="mt-1 text-[10px] text-[var(--text-faint)]">
+                            +{advisorResult.materialsWithoutRequestedThickness.length - 8}{" "}
+                            more.
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                   {/* Ranked real materials, from cushion_curves */}
                   <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-[11px] text-[var(--text-secondary)]">

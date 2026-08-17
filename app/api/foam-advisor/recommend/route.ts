@@ -36,6 +36,13 @@ export async function POST(req: Request) {
   const environment = (body.environment ?? "normal") as EnvironmentOption;
   const fragilityGMaxRaw = Number(body.fragilityGMax);
   const dropHeightInRaw = Number(body.dropHeightIn);
+  // Optional: the product's actual/proposed under-cushion thickness. When
+  // given, we VERIFY that exact thickness instead of recommending one.
+  const thicknessInRaw = body.thicknessIn;
+  const requestedThicknessIn =
+    thicknessInRaw != null && thicknessInRaw !== "" && Number.isFinite(Number(thicknessInRaw)) && Number(thicknessInRaw) > 0
+      ? Number(thicknessInRaw)
+      : null;
 
   if (!Number.isFinite(weightLb) || weightLb <= 0) {
     return NextResponse.json(
@@ -74,13 +81,19 @@ export async function POST(req: Request) {
   const fragilityTier = fragilityTierForG(fragilityGMax);
 
   try {
-    const { staticPsi, candidates, materialsConsidered, materialsWithoutCurveData } =
-      await recommendMaterials({
-        weightLb,
-        contactAreaIn2,
-        fragilityGMax,
-        dropHeightIn,
-      });
+    const {
+      staticPsi,
+      candidates,
+      materialsConsidered,
+      materialsWithoutCurveData,
+      materialsWithoutRequestedThickness,
+    } = await recommendMaterials({
+      weightLb,
+      contactAreaIn2,
+      fragilityGMax,
+      dropHeightIn,
+      requestedThicknessIn,
+    });
 
     const response = {
       ok: true,
@@ -94,9 +107,11 @@ export async function POST(req: Request) {
       fragilityTier: { key: fragilityTier.key, label: fragilityTier.label },
       dropHeightIn,
       dropHeightSuggested: !Number.isFinite(dropHeightInRaw) || dropHeightInRaw <= 0,
+      requestedThicknessIn,
       candidates,
       materialsConsidered,
       materialsWithoutCurveData,
+      materialsWithoutRequestedThickness,
       reference: {
         fragilityTiers: FRAGILITY_TIERS,
         dropHeightTable: DROP_HEIGHT_TABLE,
