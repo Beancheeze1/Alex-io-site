@@ -659,49 +659,59 @@ export async function recommendMaterials(input: {
         continue;
       }
 
-      // Design-range block: thinnest eligible thickness whose curve dips
-      // at/under target ANYWHERE on its own tested range (independent of
-      // this caller's specific operating psi -- "what footprint would this
-      // thickness support"). Complementary info only; never used for
-      // ranking or pass/fail below.
+      // Search every eligible thickness for the thinnest one that really
+      // passes AT THIS OPERATING PSI -- this drives both ranking (below) and
+      // which curve gets described as "the recommendation."
+      const verifyMatch = findBestVerifyMatch(eligibleCurves, staticPsi, input.fragilityGMax);
+      if (!verifyMatch) continue;
+      verifyCurve = verifyMatch.curve;
+      interp = verifyMatch.interp;
+
+      // Design-range block: the safe static-loading RANGE on the SAME curve
+      // that was just verified to work at the caller's actual operating psi
+      // -- never a different, thinner thickness's range. Reporting a range
+      // from some other thickness while displaying pass/fail computed on
+      // THIS thickness was the bug: every multi-thickness material's
+      // "recommendation" silently locked to its thinnest curve (almost
+      // always 2in) regardless of which thickness the real verify match
+      // actually used, so 3/4/5in matches never surfaced as "the"
+      // recommended thickness even when they were the thickness that
+      // actually passed.
       if (isMultiThickness) {
-        for (const tc of eligibleCurves) {
-          const range = computeSafeRange(tc.points, input.fragilityGMax);
+        if (verifyMatch.passes) {
+          const range = computeSafeRange(verifyCurve.points, input.fragilityGMax);
           if (range) {
             recommendation = {
-              recommended_thickness_in: tc.thickness_in,
-              provenance: tc.provenance,
+              recommended_thickness_in: verifyCurve.thickness_in,
+              provenance: verifyCurve.provenance,
               safe_static_loading_range_psi: { low: range.low, high: range.high },
               recommended_bearing_area_in2: input.weightLb / range.high,
               conservative_bearing_area_in2: input.weightLb / range.low,
               low_bound_extends_beyond_tested_data: range.loBoundedByData,
               high_bound_extends_beyond_tested_data: range.hiBoundedByData,
             };
-            break; // thinnest qualifying eligible thickness wins
+            if (recommendation.low_bound_extends_beyond_tested_data) {
+              caveats.push(
+                `The safe loading range's low end (${recommendation.safe_static_loading_range_psi.low.toFixed(
+                  3,
+                )} psi) is the first tested point, not a curve boundary -- the true safe range may extend lower.`,
+              );
+            }
+            if (recommendation.high_bound_extends_beyond_tested_data) {
+              caveats.push(
+                `The safe loading range's high end (${recommendation.safe_static_loading_range_psi.high.toFixed(
+                  3,
+                )} psi) is the last tested point, not a curve boundary -- the true safe range may extend higher.`,
+              );
+            }
           }
-        }
-        if (!recommendation) {
+        } else {
           const maxAvailable = eligibleCurves[eligibleCurves.length - 1].thickness_in;
           caveats.push(
             maxThicknessIn != null
-              ? `None of the thicknesses at or under your ${maxThicknessIn}in limit (up to ${maxAvailable}in) bring G at or under your ${input.fragilityGMax}G target at any tested static load.`
-              : `None of the tested thicknesses on file (up to ${maxAvailable}in) bring G at or under your ${input.fragilityGMax}G target at any tested static load.`,
+              ? `None of the thicknesses at or under your ${maxThicknessIn}in limit (up to ${maxAvailable}in) bring G at or under your ${input.fragilityGMax}G target at your stated footprint.`
+              : `None of the tested thicknesses on file (up to ${maxAvailable}in) bring G at or under your ${input.fragilityGMax}G target at your stated footprint.`,
           );
-        } else {
-          if (recommendation.low_bound_extends_beyond_tested_data) {
-            caveats.push(
-              `The safe loading range's low end (${recommendation.safe_static_loading_range_psi.low.toFixed(
-                3,
-              )} psi) is the first tested point, not a curve boundary -- the true safe range may extend lower.`,
-            );
-          }
-          if (recommendation.high_bound_extends_beyond_tested_data) {
-            caveats.push(
-              `The safe loading range's high end (${recommendation.safe_static_loading_range_psi.high.toFixed(
-                3,
-              )} psi) is the last tested point, not a curve boundary -- the true safe range may extend higher.`,
-            );
-          }
         }
         if (maxThicknessIn != null && eligibleCurves.length < thicknessCurves.length) {
           caveats.push(
@@ -712,13 +722,6 @@ export async function recommendMaterials(input: {
         }
       }
 
-      // THE ACTUAL FIX: search every eligible thickness for the thinnest one
-      // that really passes AT THIS OPERATING PSI, instead of trusting
-      // whichever thickness the design-range search above happened to pick.
-      const verifyMatch = findBestVerifyMatch(eligibleCurves, staticPsi, input.fragilityGMax);
-      if (!verifyMatch) continue;
-      verifyCurve = verifyMatch.curve;
-      interp = verifyMatch.interp;
       if (maxThicknessIn != null && !verifyMatch.passes) {
         caveats.push(
           `No thickness at or under your ${maxThicknessIn}in limit meets your ${input.fragilityGMax}G target for this material at your stated footprint.`,
