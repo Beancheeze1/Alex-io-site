@@ -110,6 +110,14 @@ type MaterialWithoutRequestedThickness = {
   available_thicknesses: number[];
 };
 
+type MaterialExcludedByClassification = {
+  material_id: number;
+  name: string;
+  application_category: string;
+  classification_confidence: "confirmed" | "inferred" | "unconfirmed";
+  classification_source: string | null;
+};
+
 type AdvisorResult = {
   staticLoadPsi: number;
   staticLoadPsiLabel: string;
@@ -123,6 +131,7 @@ type AdvisorResult = {
   materialsConsidered: number;
   materialsWithoutCurveData: number;
   materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[];
+  materialsExcludedByClassification: MaterialExcludedByClassification[];
 };
 
 type CushionPoint = {
@@ -641,6 +650,11 @@ export default function FoamAdvisorPage({
           json.materialsWithoutRequestedThickness,
         )
           ? json.materialsWithoutRequestedThickness
+          : [],
+        materialsExcludedByClassification: Array.isArray(
+          json.materialsExcludedByClassification,
+        )
+          ? json.materialsExcludedByClassification
           : [],
       };
 
@@ -1699,9 +1713,41 @@ export default function FoamAdvisorPage({
                       {advisorResult.materialsWithoutCurveData > 0
                         ? ` (${advisorResult.materialsWithoutCurveData} skipped -- no curve data)`
                         : ""}
+                      {advisorResult.materialsExcludedByClassification.length > 0
+                        ? ` (${advisorResult.materialsExcludedByClassification.length} skipped -- not classified as packaging_cushioning)`
+                        : ""}
                       .
                     </p>
                   </div>
+
+                  {/* Real materials-classification gate: application_category
+                      must be packaging_cushioning (Amcon-site-sourced, see
+                      migrations/018_materials_classification.sql). Listed
+                      here rather than silently dropped so unconfirmed/
+                      non-cushioning materials stay a concrete, reviewable
+                      list instead of an invisible gap. */}
+                  {advisorResult.materialsExcludedByClassification.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] p-3 text-xs text-[var(--attention)]">
+                      <div className="font-medium">
+                        {advisorResult.materialsExcludedByClassification.length} material
+                        {advisorResult.materialsExcludedByClassification.length === 1 ? "" : "s"}{" "}
+                        excluded by application-category classification
+                      </div>
+                      <ul className="mt-1.5 space-y-1.5">
+                        {advisorResult.materialsExcludedByClassification.map((m) => (
+                          <li key={m.material_id} className="text-[10px]">
+                            <span className="font-medium">{m.name}</span> -- {m.application_category} (
+                            {m.classification_confidence})
+                            {m.classification_source && (
+                              <div className="mt-0.5 text-[var(--text-faint)]">
+                                {m.classification_source}
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {/* Honest "no data at this exact thickness" list -- never
                       silently dropped or fabricated across thicknesses. */}

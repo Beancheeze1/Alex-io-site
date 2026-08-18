@@ -173,6 +173,14 @@ export type CushionCurveRow = {
   source: string | null;
 };
 
+export type ApplicationCategory =
+  | "packaging_cushioning"
+  | "seating_comfort"
+  | "filtration_acoustic"
+  | "insulation_structural"
+  | "other"
+  | "unconfirmed";
+
 export type MaterialRow = {
   id: number;
   name: string;
@@ -182,6 +190,17 @@ export type MaterialRow = {
   min_charge_usd: number | null;
   price_per_cuin: number | null;
   cost_per_ci_usd: number | null;
+  application_category: ApplicationCategory;
+  classification_confidence: "confirmed" | "inferred" | "unconfirmed";
+  classification_source: string | null;
+};
+
+export type MaterialExcludedByClassification = {
+  material_id: number;
+  name: string;
+  application_category: ApplicationCategory;
+  classification_confidence: "confirmed" | "inferred" | "unconfirmed";
+  classification_source: string | null;
 };
 
 /**
@@ -666,6 +685,7 @@ export async function recommendMaterials(input: {
   materialsWithoutCurveData: number;
   materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[];
   materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[];
+  materialsExcludedByClassification: MaterialExcludedByClassification[];
   anyMaterialMeetsTarget: boolean;
   bestOptionBeyondConstraint: BestOptionBeyondConstraint | null;
   // material_id of the passing candidate with the lowest real estimated
@@ -681,7 +701,8 @@ export async function recommendMaterials(input: {
 
   const materials = await q<MaterialRow>(`
     SELECT id, name, material_family, density_lb_ft3, price_per_bf, min_charge_usd,
-           price_per_cuin, cost_per_ci_usd
+           price_per_cuin, cost_per_ci_usd,
+           application_category, classification_confidence, classification_source
     FROM materials
     WHERE is_active IS NOT FALSE
     ORDER BY material_family, name;
@@ -711,6 +732,14 @@ export async function recommendMaterials(input: {
   let materialsWithoutCurveData = 0;
   const materialsWithoutRequestedThickness: MaterialWithoutRequestedThickness[] = [];
   const materialsExcludedByThicknessConstraint: MaterialExcludedByThicknessConstraint[] = [];
+  // Materials with real curve data that are excluded from cushioning
+  // recommendations because their real-world application_category isn't
+  // packaging_cushioning (e.g. reticulated PU, built for filtration/
+  // acoustic use) OR because classification is still unconfirmed (no
+  // guessing -- see materials.classification_confidence). Tracked and
+  // returned rather than silently dropped, so this list stays a concrete,
+  // reviewable set instead of an invisible gap.
+  const materialsExcludedByClassification: MaterialExcludedByClassification[] = [];
   const requestedThicknessIn =
     input.requestedThicknessIn != null && Number.isFinite(input.requestedThicknessIn)
       ? input.requestedThicknessIn
@@ -747,6 +776,17 @@ export async function recommendMaterials(input: {
     const rawPoints = curvesByMaterial.get(mat.id);
     if (!rawPoints || !rawPoints.length) {
       materialsWithoutCurveData++;
+      continue;
+    }
+
+    if (mat.application_category !== "packaging_cushioning") {
+      materialsExcludedByClassification.push({
+        material_id: mat.id,
+        name: mat.name,
+        application_category: mat.application_category,
+        classification_confidence: mat.classification_confidence,
+        classification_source: mat.classification_source,
+      });
       continue;
     }
 
@@ -1149,6 +1189,7 @@ export async function recommendMaterials(input: {
     materialsWithoutCurveData,
     materialsWithoutRequestedThickness,
     materialsExcludedByThicknessConstraint,
+    materialsExcludedByClassification,
     anyMaterialMeetsTarget,
     mostEconomicalMaterialId,
     smallestFootprintMaterialId,
