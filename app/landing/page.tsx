@@ -15,10 +15,16 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { usePageTracker } from "@/hooks/usePageTracker";
-import GetStartedModal from "@/components/GetStartedModal";
 
 const LandingChatWidget = dynamic(
   () => import("@/components/LandingChatWidget"),
+  { ssr: false },
+);
+
+// Only needed after a user opens a pricing/trial CTA — keep it out of the
+// initial bundle rather than shipping its form JS on first paint.
+const GetStartedModal = dynamic(
+  () => import("@/components/GetStartedModal"),
   { ssr: false },
 );
 
@@ -88,10 +94,12 @@ function Shot({
   src,
   alt,
   priority = false,
+  sizes = "(max-width: 1023px) 100vw, 50vw",
 }: {
   src: string;
   alt: string;
   priority?: boolean;
+  sizes?: string;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-card)]">
@@ -101,6 +109,8 @@ function Shot({
         width={1600}
         height={1000}
         priority={priority}
+        loading={priority ? undefined : "lazy"}
+        sizes={sizes}
         className="h-auto w-full object-cover"
       />
     </div>
@@ -142,10 +152,6 @@ const FAQ_ITEMS = [
   {
     q: "Do I have to sign a long-term contract?",
     a: "No. Plans are month-to-month. Cancel anytime.",
-  },
-  {
-    q: "How is this different from a generic CPQ tool like Salesforce or Conga?",
-    a: "Those tools are built for selling software licenses and services — not for quoting physical foam parts with cavity layouts and material density pricing. Alex-IO understands the geometry of what you're making, not just the line items.",
   },
 ];
 
@@ -194,118 +200,118 @@ function CapabilitiesSection() {
         </p>
 
         {/* ── Row 1: Getting the quote started ──────────────────────────────────── */}
-        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-          Getting the quote started
-        </div>
+        <h3 className="mb-3 text-lg font-medium text-[var(--text-primary)]">
+          However your customer shows up, they leave with a price.
+        </h3>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <CapabilityCard
             icon="💬"
             accent
-            title="AI chat widget — on your website"
-            body="Embed a chat widget on your site. Customers describe what they need in plain language — 'a 12×8 case insert for a rifle scope' — and get a priced quote without calling anyone. Works 24/7, no staff required."
+            title="Describe it, get a price"
+            body="They type what they need in plain language and get a priced quote, no staff involved."
           />
           <CapabilityCard
             icon="📋"
             accent
-            title="Guided quote form — self-serve"
+            title="Or walk through it step by step"
             body="A structured step-by-step form for customers who prefer to enter specs directly. Ship mode, insert type, cavity count, material preference — it walks them through everything and produces a live priced quote."
           />
           <CapabilityCard
             icon="🤝"
             accent
-            title="Built for your sales team too"
-            body="Salespeople use Alex-IO live in front of customers — in a meeting, on a plant tour, over the phone. Enter dimensions as the conversation happens and hand the customer a priced quote before you leave the room. No 'I'll get back to you.'"
+            title="Your reps can run it live, too"
+            body="Quote live in front of the customer, priced before they leave the meeting."
           />
         </div>
 
         {/* ── Row 2: Building the quote ────────────────────────────────────── */}
-        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-          Building the quote
-        </div>
+        <h3 className="mb-3 text-lg font-medium text-[var(--text-primary)]">
+          Real engineering, not a guess.
+        </h3>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <CapabilityCard
             icon="🧩"
-            title="Layered cavity layout editor"
+            title="Design multi-layer inserts visually"
             body="Design multi-layer foam sets with individual cavity profiles per layer. Rectangles, circles, custom shapes. The layout renders in real time as you build it."
           />
           <CapabilityCard
             icon="⚡"
-            title="Live pricing engine"
+            title="Price updates as you build"
             body="Every change in the editor — layer count, cavity size, material, quantity — reprices instantly against your actual material costs and density-based markups. No formulas to maintain."
           />
           <CapabilityCard
             icon="🧠"
-            title="AI material recommendation"
-            body="Enter the product weight, drop height, and fragility rating. Alex-IO recommends the right foam type and density for the application — not just the cheapest option."
+            title="Get the right foam recommended"
+            body="Weight, drop height, and fragility in — the right foam type and density out."
           />
           <CapabilityCard
             icon="📐"
-            title="Cushion curve analysis"
+            title="Back it with real engineering data"
             body="Engineering-grade G-factor cushion curve calculations for customers who spec fragility limits. Tells you exactly which foam provides the right shock attenuation for their product."
           />
         </div>
 
         {/* ── Row 3: Getting the quote out ─────────────────────────────────── */}
-        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-          Getting the quote out
-        </div>
+        <h3 className="mb-3 text-lg font-medium text-[var(--text-primary)]">
+          A quote that looks like your shop, not a spreadsheet.
+        </h3>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <CapabilityCard
             icon="🖨️"
-            title="Branded customer quote PDF"
+            title="Clean, branded quotes"
             body="One click generates a clean, customer-ready quote with your branding, full line items, layer breakdown, cavity counts, material specs, and a clear next step."
           />
           <CapabilityCard
             icon="📐"
-            title="3-view technical drawing PDF"
+            title="Dimensioned drawings your floor can run with"
             body="A dimensioned top/front/side engineering drawing — the kind your shop floor or production team expects. Generated from the same layout, no separate drafting required."
           />
           <CapabilityCard
             icon="⚙️"
-            title="DXF / STEP CAD exports"
+            title="Production-ready CAD files, straight from the quote"
             body="Production-ready CAD files come straight out of the quote. Hand them to your CNC operator or send them to the customer without any re-drawing in a separate tool."
           />
           <CapabilityCard
             icon="📦"
-            title="Box & carton pairing"
+            title="The right shipping carton, suggested automatically"
             body="Alex-IO suggests the right corrugated shipping carton to pair with the foam insert, factoring in wall clearance and insert thickness. Quote the full package in one step."
           />
         </div>
 
         {/* ── Row 4: Running your shop ─────────────────────────────────────── */}
-        <div className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-          Running your shop
-        </div>
+        <h3 className="mb-3 text-lg font-medium text-[var(--text-primary)]">
+          Runs like the rest of your shop, not a bolt-on.
+        </h3>
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <CapabilityCard
             icon="📊"
-            title="Commission tracking"
+            title="Reps get credit, even on self-serve quotes"
             body="Set commission percentages per sales rep. Alex-IO tracks which quotes each rep owns, calculates commissions on locked quotes, and generates payout reports. No spreadsheets."
           />
           <CapabilityCard
             icon="🔗"
-            title="HubSpot CRM sync"
+            title="Every quote becomes a tracked deal"
             body="Quotes sync to HubSpot automatically as deals. Contacts are matched or created. Your CRM stays current without anyone manually updating it after every customer conversation."
           />
           <CapabilityCard
             icon="✉️"
-            title="Send quotes from Outlook"
+            title="Send branded quotes from the inbox you already use"
             body="Send branded quote emails directly through your existing Microsoft 365 / Outlook account. Quotes land in the customer's inbox from your address, not a generic noreply."
           />
           <CapabilityCard
             icon="🔒"
-            title="Quote locking & revision history"
+            title="Production quotes can't be changed by accident"
             body="Lock quotes for production so nothing changes accidentally. Need to revise a locked quote? Full revision history tracks every version. Nothing gets lost."
           />
           <CapabilityCard
             icon="📚"
-            title="Price book management"
+            title="Update your whole material catalog in one place"
             body="Import and manage your full material catalog — foam types, densities, costs, markups. Update once and every future quote reflects the change automatically."
           />
           <CapabilityCard
             icon="👥"
-            title="Multi-rep, multi-seat"
-            body="Multiple salespeople, individual quote ownership, role-based access. Admins see everything. Reps see their own queue. Everyone works from the same system."
+            title="Every rep, one shared system"
+            body="Multiple salespeople, individual quote ownership, role-based access. Admins see everything. Reps see their own queue."
           />
         </div>
 
@@ -680,11 +686,8 @@ export default function LandingPage() {
       {/* Nav */}
       <section className="relative z-10 border-b border-[var(--border)] bg-[var(--surface-card)]">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              Alex-IO
-            </div>
-            <div className="text-sm text-[var(--text-secondary)]">Quoting · Layout · CAD</div>
+          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--text-muted)]">
+            Alex-IO
           </div>
           <a
             href="#sample-quote"
@@ -701,30 +704,12 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-14 lg:py-16">
           <div className="grid gap-10 lg:grid-cols-12 lg:items-start">
             <div className="lg:col-span-6">
-              <div className="text-xs font-medium uppercase tracking-[0.20em] text-[var(--text-muted)]">
-                Quoting Software for Foam Fabricators
-              </div>
-              <h1 className="mt-4 max-w-3xl text-3xl font-medium leading-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
+              <h1 className="max-w-3xl text-3xl font-medium leading-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
                 Stop quoting foam packaging by hand.
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-[var(--text-secondary)] sm:text-lg">
-                Alex-IO is quoting software built specifically for foam fabricators and packaging shops. Real material pricing, layered cavity layouts, and printable customer-ready quotes — generated in minutes, not days.
+                A quoting platform built for foam and corrugated shops — priced, drawn, and CAD-ready in minutes, not days.
               </p>
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {[
-                  "Customer-facing quote flow embedded in your site",
-                  "Accurate pricing based on your real material and density costs",
-                  "Layered foam insert layouts with production-ready outputs",
-                  "Your customer answers questions — not a blank form",
-                ].map((t) => (
-                  <div
-                    key={t}
-                    className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-sm text-[var(--text-secondary)]"
-                  >
-                    {t}
-                  </div>
-                ))}
-              </div>
 
               {/* Single CTA */}
               <div className="mt-8">
@@ -733,28 +718,11 @@ export default function LandingPage() {
                   onClick={() => trackEvent("cta_click")}
                   className="inline-flex rounded-md bg-[var(--action-primary)] px-5 py-3 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
                 >
-                  Try a Live Quote
+                  Try a Live Quote →
                 </a>
-                <button
-                  type="button"
-                  onClick={viewSampleQuote}
-                  disabled={sampleLoading}
-                  className="mt-3 inline-flex items-center justify-center gap-2
-                    rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-5 py-3
-                    text-sm font-medium text-[var(--text-primary)] transition
-                    hover:bg-[var(--surface-subtle)] disabled:opacity-50 sm:ml-3 sm:mt-0"
-                >
-                  {sampleLoading ? "Loading sample…" : "👀 See a Complete Sample Quote →"}
-                </button>
-              </div>
-
-              <div className="mt-6 text-sm text-[var(--text-muted)]">
-                Starts at{" "}
-                <span className="font-medium text-[var(--text-secondary)]">$799/month</span>.{" "}
-                No long-term contract.{" "}
-                <a href="#pricing" className="text-[var(--text-primary)] underline underline-offset-2">
-                  Free 30-day trial available →
-                </a>
+                <p className="mt-3 text-sm text-[var(--text-muted)]">
+                  Takes 60 seconds. No login, no credit card.
+                </p>
               </div>
             </div>
 
@@ -774,64 +742,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-
-      {/* Free trial banner */}
-      <section className="relative z-10">
-        <div className="mx-auto max-w-7xl px-4 pt-2 pb-6">
-          <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-[var(--text-primary)] text-lg shrink-0">🎯</span>
-              <div>
-                <span className="text-sm font-medium text-[var(--text-primary)]">Free 30-Day Trial — 3 Onboarding Spots This Quarter.{" "}</span>
-                <span className="text-sm text-[var(--text-secondary)]">Full access, personal setup session included. No credit card required.</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setActiveTier("FreeTrial"); trackEvent("cta_click"); }}
-              className="shrink-0 rounded-md bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)] whitespace-nowrap text-center"
-            >
-              Check Availability →
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Capabilities — before the demo form so prospect is convinced first */}
-      <CapabilitiesSection />
-
-      {/* Screenshots — moved up, after capabilities */}
-      <section id="proof" className="relative z-10">
-        <div className="mx-auto max-w-7xl px-4 pb-10 sm:pb-12">
-          <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            See it in action
-          </div>
-          <h2 className="mb-2 text-2xl font-medium text-[var(--text-primary)]">What your team actually sees</h2>
-          <p className="mb-8 text-sm leading-7 text-[var(--text-secondary)]">
-            Real screens. Real data. No mockups.
-          </p>
-
-          {/* Hero screenshot — layout editor full width */}
-          <div className="mb-3">
-            <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Layout editor — build cavities, set layers, price live</div>
-            <Shot src="/splash/layout-editor-live.png" alt="Alex-IO layout editor with live cavities and pricing" priority={false} />
-          </div>
-
-          {/* Two supporting screenshots side by side */}
-          <div className="mt-6 grid gap-6 sm:grid-cols-2">
-            <div>
-              <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Quote line items — every cost broken out</div>
-              <Shot src="/splash/quote-line-items.png" alt="Alex-IO quote line items with foam, packaging and print costs" />
-            </div>
-            <div>
-              <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Quote management — status, revisions, send to customer</div>
-              <Shot src="/splash/quotes-list.png" alt="Alex-IO quotes list with status badges and management tools" />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Quote form — after capabilities so prospect is already convinced */}
+      {/* Quote form — right after the hero, before any feature content */}
       <section id="sample-quote" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 pb-8 sm:pb-12">
           <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
@@ -1021,6 +932,96 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Not another CPQ tool */}
+      <section className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 sm:p-8">
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
+              Not another CPQ tool
+            </div>
+            <h2 className="mt-3 text-2xl font-medium leading-snug text-[var(--text-primary)] sm:text-3xl">
+              Built for foam and corrugated. Not bent to fit them.
+            </h2>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+              Generic CPQ tools weren't built for cavity layouts, cushion curves, or DXF exports — they get bolted on with spreadsheets and workarounds. Alex-IO starts from the shop floor: material costs, layer counts, G-factor calculations, and production-ready CAD files, out of the box.
+            </p>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+              No implementation team. No six-month rollout. Set up in one 45-minute session, and you're quoting live before the call ends.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* White-label positioning */}
+      <section className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 pb-10 sm:pb-12">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 sm:p-8">
+            <h2 className="text-2xl font-medium leading-snug text-[var(--text-primary)] sm:text-3xl">
+              Your website can quote instantly — under your own name.
+            </h2>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+              Embed the quote widget on your own site, and your customers never see "Alex-IO." They see your shop, quoting like the best-run operation in the industry. You keep the relationship. We just make it faster.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Free trial banner */}
+      <section className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 pt-2 pb-6">
+          <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-[var(--text-primary)] text-lg shrink-0">🎯</span>
+              <div>
+                <span className="text-sm font-medium text-[var(--text-primary)]">Free 30-Day Trial — 3 Onboarding Spots This Quarter.{" "}</span>
+                <span className="text-sm text-[var(--text-secondary)]">Full access, personal setup session included. No credit card required.</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setActiveTier("FreeTrial"); trackEvent("cta_click"); }}
+              className="shrink-0 rounded-md bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)] whitespace-nowrap text-center"
+            >
+              Check Availability →
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Capabilities */}
+      <CapabilitiesSection />
+
+      {/* Screenshots — moved up, after capabilities */}
+      <section id="proof" className="relative z-10">
+        <div className="mx-auto max-w-7xl px-4 pb-10 sm:pb-12">
+          <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            See it in action
+          </div>
+          <h2 className="mb-2 text-2xl font-medium text-[var(--text-primary)]">What your team actually sees</h2>
+          <p className="mb-8 text-sm leading-7 text-[var(--text-secondary)]">
+            Real screens. Real data. No mockups.
+          </p>
+
+          {/* Hero screenshot — layout editor full width */}
+          <div className="mb-3">
+            <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Layout editor — build cavities, set layers, price live</div>
+            <Shot src="/splash/layout-editor-live.png" alt="Alex-IO layout editor with live cavities and pricing" priority={false} />
+          </div>
+
+          {/* Two supporting screenshots side by side */}
+          <div className="mt-6 grid gap-6 sm:grid-cols-2">
+            <div>
+              <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Quote line items — every cost broken out</div>
+              <Shot src="/splash/quote-line-items.png" alt="Alex-IO quote line items with foam, packaging and print costs" />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Quote management — status, revisions, send to customer</div>
+              <Shot src="/splash/quotes-list.png" alt="Alex-IO quotes list with status badges and management tools" />
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Pricing */}
       <section id="pricing" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
@@ -1058,7 +1059,7 @@ export default function LandingPage() {
                 onClick={() => { setActiveTier("Starter"); trackEvent("cta_click"); }}
                 className="mt-6 inline-flex justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-5 py-3 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-subtle)]"
               >
-                Get Started →
+                Start my free trial →
               </button>
             </div>
 
@@ -1085,7 +1086,7 @@ export default function LandingPage() {
                 onClick={() => { setActiveTier("Pro"); trackEvent("cta_click"); }}
                 className="mt-6 inline-flex justify-center rounded-md bg-[var(--action-primary)] px-5 py-3 text-sm font-medium text-white transition hover:bg-[var(--action-primary-hover)]"
               >
-                Get Started →
+                Start my free trial →
               </button>
             </div>
 
@@ -1109,7 +1110,7 @@ export default function LandingPage() {
                 onClick={() => { setActiveTier("Shop"); trackEvent("cta_click"); }}
                 className="mt-6 inline-flex justify-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-5 py-3 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-subtle)]"
               >
-                Get Started →
+                Start my free trial →
               </button>
             </div>
 
