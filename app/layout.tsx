@@ -1,6 +1,7 @@
 // app/layout.tsx
 import "../styles/globals.css";
 import type { Metadata } from "next";
+import Script from "next/script";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { initializeApp } from "@/lib/startup";
 
@@ -56,21 +57,20 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <head>
-        {/* Google Ads conversion tracking */}
-        <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18060048309"></script>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.dataLayer = window.dataLayer || [];
-              function gtag(){dataLayer.push(arguments);}
-              gtag('js', new Date());
-              gtag('config', 'AW-18060048309');
-            `,
-          }}
-        />
-      </head>
       <body className="min-h-screen bg-neutral-50 text-neutral-800">
+        {/* Google Ads conversion tracking — loads after the page is interactive so it no longer blocks initial render/LCP */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=AW-18060048309"
+          strategy="afterInteractive"
+        />
+        <Script id="gtag-init" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'AW-18060048309');
+          `}
+        </Script>
         <main className="relative w-full px-4 py-6">
           {children}
         </main>
