@@ -1,8 +1,24 @@
 // app/admin/commissions/page.tsx
+//
+// Role-aware: admin sees the full cross-rep view below (live totals,
+// close-a-month, mark paid/undo, payout history) unchanged, plus their own
+// rep-facing commission block above it if they're also an active rep (e.g.
+// Chuck) -- not a special case, MyCommissionPanel just renders nothing when
+// the current user has no commission_pct configured. A sales-role user sees
+// ONLY the rep-facing block -- no cross-rep data, no admin controls -- since
+// the admin-only data fetches below are gated on role === "admin" and never
+// fire for them (the /api/admin/commissions* routes 403 non-admins, which
+// would otherwise incorrectly bounce a legitimate sales user to /login).
+//
+// Role comes from the same mechanism as every other admin route:
+// getCurrentUserFromRequest() server-side, read here via the existing
+// /api/auth/whoami convention (see app/admin/tenants/page.tsx,
+// app/admin/cleanup/page.tsx for prior art) -- no parallel check invented.
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
+import MyCommissionPanel from "@/components/rep/MyCommissionPanel";
 
 type LiveRow = {
   user_id: number; name: string; email: string; sales_slug: string;
@@ -49,6 +65,26 @@ export default function AdminCommissionsPage() {
   const [showPaid, setShowPaid] = React.useState(false);
   const [selectedPeriod, setSelectedPeriod] = React.useState(currentPeriod());
 
+  // Same role mechanism as the rest of /admin -- getCurrentUserFromRequest()
+  // server-side, surfaced here via the existing whoami convention.
+  const [role, setRole] = React.useState<string | null>(null);
+  const [roleLoading, setRoleLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/auth/whoami?t=${Math.random()}`, { cache: "no-store" });
+        const json = await res.json().catch(() => null);
+        if (active) setRole(json?.ok && json?.authenticated ? (json.user?.role ?? null) : null);
+      } catch { if (active) setRole(null); }
+      finally { if (active) setRoleLoading(false); }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const isAdmin = role === "admin";
+
   async function loadLive() {
     setLiveLoading(true);
     try {
@@ -72,7 +108,14 @@ export default function AdminCommissionsPage() {
     finally { setPayoutsLoading(false); }
   }
 
-  React.useEffect(() => { loadLive(); loadPayouts(); }, []);
+  // Only fetch the cross-rep admin data once we've confirmed admin role --
+  // these routes 403 a sales-role user, and the old unconditional fetch
+  // would otherwise redirect them straight to /login on that 403.
+  React.useEffect(() => {
+    if (!isAdmin) return;
+    loadLive();
+    loadPayouts();
+  }, [isAdmin]);
 
   async function closeMonth() {
     if (!selectedPeriod || !/^\d{4}-\d{2}$/.test(selectedPeriod)) { setError("Invalid period."); return; }
@@ -131,17 +174,29 @@ export default function AdminCommissionsPage() {
         <header className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">Commissions</h1>
-            <p className="mt-1 text-sm text-[var(--text-muted)]">
-              RFM quotes only. Set rates in{" "}
-              <Link href="/admin" className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline">Admin → Users</Link>.
-            </p>
+            {isAdmin && (
+              <p className="mt-1 text-sm text-[var(--text-muted)]">
+                RFM quotes only. Set rates in{" "}
+                <Link href="/admin" className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline">Admin → Users</Link>.
+              </p>
+            )}
           </div>
-          <button onClick={() => { loadLive(); loadPayouts(); }}
-            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]">
-            Refresh
-          </button>
+          {isAdmin && (
+            <button onClick={() => { loadLive(); loadPayouts(); }}
+              className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]">
+              Refresh
+            </button>
+          )}
         </header>
 
+        {/* Your commission -- shown to every role. For a sales-role user
+            this is the entire page; for admin it renders above the
+            cross-rep controls below (nothing extra if the admin isn't also
+            an active rep -- the panel decides that for itself). */}
+        {!roleLoading && <MyCommissionPanel />}
+
+        {isAdmin && (
+          <>
         {error && <p className="rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-4 py-2 text-sm text-[var(--attention)]">{error}</p>}
         {okMsg && <p className="rounded-lg border border-[var(--status-success-text)]/30 bg-[var(--status-success-bg)] px-4 py-2 text-sm text-[var(--status-success-text)]">{okMsg}</p>}
 
@@ -305,6 +360,8 @@ export default function AdminCommissionsPage() {
             );
           })}
         </section>
+          </>
+        )}
 
       </div>
     </main>
