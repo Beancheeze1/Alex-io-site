@@ -1550,14 +1550,27 @@ export async function POST(req: NextRequest) {
         // "no prior revision" handling correctly produces "AS" for a quote's
         // very first Apply. Defaulting to "AS" here would skip straight to "BS".
         //
-        // Prefer `revision` over `stage_rev`: the RFM release-mint logic
-        // (app/api/admin/quotes/lock/route.ts) resets `revision` to the fresh
-        // released letter (e.g. "A") but does NOT touch `stage_rev`, which is
-        // left holding whatever staging letter was reached before release
-        // (e.g. "CS"). Reading stage_rev first would resume from that stale
-        // value instead of correctly starting the next stage from the letter
-        // that was just released.
-        const curStage = factsForRev?.revision || factsForRev?.stage_rev || null;
+        // The next staging letter must be derived ONLY from stage_rev — the
+        // highest staging letter this quote has EVER reached, across every
+        // release cycle. Release and staging are two fully independent,
+        // monotonically-advancing sequences that happen to live on the same
+        // quote; this must never reference facts.revision or the current
+        // released letter in any way.
+        //
+        // This used to prefer facts.revision over facts.stage_rev, on the
+        // reasoning that the RFM release-mint logic (app/api/admin/quotes/
+        // lock/route.ts) resets `revision` to the fresh released letter
+        // (e.g. "A") so stage_rev must be "stale." That reasoning was the
+        // bug: release does NOT touch stage_rev (see the
+        // `if (!facts.stage_rev)` guard in that mint logic — it only ever
+        // initializes stage_rev, never overwrites an existing value), so
+        // stage_rev already correctly holds the real historical max. Reading
+        // revision instead coupled the next staging letter to whatever had
+        // just been released: a quote that reached "BS" pre-release, then
+        // released to "A", then revised, computed "AS" (matching the just-
+        // released letter) instead of "CS" (continuing forward from "BS") —
+        // a real repeat/regression, not a restart-by-design.
+        const curStage = factsForRev?.stage_rev ?? null;
         const nextStage = nextStageRev(curStage);
 
         factsForRev.stage_rev = nextStage;

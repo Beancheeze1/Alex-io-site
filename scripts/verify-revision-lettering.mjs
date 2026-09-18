@@ -2,9 +2,35 @@
 //
 // Regression test for the revision-lettering scheme (release/revise/apply
 // letter advancement) and the display invariant that came out of
-// investigating a bug report against Q-REP-20260914-221352: a released
-// quote must never show a trailing "S", and an unlocked (staging) quote
-// must always show one.
+// investigating a bug report against Q-REP-20260914-221352.
+//
+// Two fully independent, monotonically-advancing sequences live on every
+// quote:
+//   - RELEASED (facts.released_rev / bare letter, e.g. "B"): advances by
+//     exactly one letter on every Lock/RFM release, via
+//     nextReleasedLetter() in app/api/admin/quotes/lock/route.ts.
+//   - STAGING (facts.stage_rev / letter+"S", e.g. "BS"): advances by one
+//     letter on every successful Apply while unlocked, via nextStageRev()
+//     in app/api/quote/layout/apply/route.ts -- computed from the highest
+//     staging letter this quote has EVER reached, across every release
+//     cycle. It must NEVER be derived from, reset to, or coupled with the
+//     released letter.
+//
+// A prior version of apply/route.ts (commit 0f307c09, well before this
+// script existed) computed the next staging letter from facts.revision
+// (which release resets to the bare released letter) instead of
+// facts.stage_rev (which release never touches once set) -- coupling
+// staging continuation to whatever letter had just been released. This
+// script's "reach BS before ever releasing" cycle 1 is specifically
+// designed to expose that: with the bug, releasing "BS" as the first-ever
+// release mints "A", and the next Apply then reads facts.revision="A" and
+// produces "AS" (repeats/regresses); fixed, it reads facts.stage_rev="BS"
+// and correctly produces "CS" (continues forward).
+//
+// This also checks the separate display invariant fixed alongside the
+// staging-letter bug: a locked/released quote must never show a trailing
+// "S"; an unlocked (staging) quote must always show one -- via the real
+// /api/quote/print response (quote.revision, the field the UI reads).
 //
 // Drives the REAL routes end to end against a running server:
 //   POST /api/quote/layout/apply          (staging revision bump)
@@ -12,11 +38,10 @@
 //   GET  /api/quote/print                 (the sanitized revision the UI
 //                                          actually reads -- quote.revision)
 //
-// Creates its own throwaway quote (quote_no below), runs 3 full
-// release -> revise -> apply cycles, asserts on every checkpoint, then
-// deletes everything it created (quotes/quote_items/quote_layout_packages
-// rows, plus the Redis "facts" key for that quote_no) so it leaves no
-// residue when run against a real environment.
+// Creates its own throwaway quote (quote_no below), runs the full scenario,
+// then deletes everything it created (quotes/quote_items/
+// quote_layout_packages rows, plus the Redis "facts" key for that
+// quote_no) so it leaves no residue when run against a real environment.
 //
 // Usage:
 //   BASE_URL=http://localhost:3000 \
@@ -63,6 +88,7 @@ const db = new pg.Client({ connectionString: DATABASE_URL });
 await db.connect();
 
 const H = { "Content-Type": "application/json", Cookie: `alexio_session=${COOKIE}` };
+const seenRevisions = [];
 
 async function apply(qty) {
   const res = await fetch(`${BASE_URL}/api/quote/layout/apply`, {
@@ -115,6 +141,30 @@ function assertInvariant(label, locked, revision) {
   );
 }
 
+async function applyAndCheck(label, expected) {
+  await apply(1);
+  const state = await printState();
+  seenRevisions.push(state.quote.revision);
+  check(`${label}: expected "${expected}"`, state.quote.revision === expected, `got "${state.quote.revision}"`);
+  assertInvariant(label, state.quote.locked, state.quote.revision);
+  return state.quote.revision;
+}
+
+async function releaseAndCheck(label, expected) {
+  const res = await lock(true);
+  check(`${label}: lock succeeded`, res.json?.ok === true, JSON.stringify(res.json));
+  const state = await printState();
+  seenRevisions.push(state.quote.revision);
+  check(`${label}: expected "${expected}"`, state.quote.revision === expected, `got "${state.quote.revision}"`);
+  assertInvariant(label, state.quote.locked, state.quote.revision);
+  return state.quote.revision;
+}
+
+async function reviseAndCheck(label) {
+  const res = await lock(false);
+  check(`${label}: unlock (Revise) succeeded`, res.json?.ok === true, JSON.stringify(res.json));
+}
+
 async function cleanup() {
   await db.query(`DELETE FROM public.quote_layout_packages WHERE quote_id = (SELECT id FROM public.quotes WHERE quote_no = $1)`, [QUOTE_NO]);
   await db.query(`DELETE FROM public.quote_items WHERE quote_id = (SELECT id FROM public.quotes WHERE quote_no = $1)`, [QUOTE_NO]);
@@ -131,65 +181,41 @@ async function cleanup() {
 try {
   console.log(`Testing against ${BASE_URL}, quote ${QUOTE_NO}\n`);
 
-  console.log("=== Cycle 1: first-ever Apply, then release ===");
-  await apply(1);
-  let state = await printState();
-  check("first Apply produces staging label AS (no prior revision)", state.quote.revision === "AS", `got "${state.quote.revision}"`);
-  assertInvariant("cycle1 pre-release", state.quote.locked, state.quote.revision);
+  console.log("=== Chuck's exact scenario: reach BS pre-release, THEN release for the first time ===");
+  console.log("--- First Apply: no prior revision -> AS ---");
+  await applyAndCheck("apply 1 (first ever)", "AS");
 
-  const lock1 = await lock(true);
-  check("lock 1 (release) succeeded", lock1.json?.ok === true, JSON.stringify(lock1.json));
-  state = await printState();
-  const released1 = state.quote.revision;
-  check("release 1 produces letter A", released1 === "A", `got "${released1}"`);
-  assertInvariant("cycle1 post-release", state.quote.locked, state.quote.revision);
+  console.log("\n--- Second Apply BEFORE any release: AS -> BS ---");
+  await applyAndCheck("apply 2 (still pre-release)", "BS");
 
-  console.log("\n=== Cycle 1: revise (unlock) then Apply again ===");
-  check("unlock 1 (Revise) succeeded", (await lock(false)).json?.ok === true);
-  await apply(1);
-  state = await printState();
-  check("staging continues the SAME letter just released: A -> AS (not a reset)", state.quote.revision === "AS", `got "${state.quote.revision}"`);
-  assertInvariant("cycle1 post-revise-apply", state.quote.locked, state.quote.revision);
+  console.log("\n--- First-ever release, from BS: mints released letter A ---");
+  await releaseAndCheck("release 1 (first ever, from BS)", "A");
 
-  console.log("\n=== Cycle 2: release again -- released track must advance to B ===");
-  const lock2 = await lock(true);
-  check("lock 2 (release) succeeded", lock2.json?.ok === true, JSON.stringify(lock2.json));
-  state = await printState();
-  const released2 = state.quote.revision;
-  check("release 2 produces letter B (advances from A, never resets)", released2 === "B", `got "${released2}"`);
-  assertInvariant("cycle2 post-release", state.quote.locked, state.quote.revision);
+  console.log("\n--- Revise, then Apply: staging MUST continue from BS -> CS, NOT reset to AS ---");
+  await reviseAndCheck("unlock 1 (Revise)");
+  await applyAndCheck("apply 3 (post-release-1): must continue BS -> CS, not reset to AS", "CS");
 
-  console.log("\n=== Cycle 2: revise (unlock) then Apply again ===");
-  check("unlock 2 (Revise) succeeded", (await lock(false)).json?.ok === true);
-  await apply(1);
-  state = await printState();
-  check("staging continues the SAME letter just released: B -> BS (not a reset to AS)", state.quote.revision === "BS", `got "${state.quote.revision}"`);
-  assertInvariant("cycle2 post-revise-apply", state.quote.locked, state.quote.revision);
+  console.log("\n--- One more Apply before releasing again: CS -> DS ---");
+  await applyAndCheck("apply 4 (still pre-release-2)", "DS");
 
-  console.log("\n=== Cycle 3: one more Apply before release (BS->CS), then release -> C ===");
-  await apply(1);
-  state = await printState();
-  check("staging advances BS->CS on a second Apply before release", state.quote.revision === "CS", `got "${state.quote.revision}"`);
-  assertInvariant("cycle3 pre-release (2nd apply)", state.quote.locked, state.quote.revision);
+  console.log("\n--- Release again: released track advances independently, A -> B ---");
+  await releaseAndCheck("release 2 (from DS)", "B");
 
-  const lock3 = await lock(true);
-  check("lock 3 (release) succeeded", lock3.json?.ok === true, JSON.stringify(lock3.json));
-  state = await printState();
-  const released3 = state.quote.revision;
-  check("release 3 produces letter C (advances from B, never resets)", released3 === "C", `got "${released3}"`);
-  assertInvariant("cycle3 post-release", state.quote.locked, state.quote.revision);
+  console.log("\n--- Revise, then Apply: staging MUST continue from DS -> ES, NOT couple to released B (\"BS\") ---");
+  await reviseAndCheck("unlock 2 (Revise)");
+  await applyAndCheck("apply 5 (post-release-2): must continue DS -> ES, not reset/couple to BS", "ES");
 
-  console.log("\n=== Cycle 3: revise (unlock) then Apply again ===");
-  check("unlock 3 (Revise) succeeded", (await lock(false)).json?.ok === true);
-  await apply(1);
-  state = await printState();
-  check("staging continues the SAME letter just released: C -> CS (not a reset to AS)", state.quote.revision === "CS", `got "${state.quote.revision}"`);
-  assertInvariant("cycle3 post-revise-apply", state.quote.locked, state.quote.revision);
-
-  console.log("\n=== Released-track summary across all 3 cycles ===");
-  check("released letters strictly advanced A -> B -> C (never repeated, never reset)",
-    released1 === "A" && released2 === "B" && released3 === "C",
-    `A=${released1} B=${released2} C=${released3}`);
+  console.log("\n=== Full sequence produced (must have zero repeats) ===");
+  console.log(" ", seenRevisions.join(" -> "));
+  const unique = new Set(seenRevisions);
+  check("zero repeats anywhere in the sequence", unique.size === seenRevisions.length,
+    `${seenRevisions.length} entries, ${unique.size} unique: [${seenRevisions.join(", ")}]`);
+  check("staging climbed continuously across two release cycles: AS,BS,CS,DS,ES all appeared in order",
+    seenRevisions.filter((r) => /S$/.test(r)).join(",") === "AS,BS,CS,DS,ES",
+    seenRevisions.filter((r) => /S$/.test(r)).join(","));
+  check("released track advanced independently and never repeated: A, B",
+    seenRevisions.filter((r) => !/S$/.test(r)).join(",") === "A,B",
+    seenRevisions.filter((r) => !/S$/.test(r)).join(","));
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 } finally {
