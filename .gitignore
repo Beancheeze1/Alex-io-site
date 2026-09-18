@@ -56,3 +56,4 @@ yarn-error.log*
 
 # Local artifacts
 Alex-IO-clean/
+.scratch/

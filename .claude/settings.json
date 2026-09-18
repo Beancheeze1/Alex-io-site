@@ -21,7 +21,8 @@
       "Bash(node -e \"process.stdin.setEncoding\\('utf8'\\); let d=''; process.stdin.on\\('data',c=>d+=c\\); process.stdin.on\\('end',\\(\\)=>console.log\\(JSON.stringify\\(JSON.parse\\(d\\),null,2\\)\\)\\)\")",
       "Bash(node tmp_verify_modal_ui.mjs)",
       "Bash(rm -f tmp_*.mjs tmp_*.png)",
-      "Bash(rm -rf app/tmpverifyrepmodal999)"
+      "Bash(rm -rf app/tmpverifyrepmodal999)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

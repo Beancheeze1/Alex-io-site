@@ -126,6 +126,9 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/commissions" className="hover:text-[var(--text-primary)]">
                   Commissions
                 </Link>
+                <Link href="/admin/expenses" className="hover:text-[var(--text-primary)]">
+                  Expenses
+                </Link>
 
                 {showOwnerOnlyLinks ? (
                   <Link href="/admin/logs" className="hover:text-[var(--text-primary)]">

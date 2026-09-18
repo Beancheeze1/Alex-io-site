@@ -3,7 +3,14 @@
 // Manages monthly commission payout snapshots.
 //
 // GET  — list all payout records for this tenant
-// POST — "close month": snapshot current RFM totals into commission_payouts
+// POST — "close month": sweep every locked (RFM) quote not yet linked to a
+//        prior closed period into commission_payouts. Sweeping is done by
+//        app/lib/period-close.ts's shared sweepPeriod() primitive -- see
+//        that file for why: a close must NEVER filter by created_at
+//        falling inside the selected calendar month (that let a quote from
+//        a month nobody explicitly closed get orphaned forever). A period
+//        represents "everything outstanding as of now", not a fixed date
+//        range.
 // PATCH — mark a payout as paid (stamps paid_at) or unpaid (unpay: true)
 //
 // Admin-only.
@@ -13,6 +20,7 @@ import { q, one } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { getCommissionableTotal, safeNum } from "@/app/lib/commission-pricing";
+import { sweepPeriod, type SweepConfig } from "@/app/lib/period-close";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,7 +53,33 @@ async function ensureTables() {
     `ALTER TABLE public.users ADD COLUMN IF NOT EXISTS commission_pct numeric(5,2) DEFAULT NULL`,
     [],
   ).catch(() => null);
+
+  // migrations/020_commission_payout_quote_link.sql is the durable
+  // definition; this is the same belt-and-braces ensureTables() already
+  // does for the rest of this schema, so it works on an environment that
+  // has not run migrations yet.
+  await one(
+    `ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS commission_payout_id integer DEFAULT NULL`,
+    [],
+  ).catch(() => null);
+
+  await one(
+    `CREATE INDEX IF NOT EXISTS quotes_commission_payout_idx
+       ON public.quotes (tenant_id, sales_rep_id, commission_payout_id)`,
+    [],
+  ).catch(() => null);
 }
+
+const QUOTE_SWEEP_CONFIG: SweepConfig = {
+  payoutTable: "public.commission_payouts",
+  sourceTable: "public.quotes",
+  sourceRepColumn: "sales_rep_id",
+  linkColumn: "commission_payout_id",
+  sourceExtraWhere: "AND locked = true",
+  sourceSelectColumns: "id, quote_no",
+};
+
+type SweptQuote = { id: number; quote_no: string };
 
 // ── GET: list all payouts ─────────────────────────────────────────────────────
 
@@ -111,41 +145,61 @@ export async function POST(req: NextRequest) {
       [tenantId],
     );
 
-    const [year, month] = period.split("-").map(Number);
-    const periodStart = new Date(year, month - 1, 1);
-    const periodEnd   = new Date(year, month, 1);
-
     const results = await Promise.all(reps.map(async (rep) => {
-      const quotes = await q<{ id: number; quote_no: string }>(
-        `SELECT id, quote_no FROM public.quotes
-         WHERE sales_rep_id = $1 AND tenant_id = $2
-           AND locked = true
-           AND created_at >= $3 AND created_at < $4`,
-        [rep.user_id, tenantId, periodStart.toISOString(), periodEnd.toISOString()],
-      );
+      // Sweep: locks/creates the payout row and links every locked quote
+      // for this rep not yet linked to ANY prior period -- never filtered
+      // by created_at. See app/lib/period-close.ts.
+      const sweep = await sweepPeriod<SweptQuote>(QUOTE_SWEEP_CONFIG, tenantId, rep.user_id, period);
 
+      if (sweep.status === "already_paid") {
+        const frozen = await one<{
+          quotes_total_usd: string; commission_usd: string; quote_count: number;
+        }>(
+          `SELECT quotes_total_usd, commission_usd, quote_count
+           FROM public.commission_payouts WHERE id = $1`,
+          [sweep.payoutId],
+        );
+        return {
+          user_id: rep.user_id, name: rep.name, period, status: sweep.status,
+          quotes_total_usd: Number(frozen?.quotes_total_usd ?? 0),
+          commission_usd: Number(frozen?.commission_usd ?? 0),
+          quote_count: Number(frozen?.quote_count ?? 0),
+          swept: 0,
+        };
+      }
+
+      if (sweep.status === "skipped_empty") {
+        return {
+          user_id: rep.user_id, name: rep.name, period, status: sweep.status,
+          quotes_total_usd: 0, commission_usd: 0, quote_count: 0, swept: 0,
+        };
+      }
+
+      // Pricing is external (quote_items/box lookups + an HTTP round trip
+      // to /api/quotes/calc) and re-derived from EVERY quote currently
+      // linked to this payout -- not just what THIS call swept -- so
+      // re-closing an unpaid period after new RFM activity recomputes the
+      // whole period instead of drifting from an accumulated delta.
       const totals = await Promise.all(
-        quotes.map((qt) => getCommissionableTotal(qt.id, qt.quote_no, base, tenantId)),
+        sweep.allLinkedRows.map((qt) => getCommissionableTotal(qt.id, qt.quote_no, base, tenantId)),
       );
       const quotesTotal = Math.round(totals.reduce((s, t) => s + t, 0) * 100) / 100;
       const pct = safeNum(rep.commission_pct);
       const commissionAmt = Math.round(quotesTotal * (pct / 100) * 100) / 100;
 
       await one(
-        `INSERT INTO public.commission_payouts
-           (tenant_id, user_id, period, quotes_total_usd, commission_pct, commission_usd, quote_count, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-         ON CONFLICT (tenant_id, user_id, period) DO UPDATE
-           SET quotes_total_usd = EXCLUDED.quotes_total_usd,
-               commission_pct   = EXCLUDED.commission_pct,
-               commission_usd   = EXCLUDED.commission_usd,
-               quote_count      = EXCLUDED.quote_count,
-               updated_at       = NOW()
-           WHERE commission_payouts.paid_at IS NULL`,
-        [tenantId, rep.user_id, period, quotesTotal, pct, commissionAmt, quotes.length],
+        `UPDATE public.commission_payouts
+         SET quotes_total_usd = $1, commission_pct = $2, commission_usd = $3,
+             quote_count = $4, updated_at = NOW()
+         WHERE id = $5 AND paid_at IS NULL`,
+        [quotesTotal, pct, commissionAmt, sweep.allLinkedRows.length, sweep.payoutId],
       );
 
-      return { user_id: rep.user_id, name: rep.name, period, quotes_total_usd: quotesTotal, commission_usd: commissionAmt };
+      return {
+        user_id: rep.user_id, name: rep.name, period, status: sweep.status,
+        quotes_total_usd: quotesTotal, commission_usd: commissionAmt,
+        quote_count: sweep.allLinkedRows.length, swept: sweep.sweptRows.length,
+      };
     }));
 
     return ok({ ok: true, period, results });
