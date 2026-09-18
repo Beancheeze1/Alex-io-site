@@ -44,6 +44,14 @@ type QuoteRow = {
   po_number?: string | null;
   is_rush?: boolean | null;
   qty_breaks?: Array<{ qty: number; price: number | null }> | null;
+
+  // locked + revision are both selected and computed server-side in
+  // /api/quote/print (revision via pickDisplayRevision, which already
+  // strips a trailing "S" when locked and prefers released_rev over the
+  // raw staging value) — see displayRevision below for why this page reads
+  // these instead of the raw facts.revision field.
+  locked?: boolean | null;
+  revision?: string | null;
 };
 
 type ItemRow = {
@@ -795,6 +803,25 @@ export default function QuotePrintClient({
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
+  // Revision label actually shown/used on this page (pill + downloaded
+  // filenames). Prefers quote.revision -- computed server-side by
+  // pickDisplayRevision in /api/quote/print, which strips a trailing "S"
+  // when the quote is locked/released -- rather than the raw facts.revision
+  // field, which is the internal staging/mint working value and can
+  // legitimately hold an "S"-suffixed label even once the quote is locked
+  // (e.g. right after release, before the next Apply). Reading facts.revision
+  // directly violated the invariant that a released quote never shows a
+  // trailing "S": it could show e.g. "BS" alongside a package tagged
+  // RELEASED. Falls back to a defensive local strip of facts.revision only
+  // if the server somehow didn't send a usable quote.revision.
+  const displayRevision = React.useMemo(() => {
+    const fromQuote = typeof quote?.revision === "string" ? quote.revision.trim() : "";
+    if (fromQuote) return fromQuote;
+    const raw = typeof facts?.revision === "string" ? facts.revision.trim() : "";
+    if (!raw) return quote?.locked ? "" : "AS";
+    return quote?.locked ? raw.replace(/S$/i, "") : raw;
+  }, [quote, facts]);
+
 
 
 
@@ -960,7 +987,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         const blob = new Blob([text], { type: "application/dxf" });
         const filename = buildLayerFilename({
           quoteNo: quoteNoValue,
-          revision: facts?.revision ?? null,
+          revision: displayRevision || null,
           layerIndex,
           layerLabel,
           thicknessIn,
@@ -973,7 +1000,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         window.open(url, "_blank", "noopener,noreferrer");
       }
     },
-    [quote, quoteNo, facts],
+    [quote, quoteNo, displayRevision],
   );
 
   const handleDownloadLayerStep = React.useCallback(
@@ -996,7 +1023,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         const blob = new Blob([buf], { type: "application/octet-stream" });
         const filename = buildLayerFilename({
           quoteNo: quoteNoValue,
-          revision: facts?.revision ?? null,
+          revision: displayRevision || null,
           layerIndex,
           layerLabel,
           thicknessIn,
@@ -1009,7 +1036,7 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         window.open(url, "_blank", "noopener,noreferrer");
       }
     },
-    [quote, quoteNo, facts],
+    [quote, quoteNo, displayRevision],
   );
 
   // Helper to reload quote data from /api/quote/print (used on initial load and after removals)
@@ -2161,6 +2188,26 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 }}
               >
                 <div>
+                  {isStaffView ? (
+                    // This page is shared by customers (emailed link) and
+                    // staff previewing from the admin app -- see the
+                    // isStaffView comment in app/quote/page.tsx. Only show
+                    // a way back to the internal quotes list for staff;
+                    // a customer viewing their own quote should never see
+                    // admin chrome.
+                    <a
+                      href="/admin/quotes"
+                      style={{
+                        display: "inline-block",
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                        textDecoration: "none",
+                        marginBottom: 6,
+                      }}
+                    >
+                      ← Back to quotes list
+                    </a>
+                  ) : null}
                   <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>
                     Powered by Alex-IO
                   </div>
@@ -2169,9 +2216,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   </div>
                   <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-secondary)" }}>
                     Quote {quote.quote_no}
-                    {facts?.revision ? (
+                    {displayRevision ? (
                       <span
-                        title={facts.revision_updated_at ? new Date(facts.revision_updated_at).toLocaleString() : undefined}
+                        title={facts?.revision_updated_at ? new Date(facts.revision_updated_at).toLocaleString() : undefined}
                         style={{
                           marginLeft: 8,
                           padding: "2px 8px",
@@ -2184,7 +2231,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           color: "var(--text-primary)",
                         }}
                       >
-                        {facts.revision}
+                        {displayRevision}
                       </span>
                     ) : null}
                     {quote.is_rush ? (

@@ -34,6 +34,14 @@ type QuoteRow = {
   status: string;
   created_at: string;
   customer_id?: number | null;
+
+  // locked + revision are both selected/computed server-side in
+  // /api/quote/print (revision via pickDisplayRevision, which strips a
+  // trailing "S" when locked and prefers released_rev over the raw staging
+  // value). See the revisionValue-setting effect below for why this is
+  // read instead of the raw facts.revision.
+  locked?: boolean | null;
+  revision?: string | null;
 };
 
 type ItemRow = {
@@ -1303,9 +1311,28 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             setCustomerBoxDims((json as ApiOk)?.customerBoxDims ?? null);
             setCustomerBoxMatch((json as ApiOk)?.customerBoxMatch ?? null);
 
-            // REV: /api/quote/print returns facts.revision (authoritative). Fallback "AS".
-            const revRaw = (json as any)?.facts?.revision;
-            const rev = typeof revRaw === "string" && revRaw.trim().length > 0 ? revRaw.trim() : "AS";
+            // REV: prefer json.quote.revision -- computed server-side by
+            // pickDisplayRevision in /api/quote/print, which strips a
+            // trailing "S" when the quote is locked/released and prefers
+            // released_rev over the raw staging value. The raw
+            // json.facts.revision field is the internal staging/mint
+            // working value and can legitimately still hold an
+            // "S"-suffixed label even once locked (e.g. right after
+            // release, before the next Apply) -- reading it directly here
+            // violated the invariant that a released quote never displays
+            // a trailing "S". Falls back to a defensive local strip of
+            // facts.revision only if the server didn't send a usable
+            // quote.revision.
+            const quoteRevRaw = (json as any)?.quote?.revision;
+            const locked = !!(json as any)?.quote?.locked;
+            let rev: string;
+            if (typeof quoteRevRaw === "string" && quoteRevRaw.trim().length > 0) {
+              rev = quoteRevRaw.trim();
+            } else {
+              const factsRevRaw = (json as any)?.facts?.revision;
+              const raw = typeof factsRevRaw === "string" ? factsRevRaw.trim() : "";
+              rev = raw ? (locked ? raw.replace(/S$/i, "") : raw) : "AS";
+            }
             setRevisionValue(rev);
           } else {
             setError("Unexpected response from quote API.");

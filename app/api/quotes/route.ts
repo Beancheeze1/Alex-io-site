@@ -9,6 +9,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { loadFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { findOrCreateCustomer } from "@/app/lib/customers";
+import { displayRevisionLabel } from "@/app/lib/revision-label";
 
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
@@ -73,16 +74,11 @@ export async function GET(req: NextRequest) {
       const withRevision = await Promise.all(
         (rows as any[]).map(async (r) => {
           const facts = await loadFacts(String(r.quote_no));
-          const revRaw =
-            typeof (facts as any)?.revision === "string"
-              ? String((facts as any).revision).trim()
-              : "";
-          const normalize = (s: string) => {
-            const t = String(s || "").trim();
-            return t.toLowerCase().startsWith("rev") ? t.slice(3).trim() : t;
-          };
-
-          const revision = revRaw ? normalize(revRaw) : "";
+          // displayRevisionLabel strips a trailing "S" once locked (and
+          // prefers released_rev) -- see app/lib/revision-label.ts. Reading
+          // facts.revision raw here (as this used to) could show an
+          // "S"-suffixed label for an already-released quote.
+          const revision = displayRevisionLabel(facts as any, !!r.locked);
           return { ...r, revision };
         }),
       );
@@ -120,16 +116,11 @@ export async function GET(req: NextRequest) {
     const withRevision = await Promise.all(
       (rows as any[]).map(async (r) => {
         const facts = await loadFacts(String(r.quote_no));
-        const revRaw =
-          typeof (facts as any)?.revision === "string"
-            ? String((facts as any).revision).trim()
-            : "";
-        const normalize = (s: string) => {
-          const t = String(s || "").trim();
-          return t.toLowerCase().startsWith("rev") ? t.slice(3).trim() : t;
-        };
-
-        const revision = revRaw ? normalize(revRaw) : "";
+        // displayRevisionLabel strips a trailing "S" once locked (and
+        // prefers released_rev) -- see app/lib/revision-label.ts. Reading
+        // facts.revision raw here (as this used to) could show an
+        // "S"-suffixed label for an already-released quote.
+        const revision = displayRevisionLabel(facts as any, !!r.locked);
         return { ...r, revision };
       }),
     );
