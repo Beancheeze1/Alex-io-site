@@ -570,8 +570,21 @@ function notesPanel(
   if (layer.cropCorners) modifiers.push("Chamfered corners");
   if (input.block.cornerStyle==="chamfer" && input.block.chamferIn) modifiers.push(`Block chamfer ${input.block.chamferIn}"`);
 
-  // Compact block dims on one line: L × W × H
-  const blockDimsVal = `${input.block.lengthIn.toFixed(3)}" \xD7 ${input.block.widthIn.toFixed(3)}" \xD7 ${input.block.heightIn.toFixed(3)}"`;
+  // Compact block dims on one line: L × W × H. The L/W footprint is shared
+  // across every sheet in a multi-layer stack (input.block is loop-
+  // invariant, passed unchanged to every page), so that part is correctly
+  // read from input.block. The H/Z component must NOT be — it has to be
+  // THIS sheet's own layer thickness (layer.thicknessIn, already proven
+  // correct just above as the "Thickness" row), never input.block.heightIn.
+  // That field is the top-level/overall block metadata from the layout
+  // JSON (see layoutToDrawingInput in the export routes) and is identical
+  // on every page regardless of which layer is being drawn, so reading it
+  // here made every sheet's Block Dims Z show the same (wrong, for any
+  // non-primary layer) value instead of each sheet calling out the piece
+  // actually shown on it — every other height reference in this file
+  // (drawFrontView/drawRightView geometry, dimension lines) already
+  // correctly uses layer.thicknessIn; this was the one place that didn't.
+  const blockDimsVal = `${input.block.lengthIn.toFixed(3)}" \xD7 ${input.block.widthIn.toFixed(3)}" \xD7 ${layer.thicknessIn.toFixed(3)}"`;
 
   page.drawText("LAYER DETAILS:", { x:midX+colPad, y:ry, size:7, font:fontBold, color:C.black });
   ry -= 11;
