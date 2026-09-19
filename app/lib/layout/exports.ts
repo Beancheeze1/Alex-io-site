@@ -271,6 +271,18 @@ export function embedGeometryHashInStep(step: string, hash: string): string {
   return `/* ${marker} ${hash} */\n${step}`;
 }
 
+// Counterpart to embedGeometryHashInStep -- reads back the hash embedded in
+// a previously-generated STEP text's leading comment. Lets a caller that
+// already has a stored step_text (e.g. from the last Apply) tell whether it
+// still matches the current layout_json without re-hitting the STEP
+// microservice, the same way the locked-quote path already compares
+// quotes.geometry_hash against a freshly computed hash.
+export function extractGeometryHashFromStep(step: string | null | undefined): string | null {
+  if (!step) return null;
+  const m = /ALEX-IO-GEOMETRY-HASH:\s*([0-9a-f]+)/i.exec(step);
+  return m ? m[1] : null;
+}
+
 export function buildLayoutExports(layout: LayoutLike): LayoutExportBundle {
   const hash = computeGeometryHash(layout);
   const svg = embedGeometryHashInSvg(buildSvg(layout), hash);

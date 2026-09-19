@@ -25,7 +25,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
-import { buildLayoutExports, computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
+import { buildLayoutExports, computeGeometryHash, embedGeometryHashInStep, extractGeometryHashFromStep } from "@/app/lib/layout/exports";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
@@ -584,8 +584,22 @@ export async function GET(req: NextRequest) {
           // staff+unlocked case needs a genuinely fresh STEP, so call the
           // real microservice-backed generator; if that fails, keep the
           // last known-good stored value rather than blanking it.
+          //
+          // Skip the regenerate when the stored step_text already carries
+          // this exact layoutHash (embedded by embedGeometryHashInStep at
+          // whatever Apply/lock last wrote it) -- this route runs on every
+          // page view of an unlocked quote (no polling needed to trigger
+          // it, just opening/reloading the admin or /quote page), and
+          // without this check it silently re-hit the external STEP
+          // microservice on every single one of those views even when the
+          // layout hadn't changed since the last Apply. Confirmed via
+          // repeated identical "N spacing warning(s)" log entries for one
+          // quote, clustered within minutes of each other -- consistent
+          // with page reloads, not repeated deliberate downloads.
           let stepText = layoutPkg.step_text;
-          if (staffUnlockedRegen) {
+          const storedStepHash = extractGeometryHashFromStep(layoutPkg.step_text);
+          const stepAlreadyCurrent = staffUnlockedRegen && !!storedStepHash && storedStepHash === layoutHash;
+          if (staffUnlockedRegen && !stepAlreadyCurrent) {
             try {
               const fresh = await buildStepFromLayout(layoutPkg.layout_json, quote.quote_no, null);
               if (fresh) {
