@@ -25,6 +25,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { saveFacts } from "@/app/lib/memory";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { resolveDemoMaterial } from "@/lib/demo-material";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,16 +130,16 @@ export async function POST(req: NextRequest) {
 
     const tenantId = tenantRow.id;
 
-    // ── Find first active material (fallback for quote_items) ───────────────
-    // We pick the first active material as a sensible default. The layout editor
-    // lets the prospect change material before Apply so this is just a placeholder.
-    const materialRow = await one<{ id: number; name: string }>(
-      `SELECT id, name FROM public.materials WHERE active = true ORDER BY id ASC LIMIT 1`,
-      [],
-    );
-
-    const materialId = materialRow?.id ?? 1;
-    const materialName = materialRow?.name ?? "Foam";
+    // ── Resolve the material the prospect asked for ─────────────────────────
+    // Previously this always took the lowest-id active material (Ester 1560
+    // polyurethane), ignoring materialId/materialText, and silently fell back
+    // to id 1. See lib/demo-material.ts for the resolution order.
+    const material = await resolveDemoMaterial({
+      materialId: body.materialId,
+      materialText: body.materialText,
+    });
+    const materialId = material.id;
+    const materialName = material.name;
 
     // ── Build quote number ──────────────────────────────────────────────────
     // Retry up to 3 times in the astronomically unlikely case of a collision
@@ -246,7 +247,7 @@ export async function POST(req: NextRequest) {
       // Material (placeholder — editor overrides)
       materialMode: body.materialMode ?? "recommend",
       materialText: body.materialText ?? "",
-      materialId: typeof body.materialId === "number" ? body.materialId : null,
+      materialId: material.resolution === "default" ? null : material.id,
 
       // Cavities
       cavities: body.cavities ?? "",
@@ -301,8 +302,8 @@ export async function POST(req: NextRequest) {
     if (company) p.set("customer_company", company);
 
     // Material
-    if (typeof body.materialId === "number" && body.materialId > 0) {
-      p.set("material_id", String(body.materialId));
+    if (material.resolution !== "default") {
+      p.set("material_id", String(material.id));
       p.set("material_mode", "known");
     }
     if (String(body.materialText ?? "").trim()) {
@@ -385,6 +386,7 @@ export async function POST(req: NextRequest) {
         tenantId,
         materialId,
         materialName,
+        materialResolution: material.resolution,
       },
       { status: 201 },
     );

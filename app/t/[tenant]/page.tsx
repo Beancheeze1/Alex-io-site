@@ -12,6 +12,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import SplashChatWidget from "@/components/SplashChatWidget";
 import TenantLogo from "@/components/tenant/TenantLogo";
+import QuoteLookupCard from "@/components/tenant/QuoteLookupCard";
 import { loadTenantPage, PRODUCT_INFO, type ProductKey } from "@/lib/tenant-page";
 
 export const runtime = "nodejs";
@@ -235,7 +236,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
 
       {/* Action cards (overlap the banner) */}
       <section className="relative mx-auto -mt-24 max-w-[1200px] px-6">
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
           <div
             className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
             style={{
@@ -288,6 +289,8 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
               </div>
             </div>
           ) : null}
+
+          <QuoteLookupCard tenantSlug={t.slug} primaryColor={t.primaryColor} onPrimary={t.onPrimary} />
         </div>
       </section>
 

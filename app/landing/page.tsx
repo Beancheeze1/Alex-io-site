@@ -636,8 +636,13 @@ export default function LandingPage() {
         return;
       }
       quoteNo = data.quoteNo;
-      seedMaterialId = typeof data.materialId === "number" ? data.materialId : null;
-      seedMaterialName = typeof data.materialName === "string" ? data.materialName : "";
+      // Only present the seed's material as the buyer's choice when it was
+      // actually matched from their input. This form sends "recommend", so the
+      // seed's default placeholder must not be shown as a "known" material.
+      if (data.materialResolution === "id" || data.materialResolution === "text") {
+        seedMaterialId = typeof data.materialId === "number" ? data.materialId : null;
+        seedMaterialName = typeof data.materialName === "string" ? data.materialName : "";
+      }
     } catch {
       setSeedError(true);
       setSubmitting(false);

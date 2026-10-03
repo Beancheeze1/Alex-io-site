@@ -23,6 +23,11 @@ function Fail($label, $detail) {
     $script:fail++
 }
 
+function Write-Section($title) {
+    Write-Host ""
+    Write-Host $title -ForegroundColor Cyan
+}
+
 function Get-Url($path) {
     try {
         $r = Invoke-WebRequest -Uri "$BaseUrl$path" -UseBasicParsing -ErrorAction Stop -TimeoutSec 15
@@ -179,11 +184,17 @@ if ($flowQuoteNo) {
             } else {
                 Fail "Quote has no line items" "Pricing engine may not have run"
             }
-            $hasPrice = $printData.items | Where-Object { $_.unit_price -gt 0 -or $_.total_price -gt 0 }
+            $hasPrice = $printData.items | Where-Object { [double]$_.price_unit_usd -gt 0 -or [double]$_.price_total_usd -gt 0 }
             if ($hasPrice) {
                 Pass "Quote line items have pricing (engine ran)"
             } else {
-                Fail "Quote line items have no pricing" "unit_price and total_price are both 0 on all items"
+                Fail "Quote line items have no pricing" "price_unit_usd and price_total_usd are both 0 on all items"
+            }
+            $firstItem = $printData.items[0]
+            if ($firstItem.material_family -eq "Polyethylene" -and [double]$firstItem.density_lb_ft3 -eq 1.7) {
+                Pass "Demo quote material matches request (Polyethylene 1.7): $($firstItem.material_name)"
+            } else {
+                Fail "Demo quote material does not match request" "Asked for Polyethylene 1.7 PCF, got $($firstItem.material_name) ($($firstItem.material_family) $($firstItem.density_lb_ft3))"
             }
         } else {
             Fail "Quote print ok:false" "Got: $($print.body)"
@@ -233,7 +244,30 @@ if ($flowQuoteNo) {
     } else {
         Fail "Demo contact save failed" "Got: $($contact.raw)"
     }
+
+    # Step 8: Quote lookup with matching number + email (demo quotes live in the default tenant)
+    $lk = Post-Url "/api/public/quote-lookup" @{ tenant = "default"; quote_no = $flowQuoteNo; email = "smoketest+flow@alex-io.com" }
+    if ($lk.parsed.ok -eq $true -and $lk.parsed.url -like "/quote?quote_no=*") {
+        Pass "Quote lookup with matching number + email -> ok:true"
+    } else {
+        Fail "Quote lookup with matching number + email" "Got $($lk.status) $($lk.raw)"
+    }
 }
+
+# ── 10. Tenant Quotes & ordering page ─────────────────────────
+Write-Section "10. Tenant Quotes & ordering page"
+
+$r = Get-Url "/t/default"
+if ($r.status -eq 200 -and $r.body -match "Quotes &amp; ordering") { Pass "GET /t/default -> 200 with Quotes & ordering" }
+else { Fail "GET /t/default -> 200 with Quotes & ordering" "Got $($r.status)" }
+
+$r = Get-Url "/t/doesnotexist-smoke"
+if ($r.status -eq 404) { Pass "GET /t/doesnotexist-smoke -> 404" }
+else { Fail "GET /t/doesnotexist-smoke -> 404" "Got $($r.status)" }
+
+$r = Post-Url "/api/public/quote-lookup" @{ tenant = "default"; quote_no = "Q-NOPE-000000"; email = "nobody@example.com" }
+if ($r.status -eq 404 -and $r.parsed.ok -eq $false) { Pass "Quote lookup with wrong number/email -> 404 ok:false" }
+else { Fail "Quote lookup with wrong number/email -> 404 ok:false" "Got $($r.status) $($r.raw)" }
 
 # Summary
 $total = $pass + $fail
