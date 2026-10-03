@@ -22,6 +22,19 @@ type EditState = {
   logoUrl: string;
   landingChatEnabled: boolean;
   heroUseLogo: boolean;
+  tagline: string;
+  websiteUrl: string;
+  phone: string;
+  email: string;
+  address: string;
+  hours: string;
+  heroImageUrl: string;
+  heroCaption: string;
+  quoteScope: string;
+  quoteIntro: string;
+  aboutText: string;
+  products: string[];
+  stats: { label: string; value: string }[];
   saving: boolean;
   error: string | null;
   ok: boolean;
@@ -34,6 +47,67 @@ function getThemeField(theme: any, key: string): string {
 
 function getThemeBool(theme: any, key: string): boolean {
   return theme?.[key] === true;
+}
+
+// ---- Quote center page (/t/[tenant]) fields — stored in theme_json ----
+const PAGE_INPUT_FIELDS = [
+  "tagline",
+  "websiteUrl",
+  "phone",
+  "email",
+  "address",
+  "hours",
+  "heroImageUrl",
+  "heroCaption",
+  "quoteScope",
+] as const;
+const PAGE_TEXTAREA_FIELDS = ["quoteIntro", "aboutText"] as const;
+type PageTextField = (typeof PAGE_INPUT_FIELDS)[number] | (typeof PAGE_TEXTAREA_FIELDS)[number];
+const PAGE_TEXT_FIELDS: readonly PageTextField[] = [...PAGE_INPUT_FIELDS, ...PAGE_TEXTAREA_FIELDS];
+
+const PAGE_FIELD_LABELS: Record<PageTextField, string> = {
+  tagline: "Tagline (under the name, e.g. Family-owned box makers since 1971)",
+  websiteUrl: "Main website URL (https://…)",
+  phone: "Phone",
+  email: "Public contact email",
+  address: "Plant address",
+  hours: "Hours (e.g. Mon–Fri, 7:00 am – 4:30 pm)",
+  heroImageUrl: "Banner photo URL (https://…, plant or shop floor)",
+  heroCaption: "Banner photo caption (e.g. Our Wooster, Ohio plant)",
+  quoteScope: "What buyers can quote online (e.g. standard box styles and mailers)",
+  quoteIntro: "Banner intro sentence (blank = automatic)",
+  aboutText: "About text (2–3 sentences: how you started, what you do today)",
+};
+
+const PRODUCT_OPTIONS: { key: string; label: string }[] = [
+  { key: "rsc", label: "Corrugated boxes" },
+  { key: "printed", label: "Printed packaging" },
+  { key: "mailer", label: "Die-cut mailers" },
+  { key: "foam", label: "Foam inserts" },
+  { key: "kit", label: "Foam-in-box kits" },
+];
+
+function getThemeProducts(theme: any): string[] {
+  const v = theme?.products;
+  if (!Array.isArray(v)) return [];
+  const allowed = new Set(PRODUCT_OPTIONS.map((p) => p.key));
+  return v.filter((k: unknown): k is string => typeof k === "string" && allowed.has(k));
+}
+
+function getThemeStats(theme: any): { label: string; value: string }[] {
+  const v = Array.isArray(theme?.stats) ? theme.stats : [];
+  const rows = v.slice(0, 4).map((s: any) => ({
+    label: typeof s?.label === "string" ? s.label : "",
+    value: typeof s?.value === "string" ? s.value : "",
+  }));
+  while (rows.length < 4) rows.push({ label: "", value: "" });
+  return rows;
+}
+
+function pagePatch(k: PageTextField, v: string): Partial<EditState> {
+  const p: Partial<EditState> = {};
+  p[k] = v;
+  return p;
 }
 
 function coreHost(): string {
@@ -177,6 +251,11 @@ export default function TenantsPage() {
                 "landingChatEnabled",
               ),
               heroUseLogo: getThemeBool(t.theme_json, "heroUseLogo"),
+              ...(Object.fromEntries(
+                PAGE_TEXT_FIELDS.map((k) => [k, getThemeField(t.theme_json, k)]),
+              ) as Record<PageTextField, string>),
+              products: getThemeProducts(t.theme_json),
+              stats: getThemeStats(t.theme_json),
               saving: false,
               error: null,
               ok: false,
@@ -234,13 +313,31 @@ export default function TenantsPage() {
 
     updateEdit(id, { saving: true, error: null, ok: false });
 
+    // Merge onto the tenant's existing theme_json so keys this form doesn't
+    // edit are preserved. (Previously the whole object was replaced with six
+    // keys, silently deleting anything else stored in theme_json.)
+    const existing = tenants.find((x) => x.id === id)?.theme_json;
+    const existingTheme =
+      existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+
+    const pageFields = Object.fromEntries(
+      PAGE_TEXT_FIELDS.map((k) => [k, String(s[k] || "").trim()]),
+    );
+
     const theme_json = {
+      ...existingTheme,
       brandName: s.brandName,
       primaryColor: s.primaryColor,
       secondaryColor: s.secondaryColor,
       logoUrl: s.logoUrl,
       landingChatEnabled: !!s.landingChatEnabled,
       heroUseLogo: !!s.heroUseLogo,
+      ...pageFields,
+      products: s.products,
+      stats: s.stats
+        .map((st) => ({ label: st.label.trim(), value: st.value.trim() }))
+        .filter((st) => st.label && st.value)
+        .slice(0, 4),
     };
 
     const res = await fetch(`/api/admin/tenants/${id}`, {
@@ -249,6 +346,7 @@ export default function TenantsPage() {
       body: JSON.stringify({
         name: s.name,
         active: s.active,
+        plan: s.plan, // was never sent before — the plan dropdown silently didn't save
         theme_json,
       }),
     });
@@ -530,6 +628,101 @@ export default function TenantsPage() {
 
                       <div className="text-[11px] text-[var(--text-faint)]">
                         If enabled, landing page uses logoUrl. If missing/broken, it falls back to text.
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 md:col-span-2 border-t border-[var(--border)] pt-4">
+                      <div>
+                        <div className="text-sm font-medium">Quote center page</div>
+                        <div className="text-[11px] text-[var(--text-faint)]">
+                          Shown at /t/{t.slug}. Leave a field blank to hide it. Links and images must start with https://.
+                          Uses primaryColor for buttons and secondaryColor for the top bar, banner (when no photo) and footer.
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {PAGE_INPUT_FIELDS.map((k) => (
+                          <label key={k} className="block space-y-1 text-xs text-[var(--text-muted)]">
+                            <span>{PAGE_FIELD_LABELS[k]}</span>
+                            <input
+                              className="bg-[var(--surface-card)] p-2 w-full rounded border border-[var(--border)] text-[var(--text-primary)]"
+                              value={s[k]}
+                              onChange={(e) =>
+                                updateEdit(t.id, pagePatch(k, e.target.value))
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+
+                      {PAGE_TEXTAREA_FIELDS.map((k) => (
+                        <label key={k} className="block space-y-1 text-xs text-[var(--text-muted)]">
+                          <span>{PAGE_FIELD_LABELS[k]}</span>
+                          <textarea
+                            rows={3}
+                            className="bg-[var(--surface-card)] p-2 w-full rounded border border-[var(--border)] text-[var(--text-primary)]"
+                            value={s[k]}
+                            onChange={(e) =>
+                              updateEdit(t.id, pagePatch(k, e.target.value))
+                            }
+                          />
+                        </label>
+                      ))}
+
+                      <div className="space-y-1">
+                        <div className="text-xs text-[var(--text-muted)]">Products shown under “What you can quote online”</div>
+                        <div className="flex flex-wrap gap-x-5 gap-y-2">
+                          {PRODUCT_OPTIONS.map((p) => (
+                            <label key={p.key} className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                              <input
+                                type="checkbox"
+                                checked={s.products.includes(p.key)}
+                                onChange={(e) =>
+                                  updateEdit(t.id, {
+                                    products: e.target.checked
+                                      ? [...s.products.filter((x) => x !== p.key), p.key]
+                                      : s.products.filter((x) => x !== p.key),
+                                  })
+                                }
+                              />
+                              {p.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="text-xs text-[var(--text-muted)]">
+                          Stats (up to 4; a row needs both a value and a label to show)
+                        </div>
+                        {s.stats.map((st, i) => (
+                          <div key={i} className="grid grid-cols-2 gap-2">
+                            <input
+                              className="bg-[var(--surface-card)] p-2 w-full rounded border border-[var(--border)] text-[var(--text-primary)]"
+                              placeholder="Value (e.g. 1971)"
+                              value={st.value}
+                              onChange={(e) =>
+                                updateEdit(t.id, {
+                                  stats: s.stats.map((row, j) =>
+                                    j === i ? { ...row, value: e.target.value } : row,
+                                  ),
+                                })
+                              }
+                            />
+                            <input
+                              className="bg-[var(--surface-card)] p-2 w-full rounded border border-[var(--border)] text-[var(--text-primary)]"
+                              placeholder="Label (e.g. Founded)"
+                              value={st.label}
+                              onChange={(e) =>
+                                updateEdit(t.id, {
+                                  stats: s.stats.map((row, j) =>
+                                    j === i ? { ...row, label: e.target.value } : row,
+                                  ),
+                                })
+                              }
+                            />
+                          </div>
+                        ))}
                       </div>
                     </div>
 
