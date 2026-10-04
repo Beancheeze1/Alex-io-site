@@ -204,6 +204,8 @@ export default function SplashChatWidget({
   onOpenChange,
   onQuoteReady,
   salesRepSlug,
+  brandName,
+  accentColor,
 }: {
   startQuotePath: string;
   /** Strips the fixed bottom-5 right-5 self-positioning — used inside the
@@ -224,8 +226,14 @@ export default function SplashChatWidget({
    * survives into buildPrefillPayload regardless of what happens to the URL
    * during the rest of the chat-to-editor flow. */
   salesRepSlug?: string;
+  /** White-label: the tenant's display name. When set, the pill and panel
+   * header use it instead of "Alex-IO", and developer-facing text is hidden. */
+  brandName?: string;
+  /** White-label: color for the pill's status dot (must read on a light surface). */
+  accentColor?: string;
 }) {
   const router = useRouter();
+  const brand = (brandName || "").trim();
 
   const [open, setOpenState] = React.useState(false);
   const setOpen = React.useCallback(
@@ -510,12 +518,15 @@ export default function SplashChatWidget({
             className="group flex items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-sm hover:bg-[var(--surface-subtle)]"
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--surface-subtle)] ring-1 ring-[var(--border)]">
-              <span className="h-2.5 w-2.5 rounded-full bg-[var(--action-primary)]" />
+              <span
+                className="h-2.5 w-2.5 rounded-full bg-[var(--action-primary)]"
+                style={accentColor ? { background: accentColor } : undefined}
+              />
             </span>
             <span className="leading-tight">
-              <span className="block">Talk to Alex-IO</span>
+              <span className="block">{brand ? `Questions? Ask ${brand}` : "Talk to Alex-IO"}</span>
               <span className="block text-[11px] font-medium text-[var(--text-muted)]">
-                chat → layout → pricing
+                {brand ? "Materials, sizing, pricing" : "chat → layout → pricing"}
               </span>
             </span>
             <span className="ml-1 rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
@@ -529,9 +540,13 @@ export default function SplashChatWidget({
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
               <div>
-                <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">ALEX-IO</div>
+                <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                  {brand ? brand.toUpperCase() : "ALEX-IO"}
+                </div>
                 <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
-                  Talk to me like a human. I’ll keep it tight.
+                  {brand
+                    ? "Ask about materials, sizes or pricing."
+                    : "Talk to me like a human. I’ll keep it tight."}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -626,7 +641,7 @@ export default function SplashChatWidget({
                     summary. Open the layout when you’re ready.
                   </div>
 
-                  {!onQuoteReady && (
+                  {!onQuoteReady && !brand && (
                     <div className="mt-2 text-[11px] text-[var(--text-muted)]">
                       Opens the seeded editor via{" "}
                       <code className="text-[var(--text-secondary)]">{startQuotePath}</code>.

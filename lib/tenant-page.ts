@@ -30,6 +30,8 @@ export type TenantPage = {
   landingChatEnabled: boolean;
   primaryColor: string;
   onPrimary: string;
+  /** Brand color safe to use for icons/links on light surfaces (>= 3:1 vs white). */
+  accentOnLight: string;
   secondaryColor: string;
   onSecondary: string;
   tagline: string;
@@ -96,6 +98,24 @@ export function readableTextOn(hex: string): string {
   const vsWhite = 1.05 / (L + 0.05);
   const vsDark = (L + 0.05) / (relLuminance(DARK_TEXT) + 0.05);
   return vsWhite >= vsDark ? LIGHT_TEXT : DARK_TEXT;
+}
+
+function contrastRatio(a: string, b: string): number {
+  const la = relLuminance(a);
+  const lb = relLuminance(b);
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Brand color to use for icons and links on the page's light surfaces.
+ * Uses the primary color when it has at least 3:1 contrast against white,
+ * otherwise the secondary color, otherwise near-black.
+ */
+export function accentOnLightOf(primary: string, secondary: string): string {
+  if (contrastRatio(primary, "#FFFFFF") >= 3) return primary;
+  if (contrastRatio(secondary, "#FFFFFF") >= 3) return secondary;
+  return DARK_TEXT;
 }
 
 export function phoneHrefOf(phone: string): string {
@@ -176,6 +196,7 @@ export async function loadTenantPage(slugRaw: string): Promise<TenantPage | null
     landingChatEnabled: th.landingChatEnabled === true,
     primaryColor,
     onPrimary: readableTextOn(primaryColor),
+    accentOnLight: accentOnLightOf(primaryColor, secondaryColor),
     secondaryColor,
     onSecondary: readableTextOn(secondaryColor),
     tagline: str(th.tagline, 120),

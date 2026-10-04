@@ -236,7 +236,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
 
       {/* Action cards (overlap the banner) */}
       <section className="relative mx-auto -mt-24 max-w-[1200px] px-6">
-        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className={`grid gap-5 md:grid-cols-2 ${hasTalkCard ? "lg:grid-cols-3" : ""}`}>
           <div
             className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
             style={{
@@ -307,7 +307,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
               >
                 <div
                   className="mb-4 flex h-12 w-12 items-center justify-center rounded-md"
-                  style={{ background: "var(--surface-subtle)", color: t.primaryColor }}
+                  style={{ background: "var(--surface-subtle)", color: t.accentOnLight }}
                 >
                   <ProductIcon k={k} />
                 </div>
@@ -342,7 +342,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
                 </p>
               ) : null}
               {t.websiteUrl ? (
-                <a href={t.websiteUrl} className="font-medium hover:underline" style={{ color: t.primaryColor }}>
+                <a href={t.websiteUrl} className="font-medium hover:underline" style={{ color: t.accentOnLight }}>
                   More about us on {t.websiteLabel} →
                 </a>
               ) : null}
@@ -428,7 +428,12 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
       </footer>
 
       {t.landingChatEnabled ? (
-        <SplashChatWidget startQuotePath={startQuotePath} salesRepSlug={salesRepSlug} />
+        <SplashChatWidget
+          startQuotePath={startQuotePath}
+          salesRepSlug={salesRepSlug}
+          brandName={t.brandName}
+          accentColor={t.accentOnLight}
+        />
       ) : null}
     </div>
   );
