@@ -23,14 +23,18 @@
 -- one of the two shapes — never both, never neither:
 --   stock:  box_id IS NOT NULL, all four custom_* columns NULL
 --   custom: box_id IS NULL, all four custom_* columns NOT NULL
+--
+-- Idempotent (2026-10-04): production had this applied by hand without a
+-- schema_migrations row. Columns use IF NOT EXISTS, DROP NOT NULL is a no-op
+-- when already nullable, and each constraint is only added when missing.
 
 alter table public.quote_box_selections
-  add column kind text not null default 'stock',
-  add column custom_length_in numeric,
-  add column custom_width_in numeric,
-  add column custom_height_in numeric,
-  add column custom_style text,
-  add column description text;
+  add column if not exists kind text not null default 'stock',
+  add column if not exists custom_length_in numeric,
+  add column if not exists custom_width_in numeric,
+  add column if not exists custom_height_in numeric,
+  add column if not exists custom_style text,
+  add column if not exists description text;
 
 update public.quote_box_selections set kind = 'stock' where kind is null;
 
@@ -38,28 +42,39 @@ alter table public.quote_box_selections
   alter column box_id drop not null,
   alter column sku drop not null;
 
-alter table public.quote_box_selections
-  add constraint quote_box_selections_kind_check
-  check (kind in ('stock', 'custom'));
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'quote_box_selections_kind_check'
+  ) then
+    alter table public.quote_box_selections
+      add constraint quote_box_selections_kind_check
+      check (kind in ('stock', 'custom'));
+  end if;
 
-alter table public.quote_box_selections
-  add constraint quote_box_selections_kind_shape_check
-  check (
-    (
-      kind = 'stock'
-      and box_id is not null
-      and custom_length_in is null
-      and custom_width_in is null
-      and custom_height_in is null
-      and custom_style is null
-    )
-    or
-    (
-      kind = 'custom'
-      and box_id is null
-      and custom_length_in is not null
-      and custom_width_in is not null
-      and custom_height_in is not null
-      and custom_style is not null
-    )
-  );
+  if not exists (
+    select 1 from pg_constraint where conname = 'quote_box_selections_kind_shape_check'
+  ) then
+    alter table public.quote_box_selections
+      add constraint quote_box_selections_kind_shape_check
+      check (
+        (
+          kind = 'stock'
+          and box_id is not null
+          and custom_length_in is null
+          and custom_width_in is null
+          and custom_height_in is null
+          and custom_style is null
+        )
+        or
+        (
+          kind = 'custom'
+          and box_id is null
+          and custom_length_in is not null
+          and custom_width_in is not null
+          and custom_height_in is not null
+          and custom_style is not null
+        )
+      );
+  end if;
+end $$;

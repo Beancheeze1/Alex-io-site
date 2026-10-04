@@ -8,14 +8,33 @@
 -- the route now handles the resulting 23505 unique-violation by falling
 -- back to an UPDATE.
 --
--- Run this SELECT first and resolve any duplicates manually (decide which
--- row to keep, delete the other) before running the ALTER TABLE below —
--- it will fail if duplicates exist.
+-- Idempotent (2026-10-04): production had this applied by hand without a
+-- schema_migrations row, so the runner re-ran it and failed. The constraint
+-- is now only added when neither the constraint nor a relation (index) with
+-- that name exists.
+--
+-- If the constraint is missing, resolve any duplicates first or the ALTER
+-- will fail:
 --
 -- select quote_id, box_id, count(*), array_agg(id order by id) as ids
 -- from public.quote_box_selections
 -- group by quote_id, box_id
 -- having count(*) > 1;
 
-alter table public.quote_box_selections
-  add constraint quote_box_selections_quote_id_box_id_key unique (quote_id, box_id);
+do $$
+begin
+  if not exists (
+       select 1 from pg_constraint
+       where conname = 'quote_box_selections_quote_id_box_id_key'
+     )
+     and not exists (
+       select 1 from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public'
+         and c.relname = 'quote_box_selections_quote_id_box_id_key'
+     )
+  then
+    alter table public.quote_box_selections
+      add constraint quote_box_selections_quote_id_box_id_key unique (quote_id, box_id);
+  end if;
+end $$;
