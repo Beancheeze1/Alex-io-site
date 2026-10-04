@@ -125,7 +125,7 @@ export default function QuoteAttachmentsPanel({ quoteNo }: { quoteNo: string }) 
                 </div>
               </div>
               <a
-                href={`/api/quote-attachments/${a.id}`}
+                href={`/api/quote-attachments/${a.id}?quote_no=${encodeURIComponent(quoteNo)}`}
                 target="_blank"
                 rel="noreferrer"
                 style={{

@@ -24,6 +24,8 @@ type Row = {
   notify_error: string | null;
   confirm_status: string;
   created_at: string;
+  sales_rep_slug: string | null;
+  rep_name: string | null;
   files: { id: number; filename: string; size_bytes: number }[];
 };
 
@@ -59,6 +61,7 @@ export default async function SpecRequestsPage() {
     `
     SELECT r.id, r.name, r.email, r.company, r.phone, r.notes, r.status,
            r.notify_status, r.notify_error, r.confirm_status, r.created_at::text AS created_at,
+           r.sales_rep_slug, u.name AS rep_name,
            COALESCE(
              json_agg(json_build_object('id', f.id, 'filename', f.filename, 'size_bytes', f.size_bytes) ORDER BY f.id)
                FILTER (WHERE f.id IS NOT NULL),
@@ -66,8 +69,9 @@ export default async function SpecRequestsPage() {
            ) AS files
     FROM public.spec_requests r
     LEFT JOIN public.spec_request_files f ON f.spec_request_id = r.id
+    LEFT JOIN public."users" u ON u.id = r.sales_rep_id
     WHERE r.tenant_id = $1
-    GROUP BY r.id
+    GROUP BY r.id, u.name
     ORDER BY r.created_at DESC
     LIMIT 200
     `,
@@ -107,6 +111,17 @@ export default async function SpecRequestsPage() {
             <a href={`mailto:${r.email}`} className="hover:underline">{r.email}</a>
             {r.phone ? <span>{r.phone}</span> : null}
           </div>
+          {r.sales_rep_slug ? (
+            <div className="text-xs text-[var(--text-secondary)]">
+              Referred by{" "}
+              {r.rep_name ? (
+                <span className="font-medium text-[var(--text-primary)]">{r.rep_name}</span>
+              ) : (
+                <>rep link “{r.sales_rep_slug}” (no matching rep)</>
+              )}{" "}
+              — credit them when you build the quote.
+            </div>
+          ) : null}
           {r.notes ? <p className="whitespace-pre-line text-sm text-[var(--text-secondary)]">{r.notes}</p> : null}
           {r.files.length ? (
             <div className="flex flex-wrap gap-2">

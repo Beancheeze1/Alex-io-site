@@ -8,6 +8,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+
+const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,6 +33,9 @@ type AttachRow = {
 
 export async function POST(req: NextRequest) {
   try {
+    const rate = await rateLimit(req, 10, "save-pdf");
+    if (!rate.success) return rateLimitResponse(rate.reset);
+
     const form = await req.formData().catch(() => null);
     if (!form) {
       return err("invalid_form", "Expected multipart/form-data");
@@ -38,6 +44,14 @@ export async function POST(req: NextRequest) {
     const file = form.get("file");
     if (!(file instanceof File)) {
       return err("missing_file", "file is required");
+    }
+
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      return err("not_a_pdf", "Only PDF files are accepted here.");
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      return err("too_large", "PDF must be 8 MB or less.", 413);
     }
 
     const quoteNoRaw = form.get("quote_no") as string | null;
@@ -60,7 +74,7 @@ export async function POST(req: NextRequest) {
     // Read file data
     const arrayBuf = await file.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
-    const contentType = file.type || "application/pdf";
+    const contentType = "application/pdf";
     const filename = file.name;
 
     // Save to database

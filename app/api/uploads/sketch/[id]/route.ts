@@ -8,8 +8,11 @@ export const runtime = "nodejs";
 
 const ROOT = "/tmp/sketches";
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
-  const id = params.id;
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(id || ""))) {
+    return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+  }
   const base = path.join(ROOT, id);
 
   const tryExt = [".png", ".jpg", ".pdf", ".svg", ".bin"];

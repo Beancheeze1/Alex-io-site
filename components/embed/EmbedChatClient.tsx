@@ -32,7 +32,15 @@ function postChatState(state: ChatState) {
   window.parent.postMessage({ type: CHAT_STATE_MESSAGE_TYPE, state }, "*");
 }
 
-export default function EmbedChatClient() {
+export default function EmbedChatClient({
+  brandName,
+  accentColor,
+}: {
+  /** Tenant display name; switches the bubble to the white-label quoting wording. */
+  brandName?: string;
+  /** Light-surface-safe brand color for the bubble's status dot. */
+  accentColor?: string;
+}) {
   const [state, setState] = React.useState<ChatState>("closed");
   const [prefillPayload, setPrefillPayload] = React.useState<Record<string, any> | null>(null);
 
@@ -76,6 +84,8 @@ export default function EmbedChatClient() {
   return (
     <SplashChatWidget
       embedded
+      brandName={brandName}
+      accentColor={accentColor}
       startQuotePath="/start-quote"
       onOpenChange={(open) => setState(open ? "open" : "closed")}
       onQuoteReady={(payload) => {

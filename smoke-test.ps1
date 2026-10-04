@@ -284,6 +284,21 @@ $r = Get-Url "/api/admin/spec-requests/files/1"
 if ($r.status -eq 401) { Pass "Spec file download without auth -> 401" }
 else { Fail "Spec file download without auth -> 401" "Got $($r.status)" }
 
+# ── 12. Attachment access ─────────────────────────────────────
+Write-Section "12. Attachment access"
+
+$r = Get-Url "/api/quote-attachments/1"
+if ($r.status -eq 404) { Pass "Attachment by id without login or quote_no -> 404" }
+else { Fail "Attachment by id without login or quote_no -> 404" "Got $($r.status)" }
+
+$r = Get-Url "/api/quote-attachments/1?quote_no=Q-NOT-A-REAL-QUOTE"
+if ($r.status -eq 404 -or $r.status -eq 429) { Pass "Attachment by id with wrong quote_no -> $($r.status)" }
+else { Fail "Attachment by id with wrong quote_no -> 404" "Got $($r.status)" }
+
+$r = Get-Url "/embed/chat"
+if ($r.status -eq 200 -and $r.body -notmatch "Talk to Alex-IO") { Pass "Embed chat is white-labeled (no 'Talk to Alex-IO')" }
+else { Fail "Embed chat is white-labeled" "Got $($r.status)" }
+
 # Summary
 $total = $pass + $fail
 Write-Host ""

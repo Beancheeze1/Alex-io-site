@@ -1504,7 +1504,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
             const attachmentId = Number(latestJson?.attachment?.id);
             if (Number.isFinite(attachmentId) && attachmentId > 0) {
               const facesDownload = await fetch(
-                `/api/quote-attachments/${attachmentId}?t=${Date.now()}`,
+                `/api/quote-attachments/${attachmentId}?quote_no=${encodeURIComponent(quoteNoFromUrl.trim())}&t=${Date.now()}`,
                 { cache: "no-store" },
               );
 
@@ -3572,7 +3572,7 @@ try {
 
     if (Number.isFinite(attachmentId) && attachmentId > 0) {
       const facesDownload = await fetch(
-        `/api/quote-attachments/${attachmentId}?t=${Date.now()}`,
+        `/api/quote-attachments/${attachmentId}?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`,
         { cache: "no-store" },
       );
 

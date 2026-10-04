@@ -2,6 +2,7 @@
 //
 // "Send us your specs" page for a tenant. Server-rendered and white-labeled
 // like /t/[tenant]; the form itself is a client component.
+// ?sales_rep_slug= (from rep links) is carried into the form and the back link.
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -11,7 +12,10 @@ import { loadTenantPage } from "@/lib/tenant-page";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type PageProps = { params: Promise<{ tenant: string }> };
+type PageProps = {
+  params: Promise<{ tenant: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { tenant } = await params;
@@ -29,12 +33,17 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   };
 }
 
-export default async function SpecsPage({ params }: PageProps) {
+export default async function SpecsPage({ params, searchParams }: PageProps) {
   const { tenant } = await params;
+  const sp = await searchParams;
   const t = await loadTenantPage(tenant);
   if (!t) notFound();
 
-  const backHref = `/t/${encodeURIComponent(t.slug)}`;
+  const repRaw = sp.sales_rep_slug;
+  const salesRepSlug = typeof repRaw === "string" ? repRaw.trim().slice(0, 100) : "";
+  const backHref =
+    `/t/${encodeURIComponent(t.slug)}` +
+    (salesRepSlug ? `?sales_rep_slug=${encodeURIComponent(salesRepSlug)}` : "");
 
   return (
     <div className="-mx-4 -my-6 min-h-screen" style={{ background: "var(--surface-page)", color: "var(--text-primary)" }}>
@@ -57,6 +66,7 @@ export default async function SpecsPage({ params }: PageProps) {
           primaryColor={t.primaryColor}
           onPrimary={t.onPrimary}
           backHref={backHref}
+          salesRepSlug={salesRepSlug}
         />
       </main>
     </div>

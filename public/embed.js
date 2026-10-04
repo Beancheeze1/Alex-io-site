@@ -48,7 +48,7 @@
   // page, with its own native scrolling — no dynamic height tracking
   // needed at all once it's full-viewport.
   var CHAT_SIZES = {
-    closed: { width: "260px", height: "64px" },
+    closed: { width: "300px", height: "64px" },
     open: { width: "380px", height: "620px" },
   };
 

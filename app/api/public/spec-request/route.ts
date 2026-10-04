@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
   const company = field(form, "company", 200);
   const phone = field(form, "phone", 60);
   const notes = field(form, "notes", 4000);
+  const salesRepSlug = field(form, "sales_rep_slug", 100);
 
   if (!/^[a-z0-9-]{1,63}$/.test(tenantSlug)) return bad("invalid_tenant", "This page isn't set up for spec requests.");
   if (!name) return bad("missing_name", "Please enter your name.");
@@ -100,6 +101,20 @@ export async function POST(req: NextRequest) {
       .map((v: unknown) => (typeof v === "string" ? v.trim() : ""))
       .find((v: string) => EMAIL_RE.test(v)) || null;
 
+  // Rep attribution: tenant-scoped match on users.sales_slug, same as quotes.
+  let salesRep: { id: number; name: string } | null = null;
+  if (salesRepSlug) {
+    try {
+      salesRep = await one<{ id: number; name: string }>(
+        `SELECT id, name FROM public."users" WHERE tenant_id = $1 AND sales_slug = $2 LIMIT 1`,
+        [tenant.id, salesRepSlug],
+      );
+    } catch (err) {
+      console.error("[spec-request] rep lookup failed:", err);
+      salesRep = null;
+    }
+  }
+
   const fileData = await Promise.all(
     files.map(async (f) => ({
       name: f.name.slice(0, 200),
@@ -115,10 +130,21 @@ export async function POST(req: NextRequest) {
     requestId = await withTxn(async (tx) => {
       const r = await tx.query<{ id: string }>(
         `INSERT INTO public.spec_requests
-           (tenant_id, name, email, company, phone, notes, source_ip, notify_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (tenant_id, name, email, company, phone, notes, source_ip, notify_status, sales_rep_slug, sales_rep_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
-        [tenant.id, name, email, company || null, phone || null, notes || null, ip, notifyTo ? "pending" : "no_recipient"],
+        [
+          tenant.id,
+          name,
+          email,
+          company || null,
+          phone || null,
+          notes || null,
+          ip,
+          notifyTo ? "pending" : "no_recipient",
+          salesRepSlug || null,
+          salesRep ? salesRep.id : null,
+        ],
       );
       const id = Number(r.rows[0].id);
       for (const f of fileData) {
@@ -145,7 +171,7 @@ export async function POST(req: NextRequest) {
       const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px">
 <p style="font-size:16px;color:#1C1C1A;margin:0 0 12px"><strong>New spec request</strong> from your Quotes &amp; ordering page.</p>
 <table style="border-collapse:collapse;border:1px solid #E4E4E0;width:100%">
-${row("Name", name)}${row("Company", company)}${row("Email", email)}${row("Phone", phone)}${row("Notes", notes)}${row("Files", fileList)}
+${row("Name", name)}${row("Company", company)}${row("Email", email)}${row("Phone", phone)}${row("Notes", notes)}${row("Files", fileList)}${salesRepSlug ? row("Referred by", salesRep ? salesRep.name : `${salesRepSlug} (no matching rep)`) : ""}
 </table>
 <p style="margin:16px 0"><a href="https://${tenantHost(tenant.slug)}/admin/spec-requests" style="background:#2B2B28;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-size:14px">Open spec requests</a></p>
 <p style="font-size:12px;color:#7A7A74">Reply to this email to answer ${escapeHtml(name)} directly.</p>

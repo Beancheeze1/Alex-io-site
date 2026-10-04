@@ -16,12 +16,15 @@ export default function SpecRequestForm({
   primaryColor,
   onPrimary,
   backHref,
+  salesRepSlug,
 }: {
   tenantSlug: string;
   brandName: string;
   primaryColor: string;
   onPrimary: string;
   backHref: string;
+  /** Rep attribution from the page URL (?sales_rep_slug=), sent with the form. */
+  salesRepSlug?: string;
 }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -33,6 +36,7 @@ export default function SpecRequestForm({
     const form = e.currentTarget;
     const fd = new FormData(form);
     fd.set("tenant", tenantSlug);
+    if (salesRepSlug) fd.set("sales_rep_slug", salesRepSlug);
 
     const files = (fd.getAll("files") as File[]).filter((f) => f && f.size > 0);
     if (files.length > MAX_FILES) return setError(`Attach up to ${MAX_FILES} files.`);

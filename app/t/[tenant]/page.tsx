@@ -267,7 +267,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
               Have a drawing, a sample or something custom? Send what you have and our team will put together a quote.
             </p>
             <a
-              href={`/t/${encodeURIComponent(t.slug)}/specs`}
+              href={`/t/${encodeURIComponent(t.slug)}/specs${salesRepSlug ? `?sales_rep_slug=${encodeURIComponent(salesRepSlug)}` : ""}`}
               className="inline-flex min-h-[48px] items-center self-start rounded-md px-5 text-[15px] font-medium"
               style={{ border: "1px solid var(--border-strong)" }}
             >

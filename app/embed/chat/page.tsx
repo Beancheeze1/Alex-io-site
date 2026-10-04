@@ -9,9 +9,14 @@
 // (set today only via the owner-only /admin/tenants page) — a tenant that
 // hasn't opted in gets nothing rendered, regardless of whether a snippet
 // was pasted somewhere.
+//
+// White-label: passes the tenant's brand name and a light-surface-safe
+// accent color, so the bubble reads "Get a quote by chat" under the shop's
+// name instead of "Talk to Alex-IO".
 
 import { headers } from "next/headers";
 import { resolveTenantFromHost } from "@/lib/tenant";
+import { loadTenantPage } from "@/lib/tenant-page";
 import EmbedChatClient from "@/components/embed/EmbedChatClient";
 import EmbedChatDisabled from "@/components/embed/EmbedChatDisabled";
 
@@ -23,9 +28,16 @@ export default async function EmbedChatPage() {
   const tenant = await resolveTenantFromHost(h.get("host"));
   const chatEnabled = tenant?.theme_json?.landingChatEnabled === true;
 
-  if (!chatEnabled) {
+  if (!chatEnabled || !tenant) {
     return <EmbedChatDisabled />;
   }
 
-  return <EmbedChatClient />;
+  const page = await loadTenantPage(tenant.slug);
+
+  return (
+    <EmbedChatClient
+      brandName={page?.brandName || tenant.name || ""}
+      accentColor={page?.accentOnLight}
+    />
+  );
 }

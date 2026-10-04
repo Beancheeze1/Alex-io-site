@@ -84,6 +84,19 @@ export async function POST(req: NextRequest) {
       if (!attach) {
         return err("ATTACHMENT_NOT_FOUND", `No attachment with id=${attachmentId}`, 404);
       }
+
+      // Authorize by the attachment's OWN quote (never a caller-supplied
+      // quote_no), so one tenant can't read another tenant's file by id.
+      // Same 404 as a missing id.
+      const ownerQuote = attach.quote_no
+        ? await one<{ id: number }>(
+            `select id from quotes where quote_no = $1 and tenant_id = $2 limit 1`,
+            [attach.quote_no, user.tenant_id],
+          )
+        : null;
+      if (!ownerQuote) {
+        return err("ATTACHMENT_NOT_FOUND", `No attachment with id=${attachmentId}`, 404);
+      }
       
       const ct = (attach.content_type || "").toLowerCase();
       if (!ct.includes("pdf") && !attach.filename.toLowerCase().endsWith(".pdf")) {
@@ -91,7 +104,7 @@ export async function POST(req: NextRequest) {
       }
       
       pdfBuffer = attach.data;
-      quoteNo = quoteNo || attach.quote_no;
+      quoteNo = attach.quote_no;
       if (quoteNo) {
         const quote = await one<{ id: number }>(
           `
