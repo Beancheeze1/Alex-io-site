@@ -269,6 +269,21 @@ $r = Post-Url "/api/public/quote-lookup" @{ tenant = "default"; quote_no = "Q-NO
 if ($r.status -eq 404 -and $r.parsed.ok -eq $false) { Pass "Quote lookup with wrong number/email -> 404 ok:false" }
 else { Fail "Quote lookup with wrong number/email -> 404 ok:false" "Got $($r.status) $($r.raw)" }
 
+# ── 11. Spec requests ─────────────────────────────────────────
+Write-Section "11. Spec requests"
+
+$r = Get-Url "/t/default/specs"
+if ($r.status -eq 200 -and $r.body -match "Send us your specs") { Pass "GET /t/default/specs -> 200" }
+else { Fail "GET /t/default/specs -> 200" "Got $($r.status)" }
+
+$r = Post-Url "/api/public/spec-request" @{ tenant = "default"; name = "X"; email = "x@x.com" }
+if ($r.status -eq 400 -or $r.status -eq 429) { Pass "Spec request as JSON (not multipart) is rejected -> $($r.status)" }
+else { Fail "Spec request non-multipart rejected" "Got $($r.status) $($r.raw)" }
+
+$r = Get-Url "/api/admin/spec-requests/files/1"
+if ($r.status -eq 401) { Pass "Spec file download without auth -> 401" }
+else { Fail "Spec file download without auth -> 401" "Got $($r.status)" }
+
 # Summary
 $total = $pass + $fail
 Write-Host ""

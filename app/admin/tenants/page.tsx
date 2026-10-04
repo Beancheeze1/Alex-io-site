@@ -28,6 +28,7 @@ type EditState = {
   email: string;
   address: string;
   hours: string;
+  specsEmail: string;
   heroImageUrl: string;
   heroCaption: string;
   quoteScope: string;
@@ -57,6 +58,7 @@ const PAGE_INPUT_FIELDS = [
   "email",
   "address",
   "hours",
+  "specsEmail",
   "heroImageUrl",
   "heroCaption",
   "quoteScope",
@@ -72,6 +74,7 @@ const PAGE_FIELD_LABELS: Record<PageTextField, string> = {
   email: "Public contact email",
   address: "Plant address",
   hours: "Hours (e.g. Mon–Fri, 7:00 am – 4:30 pm)",
+  specsEmail: "Spec request notifications go to (blank = public contact email)",
   heroImageUrl: "Banner photo URL (https://…, plant or shop floor)",
   heroCaption: "Banner photo caption (e.g. Our Wooster, Ohio plant)",
   quoteScope: "What buyers can quote online (e.g. standard box styles and mailers)",

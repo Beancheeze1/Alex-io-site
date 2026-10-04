@@ -139,6 +139,9 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
+                <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
+                  Spec requests
+                </Link>
                 <Link href="/admin/cleanup" className="hover:text-[var(--text-primary)]">
                   Cleanup
                 </Link>
@@ -160,6 +163,9 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
+                <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
+                  Spec requests
+                </Link>
                 <Link href="/admin/commissions" className="hover:text-[var(--text-primary)]">
                   Commissions
                 </Link>
@@ -171,6 +177,9 @@ export default async function AdminLayout({ children }: Props) {
               <>
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
+                </Link>
+                <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
+                  Spec requests
                 </Link>
               </>
             )}

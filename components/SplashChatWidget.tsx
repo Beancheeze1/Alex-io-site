@@ -524,9 +524,9 @@ export default function SplashChatWidget({
               />
             </span>
             <span className="leading-tight">
-              <span className="block">{brand ? `Questions? Ask ${brand}` : "Talk to Alex-IO"}</span>
+              <span className="block">{brand ? "Get a quote by chat" : "Talk to Alex-IO"}</span>
               <span className="block text-[11px] font-medium text-[var(--text-muted)]">
-                {brand ? "Materials, sizing, pricing" : "chat → layout → pricing"}
+                {brand ? "Dims + qty → layout & price" : "chat → layout → pricing"}
               </span>
             </span>
             <span className="ml-1 rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
@@ -545,7 +545,7 @@ export default function SplashChatWidget({
                 </div>
                 <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
                   {brand
-                    ? "Ask about materials, sizes or pricing."
+                    ? "Describe your part — we’ll build the quote."
                     : "Talk to me like a human. I’ll keep it tight."}
                 </div>
               </div>

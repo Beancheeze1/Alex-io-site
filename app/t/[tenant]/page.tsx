@@ -236,7 +236,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
 
       {/* Action cards (overlap the banner) */}
       <section className="relative mx-auto -mt-24 max-w-[1200px] px-6">
-        <div className={`grid gap-5 md:grid-cols-2 ${hasTalkCard ? "lg:grid-cols-3" : ""}`}>
+        <div className={`grid gap-5 md:grid-cols-2 ${hasTalkCard ? "xl:grid-cols-4" : "lg:grid-cols-3"}`}>
           <div
             className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
             style={{
@@ -255,6 +255,23 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
               style={primaryBtn}
             >
               Start an online quote
+            </a>
+          </div>
+
+          <div
+            className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+            style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
+          >
+            <h2 className="mb-2 text-xl font-medium">Send us your specs</h2>
+            <p className="mb-5 flex-1" style={{ color: "var(--text-secondary)" }}>
+              Have a drawing, a sample or something custom? Send what you have and our team will put together a quote.
+            </p>
+            <a
+              href={`/t/${encodeURIComponent(t.slug)}/specs`}
+              className="inline-flex min-h-[48px] items-center self-start rounded-md px-5 text-[15px] font-medium"
+              style={{ border: "1px solid var(--border-strong)" }}
+            >
+              Send specs
             </a>
           </div>
 
