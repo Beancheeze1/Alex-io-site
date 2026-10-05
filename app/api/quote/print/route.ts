@@ -29,6 +29,8 @@ import { buildLayoutExports, computeGeometryHash, embedGeometryHashInStep, extra
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
+import { isDemoQuoteNo } from "@/lib/quote-no";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 
 export const dynamic = "force-dynamic";
@@ -272,7 +274,7 @@ export async function GET(req: NextRequest) {
   //   - Q-DEMO- quotes carry no customer PII or real pricing commitments
   //   - CAD exports are always redacted for demo quotes (see cadAllowed below)
   //   - Only Q-DEMO- prefix is allowed — real Q-AI- quotes still require auth
-  const isDemoQuote = quoteNo.startsWith("Q-DEMO-");
+  const isDemoQuote = isDemoQuoteNo(quoteNo);
   let tenantId: number;
   let user: Awaited<ReturnType<typeof getCurrentUserFromRequest>> | null = null;
 
@@ -297,6 +299,9 @@ export async function GET(req: NextRequest) {
       tenantId = user.tenant_id;
     } else {
       // Public widget flow: no valid session.
+      // Rate limit public quote views so quote numbers can't be brute-forced.
+      const viewRate = await rateLimit(req, 120, "quote-view");
+      if (!viewRate.success) return rateLimitResponse(viewRate.reset);
       // Resolve tenant from the quote's own DB row (most reliable — the
       // orchestrate/chat flow seeds it), then fall back to host resolution.
       const existingQuote = await one<{ tenant_id: number }>(

@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { isDemoQuoteNo } from "@/lib/quote-no";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -197,9 +198,9 @@ export async function POST(req: NextRequest) {
     const notes = String(body.notes ?? "").trim();
 
     // Safety: only process demo quotes
-    if (!quoteNo.startsWith("Q-DEMO-")) {
+    if (!isDemoQuoteNo(quoteNo)) {
       return NextResponse.json(
-        { ok: false, error: "INVALID_QUOTE", message: "Only Q-DEMO- quotes are accepted." },
+        { ok: false, error: "INVALID_QUOTE", message: "Only demo quotes are accepted." },
         { status: 400 },
       );
     }

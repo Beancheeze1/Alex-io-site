@@ -50,6 +50,7 @@ import { resolveCustomSelection } from "@/app/lib/packaging-selection";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
+import { isDemoQuoteNo } from "@/lib/quote-no";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import {
@@ -396,7 +397,7 @@ async function ensureQuoteHeader(args: {
         null,
         null,
         args.currentUserId,
-        args.quoteNo.startsWith("Q-DEMO-"),
+        isDemoQuoteNo(args.quoteNo),
         args.quoteSource,
       ],
     );
@@ -1286,7 +1287,7 @@ export async function POST(req: NextRequest) {
   //   - Q-DEMO- quotes have no pricing data a bad actor could extract
   //   - The quote already exists in DB (seeded before editor opened)
   //   - Only Q-DEMO- prefix is allowed — real Q-AI- quotes still require auth
-  const isDemoQuote = quoteNo.startsWith("Q-DEMO-");
+  const isDemoQuote = isDemoQuoteNo(quoteNo);
 
   let currentUserId: number | null = null;
   let tenantId: number;
@@ -1328,10 +1329,20 @@ export async function POST(req: NextRequest) {
         tenantId = existingQuote.tenant_id;
       } else {
         const slugFromHeader = req.headers.get("x-tenant-slug");
-        const tenantRow = slugFromHeader
+        // Core host (api.alex-io.com, tagged "default" by middleware) serves
+        // every tenant's /t/<slug> quote center, so a brand-new public quote
+        // started there carries the shop's slug in the body. A real tenant
+        // subdomain always wins over the body.
+        const bodyTenantSlug =
+          typeof body?.tenant_slug === "string" ? body.tenant_slug.trim().toLowerCase() : "";
+        const useBodySlug =
+          (!slugFromHeader || slugFromHeader === "default") &&
+          /^[a-z0-9-]{1,63}$/.test(bodyTenantSlug);
+        const slugToUse = useBodySlug ? bodyTenantSlug : slugFromHeader;
+        const tenantRow = slugToUse
           ? await one<{ id: number }>(
               `SELECT id FROM public.tenants WHERE slug = $1 AND active = true LIMIT 1`,
-              [slugFromHeader],
+              [slugToUse],
             )
           : await resolveTenantFromHost(req.headers.get("host"));
         if (!tenantRow) {

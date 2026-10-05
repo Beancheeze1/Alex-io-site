@@ -56,6 +56,8 @@ import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import logger from "@/lib/logger";
 import { handleApiError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { extractQuoteNoFromText } from "@/lib/quote-no";
+import { newUniqueQuoteNo } from "@/lib/quote-no-server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -234,9 +236,8 @@ function getLastInboundText(p: In, threadMsgs: any[]): string {
 // Detect Q-AI-* style quote numbers in subject/body so we can
 // pull sketch facts that were stored under quote_no.
 function extractQuoteNo(text: string): string | null {
-  if (!text) return null;
-  const m = text.match(/Q-[A-Z]+-\d{8}-\d{6}/i);
-  return m ? m[0] : null;
+  // New (Q-A-YYMMDD-NNNNN) and legacy (Q-AI-YYYYMMDD-HHMMSS etc.) formats.
+  return extractQuoteNoFromText(text);
 }
 
 // Detect sales rep slug from subject and/or body.
@@ -2552,14 +2553,7 @@ newly = mergeFacts(newly, formFacts);
 
     // Stable quote number per thread
     if (!merged.quoteNumber && !merged.quote_no) {
-      const now = new Date();
-      const yyyy = now.getUTCFullYear();
-      const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-      const dd = String(now.getUTCDate()).padStart(2, "0");
-      const hh = String(now.getUTCHours()).padStart(2, "0");
-      const mi = String(now.getUTCMinutes()).padStart(2, "0");
-      const ss = String(now.getUTCSeconds()).padStart(2, "0");
-      const autoNo = `Q-AI-${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+      const autoNo = await newUniqueQuoteNo("A");
       merged.quoteNumber = autoNo;
       merged.quote_no = autoNo;
     } else if (!merged.quoteNumber && merged.quote_no) {

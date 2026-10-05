@@ -102,7 +102,7 @@ export default function SketchUploadPage({ searchParams }: Props) {
               value={quoteNo}
               onChange={(e) => setQuoteNo(e.target.value)}
               required
-              placeholder="e.g. Q-AI-20251116-223023"
+              placeholder="e.g. Q-A-261004-48213"
               style={{
                 display: "block",
                 width: "100%",

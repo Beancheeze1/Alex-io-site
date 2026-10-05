@@ -27,6 +27,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import RepStartQuoteModal from "@/components/start-quote/RepStartQuoteModal";
+import { fetchNewQuoteNo } from "@/lib/quote-no";
 
 type QuoteRow = {
   id: number;
@@ -165,16 +166,8 @@ export default function AdminQuotesPage() {
     setCreating(true);
 
     try {
-      // Generate UTC quote number (same format as orchestrate)
-      const now = new Date();
-      const yyyy = now.getUTCFullYear();
-      const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-      const dd = String(now.getUTCDate()).padStart(2, "0");
-      const hh = String(now.getUTCHours()).padStart(2, "0");
-      const mi = String(now.getUTCMinutes()).padStart(2, "0");
-      const ss = String(now.getUTCSeconds()).padStart(2, "0");
-
-      const quoteNo = `Q-AI-${yyyy}${mm}${dd}-${hh}${mi}${ss}`;
+      // New collision-checked quote number (lib/quote-no.ts)
+      const quoteNo = await fetchNewQuoteNo("A");
 
       // Create draft quote row
       const res = await fetch("/api/quotes", {
@@ -550,7 +543,7 @@ export default function AdminQuotesPage() {
                 type="text"
                 value={quoteNoInput}
                 onChange={(e) => setQuoteNoInput(e.target.value)}
-                placeholder="e.g. Q-AI-20251129-123456"
+                placeholder="e.g. Q-A-261004-48213"
                 className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none ring-0 placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)]"
               />
               <button

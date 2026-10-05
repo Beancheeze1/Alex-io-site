@@ -29,6 +29,7 @@ import ProgressRail, {
 } from "@/components/start-quote/ProgressRail";
 import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
+import { fetchNewQuoteNo } from "@/lib/quote-no";
 
 type QuoteType = "foam_insert" | "complete_pack";
 type BoxStyle = "mailer" | "rsc";
@@ -88,22 +89,8 @@ type StockCandidate = {
   extended_price_usd?: number | null;
 };
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-function buildQuoteNo() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1);
-  const day = pad2(d.getDate());
-  const hh = pad2(d.getHours());
-  const mm = pad2(d.getMinutes());
-  const ss = pad2(d.getSeconds());
-  // Distinct prefix from Q-AI- (customer/AI flow) and Q-DEMO- (sales demo)
-  // so rep-created quotes are easy to filter/report on later.
-  return `Q-REP-${y}${m}${day}-${hh}${mm}${ss}`;
-}
+// Rep-created quotes use the Q-R- prefix (lib/quote-no.ts), distinct from
+// Q-A- (customer flow) and Q-D- (demo), so they're easy to filter/report on.
 
 function normalizeDims3(L: number | null, W: number | null, D: number | null) {
   if (!L || !W || !D) return "";
@@ -627,7 +614,7 @@ export default function RepStartQuoteModal({
 
     setSubmitting(true);
     try {
-      const quote_no = buildQuoteNo();
+      const quote_no = await fetchNewQuoteNo("R");
 
       const cleanBreaks = qtyBreaks
         .map((b) => ({

@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { isDemoQuoteNo } from "@/lib/quote-no";
 import { computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
 
 function jsonErr(status: number, error: string, message: string) {
@@ -106,7 +107,7 @@ export async function GET(req: Request) {
     if (!Number.isInteger(layer_index) || layer_index < 0) return jsonErr(400, "BAD_REQUEST", "Invalid layer_index.");
 
     // ── Demo bypass ────────────────────────────────────────────────────────
-    const isDemoQuote = quote_no.startsWith("Q-DEMO-");
+    const isDemoQuote = isDemoQuoteNo(quote_no);
     let tenantId: number;
     let userRole = "";
 

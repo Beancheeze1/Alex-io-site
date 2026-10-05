@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { computeGeometryHash, embedGeometryHashInStep } from "@/app/lib/layout/exports";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { isDemoQuoteNo } from "@/lib/quote-no";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Demo bypass ──────────────────────────────────────────────────────────
-  const isDemoQuote = quoteNo.startsWith("Q-DEMO-");
+  const isDemoQuote = isDemoQuoteNo(quoteNo);
   let tenantId: number;
   let userRole = "";
 

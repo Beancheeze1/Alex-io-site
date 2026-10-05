@@ -5,7 +5,7 @@
 // prospect wants to try the full quoting flow.
 //
 // What it does:
-//   1. Generates a Q-DEMO-YYYYMMDD-xxxxxx quote number
+//   1. Generates a Q-D-YYMMDD-NNNNN quote number
 //   2. Inserts a quotes row with is_demo=true scoped to the default tenant
 //   3. Inserts a primary quote_items row from the form dimensions
 //   4. Seeds the facts store (memory) so the layout editor and print view
@@ -26,23 +26,17 @@ import { q, one } from "@/lib/db";
 import { saveFacts } from "@/app/lib/memory";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { resolveDemoMaterial } from "@/lib/demo-material";
+import { buildQuoteNo } from "@/lib/quote-no";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-
 function buildDemoQuoteNo(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const mo = pad2(d.getMonth() + 1);
-  const day = pad2(d.getDate());
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `Q-DEMO-${y}${mo}${day}-${rand}`;
+  // Q-D-YYMMDD-NNNNN (lib/quote-no.ts). Collisions are handled by the
+  // ON CONFLICT DO NOTHING retry loop below.
+  return buildQuoteNo("D");
 }
 
 function toPositiveFloat(raw: unknown): number | null {
@@ -142,11 +136,11 @@ export async function POST(req: NextRequest) {
     const materialName = material.name;
 
     // ── Build quote number ──────────────────────────────────────────────────
-    // Retry up to 3 times in the astronomically unlikely case of a collision
+    // Retry on the (rare) collision: 5 random digits per day.
     let quoteNo = "";
     let quoteRow: any = null;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 10; attempt++) {
       quoteNo = buildDemoQuoteNo();
 
       const customerName =

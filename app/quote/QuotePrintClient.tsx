@@ -28,6 +28,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download";
+import { isDemoQuoteNo } from "@/lib/quote-no";
 
 type QuoteRow = {
   id: number;
@@ -685,7 +686,7 @@ export default function QuotePrintClient({
 
   // Demo quotes are identified by Q-DEMO- prefix — no extra API call needed.
   // This drives: watermark banner, button swap → CTA.
-  const isDemo = quoteNo.startsWith("Q-DEMO-");
+  const isDemo = isDemoQuoteNo(quoteNo);
 
   // Demo lead capture modal
   const [showLeadModal, setShowLeadModal] = React.useState(false);

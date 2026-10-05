@@ -19,6 +19,7 @@ import ProgressRail, {
 } from "@/components/start-quote/ProgressRail";
 import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
+import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
 
 type QuoteType = "foam_insert" | "complete_pack";
 type BoxStyle = "mailer" | "rsc";
@@ -46,20 +47,7 @@ type StockCandidate = {
   notes?: string;
 };
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-function buildQuoteNo() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1);
-  const day = pad2(d.getDate());
-  const hh = pad2(d.getHours());
-  const mm = pad2(d.getMinutes());
-  const ss = pad2(d.getSeconds());
-  return `Q-AI-${y}${m}${day}-${hh}${mm}${ss}`;
-}
+// Quote numbers come from lib/quote-no.ts (Q-A-YYMMDD-NNNNN, collision-checked server-side).
 
 function normalizeDims3(L: number | null, W: number | null, D: number | null) {
   if (!L || !W || !D) return "";
@@ -976,7 +964,7 @@ export default function StartQuoteModal({
     cavitySeed.trim().length > 0 && !parseSeedCavities(cavitySeed).isValid;
 
   // ---------- Launch (seed editor URL) ----------
-  const onLaunchEditor = () => {
+  const onLaunchEditor = async () => {
     if (!qtyOk) return;
 
     if (quoteType === "foam_insert") {
@@ -985,14 +973,16 @@ export default function StartQuoteModal({
       if (!boxOk || !foamFitOk || !thicknessOk) return;
     }
 
-    // If prefill supplied a Q-DEMO- quote_no (from the landing page demo flow),
-    // use it so the Apply route can find the already-created DB row.
-    // Otherwise generate a fresh Q-AI- number as normal.
+    // If prefill supplied a demo quote_no (Q-D- or legacy Q-DEMO-, from the
+    // landing page demo flow), use it so the Apply route can find the
+    // already-created DB row. Otherwise get a fresh, collision-checked
+    // Q-A- number. Quote-center and chat quotes always take this path, so
+    // they are real quotes.
     const prefillQuoteNo =
-      typeof prefillData?.quoteNo === "string" && prefillData.quoteNo.startsWith("Q-DEMO-")
+      typeof prefillData?.quoteNo === "string" && isDemoQuoteNo(prefillData.quoteNo)
         ? prefillData.quoteNo.trim()
         : null;
-    const quote_no = prefillQuoteNo ?? buildQuoteNo();
+    const quote_no = prefillQuoteNo ?? (await fetchNewQuoteNo("A"));
 
     const p = new URLSearchParams();
 

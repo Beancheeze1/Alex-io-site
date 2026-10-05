@@ -3795,6 +3795,19 @@ const handleGoToFoamAdvisor = () => {
   // Quote source (reporting only, distinct from sales credit above): each
   // entry point into StartQuoteModal already sets this unambiguously
   // ("direct" or "embed_website"), threaded here the same way as sales credit.
+  // Tenant the buyer came from (?tenant= set by the quote center / Start
+  // Quote). On the core host every tenant's /t/<slug> page is served, so
+  // Apply needs this to save the quote under the right shop.
+  const tenantSlugForApply = (() => {
+    try {
+      if (typeof window === "undefined") return "";
+      const url = new URL(window.location.href);
+      return (url.searchParams.get("tenant") || url.searchParams.get("t") || "").trim().toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
+
   const quoteSourceForApply = (() => {
     try {
       if (typeof window === "undefined") return "";
@@ -3940,6 +3953,12 @@ const handleGoToFoamAdvisor = () => {
       // Quote source: reporting only, does not affect sales credit above.
       if (quoteSourceForApply && quoteSourceForApply.length > 0) {
         payload.quote_source = quoteSourceForApply;
+      }
+
+      // Tenant the buyer came from (only used server-side on the core host,
+      // for a quote that doesn't exist yet).
+      if (tenantSlugForApply) {
+        payload.tenant_slug = tenantSlugForApply;
       }
 
       // Attach chosen carton so the backend can upsert the box line item.

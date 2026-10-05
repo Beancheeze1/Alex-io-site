@@ -212,7 +212,7 @@ if ($flowQuoteNo) {
     }
 
     # Step 4: Demo page contains quote number in HTML
-    if ($quotePage.body -match "Q-DEMO-") {
+    if ($quotePage.body -match "Q-D-|Q-DEMO-") {
         Pass "Demo quote page contains quote number in HTML"
     } else {
         Fail "Demo quote page HTML does not reference quote number" "Page may have failed to render"
@@ -298,6 +298,21 @@ else { Fail "Attachment by id with wrong quote_no -> 404" "Got $($r.status)" }
 $r = Get-Url "/embed/chat"
 if ($r.status -eq 200 -and $r.body -notmatch "Talk to Alex-IO") { Pass "Embed chat is white-labeled (no 'Talk to Alex-IO')" }
 else { Fail "Embed chat is white-labeled" "Got $($r.status)" }
+
+# ── 13. Quote numbers ─────────────────────────────────────────
+Write-Section "13. Quote numbers"
+
+$r = Get-Url "/api/public/quote-number?kind=A"
+$qn = $null
+if ($r.status -eq 200) { $qn = ($r.body | ConvertFrom-Json).quoteNo }
+if ($qn -match '^Q-A-\d{6}-\d{5}$') { Pass "New customer quote number format: $qn" }
+else { Fail "New customer quote number format Q-A-YYMMDD-NNNNN" "Got $($r.status) $qn" }
+
+$r = Get-Url "/api/public/quote-number?kind=R"
+$qn = $null
+if ($r.status -eq 200) { $qn = ($r.body | ConvertFrom-Json).quoteNo }
+if ($qn -match '^Q-R-\d{6}-\d{5}$') { Pass "New rep quote number format: $qn" }
+else { Fail "New rep quote number format Q-R-YYMMDD-NNNNN" "Got $($r.status) $qn" }
 
 # Summary
 $total = $pass + $fail

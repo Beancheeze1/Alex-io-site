@@ -26,6 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { newUniqueQuoteNo } from "@/lib/quote-no-server";
 import { stlToFacesJson } from "@/lib/stl/processor";
 
 export const dynamic = "force-dynamic";
@@ -150,13 +151,16 @@ async function postJson(url: string, body: any = {}) {
 
 
 async function createQuoteWithAutoNumber(email: string | null) {
+  // New-format, collision-checked number (lib/quote-no.ts), replacing the
+  // undocumented public.next_quote_no() database function.
+  const quoteNo = await newUniqueQuoteNo("A");
   return one<{ id: number; quote_no: string }>(
     `
     INSERT INTO quotes (quote_no, email)
-    VALUES (public.next_quote_no(), $1)
+    VALUES ($1, $2)
     RETURNING id, quote_no;
     `,
-    [email],
+    [quoteNo, email],
   );
 }
 

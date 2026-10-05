@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { isDemoQuoteNo } from "@/lib/quote-no";
 import { computeGeometryHash } from "@/app/lib/layout/exports";
 import { buildDxfForLayer } from "@/app/lib/layout/layer-dxf";
 
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
     if (!Number.isInteger(layer_index) || layer_index < 0) return jsonErr(400, "BAD_REQUEST", "Invalid layer_index.");
 
     // ── Demo bypass (matches step-layer) ────────────────────────────────────
-    const isDemoQuote = quote_no.startsWith("Q-DEMO-");
+    const isDemoQuote = isDemoQuoteNo(quote_no);
     let tenantId: number;
     let userRole = "";
 
