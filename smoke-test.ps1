@@ -332,6 +332,13 @@ if ($r.status -eq 200) { $th = $r.body | ConvertFrom-Json }
 if ($th -and $th.tenant_slug -eq "default") { Pass "Theme with only a cache-buster -> default" }
 else { Fail "Theme with only a cache-buster -> default" "Got slug=$($th.tenant_slug)" }
 
+# ── 15. Materials public route ────────────────────────────────
+Write-Section "15. Materials public route"
+
+$r = Get-Url "/api/materials/61"
+if ($r.status -eq 200 -and $r.body -match "PU Ether 1030") { Pass "GET /api/materials/61 -> 200" }
+else { Fail "GET /api/materials/61 -> 200" "Got $($r.status)" }
+
 # Summary
 $total = $pass + $fail
 Write-Host ""
