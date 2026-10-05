@@ -2,9 +2,11 @@
 --
 -- Adds plan tier column to the tenants table.
 -- Drives feature gating across the platform:
---   starter  → $599/mo  · 2 seats   · PDF only, no CAD exports
---   pro      → $1199/mo · 10 seats  · CAD/DXF/STEP, HubSpot, commissions
---   shop     → $1999/mo · unlimited · Multi-location, white-label, API
+--   starter  → $799/mo   · 2 seats   · PDF only, no CAD exports
+--   pro      → $1,299/mo · 10 seats  · CAD/DXF/STEP, HubSpot, commissions
+--   shop     → $1,999/mo · unlimited · Multi-location, white-label, API
+--   (Prices updated Oct 2026 to match lib/plan.ts and the landing page.
+--    Comment-only change; no SQL below changed.)
 --
 -- Default is 'pro' so ALL existing tenants keep their current full access.
 -- Safe to run multiple times (idempotent via IF NOT EXISTS / DO NOTHING).

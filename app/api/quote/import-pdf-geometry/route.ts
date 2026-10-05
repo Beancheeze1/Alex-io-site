@@ -4,7 +4,9 @@
 // Returns shapes that can be imported as cavities in the layout editor
 //
 // POST /api/quote/import-pdf-geometry
-// Body: { attachment_id: number } or multipart with file
+// Body: { attachment_id: number, quote_no?: string } or multipart with file.
+// Logged out: JSON only, and quote_no must match the attachment's own quote.
+// Multipart upload: staff only.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
@@ -14,6 +16,7 @@ import { writeFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { getCurrentUserFromRequest } from "@/lib/auth";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const execAsync = promisify(exec);
 
@@ -56,7 +59,15 @@ export type GeometryExtractionResult = {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUserFromRequest(req);
-    if (!user) return err("UNAUTHENTICATED", "Login required.", 401);
+
+    // Logged-out buyers in the public layout editor may extract geometry from
+    // a PDF already attached to THEIR quote (they must send that quote_no) —
+    // same rule as /api/quote-attachments/{id}. Rate limited because this runs
+    // a Python extraction. Uploading a new file here stays staff-only.
+    if (!user) {
+      const rate = await rateLimit(req, 10, "pdf-geometry");
+      if (!rate.success) return rateLimitResponse(rate.reset);
+    }
 
     const contentType = req.headers.get("content-type") || "";
     
@@ -69,6 +80,7 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       attachmentId = body.attachment_id || null;
       quoteNo = body.quote_no || null;
+      const callerQuoteNo = typeof body.quote_no === "string" ? body.quote_no.trim() : "";
       
       if (!attachmentId) {
         return err("MISSING_ATTACHMENT_ID", "Provide attachment_id or upload a file", 400);
@@ -88,12 +100,19 @@ export async function POST(req: NextRequest) {
       // Authorize by the attachment's OWN quote (never a caller-supplied
       // quote_no), so one tenant can't read another tenant's file by id.
       // Same 404 as a missing id.
-      const ownerQuote = attach.quote_no
-        ? await one<{ id: number }>(
-            `select id from quotes where quote_no = $1 and tenant_id = $2 limit 1`,
-            [attach.quote_no, user.tenant_id],
-          )
-        : null;
+      const ownerQuote = !attach.quote_no
+        ? null
+        : user
+          ? await one<{ id: number }>(
+              `select id from quotes where quote_no = $1 and tenant_id = $2 limit 1`,
+              [attach.quote_no, user.tenant_id],
+            )
+          : callerQuoteNo && callerQuoteNo === attach.quote_no.trim()
+            ? await one<{ id: number }>(
+                `select id from quotes where quote_no = $1 limit 1`,
+                [attach.quote_no],
+              )
+            : null;
       if (!ownerQuote) {
         return err("ATTACHMENT_NOT_FOUND", `No attachment with id=${attachmentId}`, 404);
       }
@@ -105,7 +124,7 @@ export async function POST(req: NextRequest) {
       
       pdfBuffer = attach.data;
       quoteNo = attach.quote_no;
-      if (quoteNo) {
+      if (quoteNo && user) {
         const quote = await one<{ id: number }>(
           `
           select id
@@ -119,6 +138,9 @@ export async function POST(req: NextRequest) {
       }
       
     } else if (contentType.includes("multipart/form-data")) {
+      // Uploading a new PDF straight to this route is staff-only.
+      if (!user) return err("UNAUTHENTICATED", "Login required.", 401);
+
       const formData = await req.formData();
       const file = formData.get("file") as File | null;
       quoteNo = formData.get("quote_no") as string | null;

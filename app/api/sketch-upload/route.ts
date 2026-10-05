@@ -1,7 +1,7 @@
 // app/api/sketch-upload/route.ts
 //
 // Handle "Upload file" from /sketch-upload page.
-// - Saves the file into quote_attachments (with quote_id + quote_no when possible)
+// - Saves the file into quote_attachments for an existing quote (quote_no required)
 // - If the client provided an email, stores it on the quote header (if missing)
 // - Calls /api/sketch/parse to run vision
 // - Calls /api/sketch/apply to send an updated quote email (Option A)
@@ -26,7 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
-import { newUniqueQuoteNo } from "@/lib/quote-no-server";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { stlToFacesJson } from "@/lib/stl/processor";
 
 export const dynamic = "force-dynamic";
@@ -150,19 +150,9 @@ async function postJson(url: string, body: any = {}) {
 }
 
 
-async function createQuoteWithAutoNumber(email: string | null) {
-  // New-format, collision-checked number (lib/quote-no.ts), replacing the
-  // undocumented public.next_quote_no() database function.
-  const quoteNo = await newUniqueQuoteNo("A");
-  return one<{ id: number; quote_no: string }>(
-    `
-    INSERT INTO quotes (quote_no, email)
-    VALUES ($1, $2)
-    RETURNING id, quote_no;
-    `,
-    [quoteNo, email],
-  );
-}
+// NOTE (Oct 2026): this route no longer creates quotes. It used to insert a
+// quote with no tenant_id when quote_no was missing, which always failed
+// (quotes.tenant_id is NOT NULL). Every caller sends quote_no.
 
 function dxfFromLoops(params: { units: "in" | "mm"; loops: Array<Array<{ x: number; y: number }>> }): string {
   const unitsCode = params.units === "mm" ? 4 : 1; // DXF INSUNITS
@@ -427,6 +417,11 @@ if (units !== "in" && units !== "mm") {
 
 export async function POST(req: NextRequest) {
   try {
+    // Public route (layout editor + /sketch-upload page). Each upload can run
+    // Forge / vision processing, so limit per IP.
+    const rate = await rateLimit(req, 20, "sketch-upload");
+    if (!rate.success) return rateLimitResponse(rate.reset);
+
     const form = await req.formData().catch(() => null);
     if (!form) {
       return err("invalid_form", "Expected multipart/form-data");
@@ -497,11 +492,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!quoteNo) {
-      const created = await createQuoteWithAutoNumber(email);
-      if (!created) return err("quote_create_failed", "Could not create quote", 500);
-
-      quoteId = created.id;
-      quoteNo = created.quote_no;
+      return err("missing_quote_no", "quote_no is required.", 400);
     }
 
     // Feature-flagged Forge ingestion (DXF-primary v1)
