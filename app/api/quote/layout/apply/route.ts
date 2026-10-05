@@ -1720,6 +1720,31 @@ export async function POST(req: NextRequest) {
         `,
         [quote.id, customerName, customerEmail, customerPhone, customerCompany, currentUserId, tenantId],
       );
+
+      // A draft created by an upload (lib/quote-draft.ts) exists before the
+      // first Apply, so ensureQuoteHeader didn't link a customer. Link it now
+      // (only if not linked yet).
+      if (customerEmail) {
+        try {
+          const cust = await findOrCreateCustomer(tenantId, {
+            name: customerName,
+            email: customerEmail,
+            phone: customerPhone,
+            company: customerCompany,
+          });
+          if (cust?.id) {
+            await q(
+              `update quotes set customer_id = $1 where id = $2 and tenant_id = $3 and customer_id is null`,
+              [cust.id, quote.id, tenantId],
+            );
+          }
+        } catch (e) {
+          console.warn("[layout/apply] Failed to link customer to existing quote", {
+            quoteNo,
+            err: String(e),
+          });
+        }
+      }
     }
 
     let materialLegend: string | null = null;

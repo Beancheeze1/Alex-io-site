@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { findOrCreateUploadDraft } from "@/lib/quote-draft";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
@@ -18,11 +19,6 @@ export const runtime = "nodejs";
 function err(error: string, detail?: any, status = 400) {
   return NextResponse.json({ ok: false, error, detail }, { status });
 }
-
-type QuoteRow = {
-  id: number;
-  quote_no: string;
-};
 
 type AttachRow = {
   id: number;
@@ -61,11 +57,13 @@ export async function POST(req: NextRequest) {
       return err("missing_quote_no", "quote_no is required");
     }
 
-    // Verify quote exists
-    const quote = await one<QuoteRow>(
-      `SELECT id, quote_no FROM quotes WHERE quote_no = $1 LIMIT 1`,
-      [quoteNo]
-    );
+    // Existing quote, or — public editor before the first Apply — a new
+    // empty draft (lib/quote-draft.ts) so the PDF has somewhere to go.
+    const quote = await findOrCreateUploadDraft(req, {
+      quoteNo,
+      tenantSlug: (form.get("tenant_slug") as string | null) || null,
+      quoteSource: (form.get("quote_source") as string | null) || null,
+    });
 
     if (!quote) {
       return err("quote_not_found", { quoteNo }, 404);

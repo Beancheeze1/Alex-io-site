@@ -27,6 +27,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { findOrCreateUploadDraft } from "@/lib/quote-draft";
 import { stlToFacesJson } from "@/lib/stl/processor";
 
 export const dynamic = "force-dynamic";
@@ -488,7 +489,17 @@ export async function POST(req: NextRequest) {
     }
 
     if (quoteNo && !quoteId) {
-      return err("quote_not_found", { quoteNo }, 404);
+      // Public editor before the first Apply: create an empty draft
+      // (lib/quote-draft.ts) so the file has a quote to attach to.
+      const draft = await findOrCreateUploadDraft(req, {
+        quoteNo,
+        tenantSlug: (form.get("tenant_slug") as string | null) || null,
+        quoteSource: (form.get("quote_source") as string | null) || null,
+      });
+      if (!draft) {
+        return err("quote_not_found", { quoteNo }, 404);
+      }
+      quoteId = draft.id;
     }
 
     if (!quoteNo) {

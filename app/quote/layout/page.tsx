@@ -3373,6 +3373,15 @@ else nextYIn = snapInches(nextYIn);
           const pdfFormData = new FormData();
           pdfFormData.append("file", file);
           pdfFormData.append("quote_no", currentQuoteNo);
+          // Lets the server create a draft under the right shop if this is
+          // the buyer's first action (before any Apply).
+          try {
+            const sp = new URL(window.location.href).searchParams;
+            const ts = (sp.get("tenant") || sp.get("t") || "").trim().toLowerCase();
+            if (ts) pdfFormData.append("tenant_slug", ts);
+            const qs = (sp.get("quote_source") || "").trim();
+            if (qs) pdfFormData.append("quote_source", qs);
+          } catch {}
           
           const saveRes = await fetch('/api/quote-attachments/save-pdf', {
             method: 'POST',
@@ -3535,6 +3544,15 @@ else nextYIn = snapInches(nextYIn);
       fd.append("filename", file.name);
       fd.append("quote_no", currentQuoteNo);
       fd.append("importMode", importMode);
+      // Lets the server create a draft under the right shop if this is
+      // the buyer's first action (before any Apply).
+      try {
+        const sp = new URL(window.location.href).searchParams;
+        const ts = (sp.get("tenant") || sp.get("t") || "").trim().toLowerCase();
+        if (ts) fd.append("tenant_slug", ts);
+        const qs = (sp.get("quote_source") || "").trim();
+        if (qs) fd.append("quote_source", qs);
+      } catch {}
 
       const base = "/api/sketch-upload";
       const url = `${base}?quote_no=${encodeURIComponent(currentQuoteNo)}&t=${Date.now()}`;
