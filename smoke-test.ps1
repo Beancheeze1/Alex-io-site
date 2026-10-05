@@ -339,6 +339,13 @@ $r = Get-Url "/api/materials/61"
 if ($r.status -eq 200 -and $r.body -match "PU Ether 1030") { Pass "GET /api/materials/61 -> 200" }
 else { Fail "GET /api/materials/61 -> 200" "Got $($r.status)" }
 
+# ── 16. Corrugated settings API ───────────────────────────────
+Write-Section "16. Corrugated settings API"
+
+$r = Get-Url "/api/admin/corrugated"
+if ($r.status -eq 401) { Pass "GET /api/admin/corrugated without login -> 401" }
+else { Fail "GET /api/admin/corrugated without login -> 401" "Got $($r.status)" }
+
 # Summary
 $total = $pass + $fail
 Write-Host ""
