@@ -1442,7 +1442,11 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
             phone?: string | null;
           };
 
-          const dbName = (qh.customer_name ?? "").toString().trim();
+          // A draft created by an upload before the first Apply carries a
+          // placeholder name (DRAFT_CUSTOMER_NAME in lib/quote-draft.ts — keep
+          // these in sync). Treat it as blank so the buyer must enter a real name.
+          const rawDbName = (qh.customer_name ?? "").toString().trim();
+          const dbName = rawDbName === "Draft – no contact yet" ? "" : rawDbName;
           const dbEmail = (qh.email ?? "").toString().trim();
           const dbPhone = (qh.phone ?? "").toString().trim();
 
