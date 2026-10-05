@@ -314,6 +314,24 @@ if ($r.status -eq 200) { $qn = ($r.body | ConvertFrom-Json).quoteNo }
 if ($qn -match '^Q-R-\d{6}-\d{5}$') { Pass "New rep quote number format: $qn" }
 else { Fail "New rep quote number format Q-R-YYMMDD-NNNNN" "Got $($r.status) $qn" }
 
+# ── 14. Tenant theme on the core host ─────────────────────────
+Write-Section "14. Tenant theme on the core host"
+
+$r = Get-Url "/api/tenant/theme?tenant=mline&t=0.123"
+$th = $null
+if ($r.status -eq 200) { $th = $r.body | ConvertFrom-Json }
+if ($th -and $th.tenant_slug -eq "mline") { Pass "Theme honors ?tenant=mline on the core host" }
+else { Fail "Theme honors ?tenant=mline on the core host" "Got $($r.status) slug=$($th.tenant_slug)" }
+
+if ($th -and -not ($th.theme_json.PSObject.Properties.Name -contains "specsEmail")) { Pass "Theme response has no specsEmail" }
+else { Fail "Theme response has no specsEmail" "specsEmail present" }
+
+$r = Get-Url "/api/tenant/theme?t=0.456"
+$th = $null
+if ($r.status -eq 200) { $th = $r.body | ConvertFrom-Json }
+if ($th -and $th.tenant_slug -eq "default") { Pass "Theme with only a cache-buster -> default" }
+else { Fail "Theme with only a cache-buster -> default" "Got slug=$($th.tenant_slug)" }
+
 # Summary
 $total = $pass + $fail
 Write-Host ""
