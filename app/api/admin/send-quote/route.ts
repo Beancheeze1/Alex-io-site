@@ -12,6 +12,7 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
 import { computePricing } from "@/app/lib/pricing/compute";
 
@@ -217,6 +218,7 @@ export async function POST(req: NextRequest) {
       packagingLines = await q<PkgRow>(
         `SELECT qbs.id, qbs.sku, qbs.qty,
                 qbs.unit_price_usd, qbs.extended_price_usd,
+                (to_jsonb(qbs) ->> 'plates_usd')::numeric as plates_usd,
                 b.vendor,
                 coalesce(b.style, qbs.custom_style) as style,
                 coalesce(qbs.description, b.description) as description,
@@ -250,11 +252,10 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       return json({ ok: false, error: "settings_failed", detail: String(e?.message || e) }, 500);
     }
-    const isPrinted = !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true);
-    const artSetupFee = isPrinted ? Number(settings.printing_upcharge_usd || 0) : 0;
-    const printingUpchargePct = isPrinted ? Number(settings.printing_upcharge_pct || 0) : 0;
-    const printingUpchargeAmt = Math.round((foamSubtotal + packagingSubtotal) * (printingUpchargePct / 100) * 100) / 100;
-    const printingUpcharge = artSetupFee + printingUpchargeAmt;
+    // Same printing rules as /api/quote/print (app/lib/pricing/print-charges.ts).
+    const platesTotal = packagingLines.reduce((s, l) => s + (Number((l as any).plates_usd) || 0), 0);
+    const pc = computePrintCharges({ facts, settings, foamSubtotal, packagingSubtotal, platesTotal });
+    const { isPrinted, artSetupFee, printingUpchargePct, printingUpchargeAmt, printingUpcharge } = pc;
 
     // Die-cutting charge: same rule as /api/quote/print — flat fee once the
     // order's real qty (the primary, non-layout-layer, non-packaging row)
@@ -427,6 +428,8 @@ export async function POST(req: NextRequest) {
       printingUpchargePct: printingUpchargePct > 0 ? printingUpchargePct : null,
       printingUpchargeAmt: printingUpchargeAmt > 0 ? printingUpchargeAmt : null,
       printingUpcharge: printingUpcharge > 0 ? printingUpcharge : null,
+      printLabel: pc.printModel === "per_color" ? "Packaging &ndash; Printing plates (one time)" : null,
+      printSublabel: pc.printModel === "per_color" ? pc.printSummary : null,
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
       grandTotal,

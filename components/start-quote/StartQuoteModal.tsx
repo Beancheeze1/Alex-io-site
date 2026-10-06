@@ -336,6 +336,20 @@ export default function StartQuoteModal({
     (searchParams.get("printed") || "").trim() === "1" ||
       (searchParams.get("box_printed") || "").trim() === "1",
   );
+  // Per-color printing (Corrugated Step 3B): one entry per color (spot or
+  // flood) + sides. `printed` is kept in sync (colors.length > 0) for the
+  // flows that still read it.
+  const [printColors, setPrintColors] = React.useState<("spot" | "flood")[]>(() =>
+    (searchParams.get("printed") || "").trim() === "1" ||
+    (searchParams.get("box_printed") || "").trim() === "1"
+      ? ["spot"]
+      : [],
+  );
+  const [printSides, setPrintSides] = React.useState<1 | 2>(1);
+  const setPrintColorCount = (n: number) => {
+    setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
+    setPrinted(n > 0);
+  };
   const [prefillPackagingSku, setPrefillPackagingSku] = React.useState<string>(
     searchParams.get("box_sku") || "",
   );
@@ -394,7 +408,10 @@ export default function StartQuoteModal({
     if (prefillData.cavities) setCavitySeed(prefillData.cavities);
 
     // Printing preference
-    if (prefillData.printed === true) setPrinted(true);
+    if (prefillData.printed === true) {
+      setPrinted(true);
+      setPrintColors((c) => (c.length ? c : ["spot"]));
+    }
 
     // Stock box SKU (only present if customer chose it in the widget)
     if (prefillData.packagingSku) setPrefillPackagingSku(prefillData.packagingSku);
@@ -1114,7 +1131,9 @@ export default function StartQuoteModal({
       if (customRscBox && /^\d+$/.test(boxGradeId)) {
         p.set("box_grade", boxGradeId);
       }
-      p.set("printed", printed ? "1" : "0");
+      p.set("print_colors", printColors.join(","));
+      p.set("print_sides", String(printSides));
+      p.set("printed", printColors.length > 0 ? "1" : "0");
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
       p.set("fit_allow_in", String(FIT_ALLOW_IN));
@@ -1130,7 +1149,8 @@ export default function StartQuoteModal({
           body: JSON.stringify({
             quote_no,
             box: { L: boxLNum, W: boxWNum, H: boxDNum, style: boxStyle },
-            printed: printed ? 1 : 0,
+            printed: printColors.length > 0 ? 1 : 0,
+            print_spec: { colors: printColors, sides: printSides },
           }),
         }).catch(() => null);
       }
@@ -1471,28 +1491,71 @@ export default function StartQuoteModal({
                         ) : null}
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                                PRINTED BOX
-                              </div>
-                              <div className="mt-1 text-sm text-[var(--text-secondary)]">
-                                If printed, add a $50 upcharge (shown in review).
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setPrinted((p) => !p)}
-                              className={[
-                                "rounded-md border px-4 py-2 text-sm font-medium",
-                                printed
-                                  ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
-                                  : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
-                              ].join(" ")}
-                            >
-                              {printed ? "Printed  +$50" : "Not printed"}
-                            </button>
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            PRINTING
                           </div>
+                          <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                            Print on the box? Choose the colors. Spot is text, lines and logos; flood covers large
+                            solid areas.
+                          </div>
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label className="block">
+                              <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                                COLORS
+                              </div>
+                              <select
+                                aria-label="Print colors"
+                                value={String(printColors.length)}
+                                onChange={(e) => setPrintColorCount(Number(e.target.value))}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              >
+                                <option value="0">No print</option>
+                                <option value="1">1 color</option>
+                                <option value="2">2 colors</option>
+                                <option value="3">3 colors</option>
+                                <option value="4">4 colors</option>
+                              </select>
+                            </label>
+                            {printColors.length > 0 ? (
+                              <label className="block">
+                                <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                                  SIDES
+                                </div>
+                                <select
+                                  aria-label="Print sides"
+                                  value={String(printSides)}
+                                  onChange={(e) => setPrintSides(e.target.value === "2" ? 2 : 1)}
+                                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                >
+                                  <option value="1">One side</option>
+                                  <option value="2">Two sides</option>
+                                </select>
+                              </label>
+                            ) : null}
+                          </div>
+                          {printColors.length > 0 ? (
+                            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                              {printColors.map((c, i) => (
+                                <label key={i} className="block">
+                                  <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                                    COLOR {i + 1}
+                                  </div>
+                                  <select
+                                    aria-label={`Color ${i + 1} coverage`}
+                                    value={c}
+                                    onChange={(e) => {
+                                      const v: "spot" | "flood" = e.target.value === "flood" ? "flood" : "spot";
+                                      setPrintColors((cs) => cs.map((x, j) => (j === i ? v : x)));
+                                    }}
+                                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                  >
+                                    <option value="spot">Spot</option>
+                                    <option value="flood">Flood</option>
+                                  </select>
+                                </label>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
@@ -1930,7 +1993,14 @@ export default function StartQuoteModal({
                                     v={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Recommended by the shop"}
                                   />
                                 ) : null}
-                                <Row k="Printed" v={printed ? "Yes (+$50)" : "No"} />
+                                <Row
+                                  k="Printing"
+                                  v={
+                                    printColors.length
+                                      ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
+                                      : "No print"
+                                  }
+                                />
                                 <Row
                                   k="Foam fit (L/W)"
                                   v={

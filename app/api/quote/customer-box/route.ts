@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { one } from "@/lib/db";
+import { parsePrintSpec } from "@/lib/corrugated-price";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -63,7 +64,8 @@ export async function GET(req: NextRequest) {
       (facts as any)?.printed === "1"
     );
 
-    return NextResponse.json({ ok: true, box: box ?? null, printed });
+    const print_spec = parsePrintSpec((facts as any)?.print_spec);
+    return NextResponse.json({ ok: true, box: box ?? null, printed, print_spec });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: String(err?.message || err) },
@@ -115,6 +117,14 @@ export async function POST(req: NextRequest) {
     }
     if (typeof printedRaw === "boolean" || printedRaw === 1 || printedRaw === 0) {
       patch.printed = printedRaw ? 1 : 0;
+    }
+    // Per-color print spec (Corrugated Step 3B): { colors: ("spot"|"flood")[], sides: 1|2 }.
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, "print_spec")) {
+      const spec = parsePrintSpec(body.print_spec);
+      if (spec) {
+        patch.print_spec = spec;
+        patch.printed = spec.colors.length > 0 ? 1 : 0;
+      }
     }
     await saveFacts(quoteNo, { ...(existing as any), ...patch });
 

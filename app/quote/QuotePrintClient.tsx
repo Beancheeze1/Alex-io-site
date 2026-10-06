@@ -149,6 +149,8 @@ type ApiOk = {
   dieCutTriggerQty?: number;
   grandTotal: number;
   isPrinted?: boolean;
+  printModel?: "per_color" | "legacy";
+  printSummary?: string | null;
   customerBoxDims?: { L: number; W: number; H: number; style?: "mailer" | "rsc" } | null;
   packagingLines?: RequestedBox[];
   salesRepEmail?: string | null;
@@ -834,6 +836,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
 
   // Printed flag and customer box dims from API
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
+  const [printModel, setPrintModel] = React.useState<"per_color" | "legacy">("legacy");
+  const [printSummary, setPrintSummary] = React.useState<string | null>(null);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number; style?: "mailer" | "rsc" } | null>(null);
 
   // Subtotals from server: foam, packaging, grand (foam + packaging)
@@ -1087,6 +1091,8 @@ const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
         );
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
+        setPrintModel(asOk.printModel === "per_color" ? "per_color" : "legacy");
+        setPrintSummary(typeof asOk.printSummary === "string" ? asOk.printSummary : null);
         setCustomerBoxDims(asOk.customerBoxDims ?? null);
         setSalesRepEmail(typeof asOk.salesRepEmail === "string" ? asOk.salesRepEmail : null);
       } else {
@@ -2529,7 +2535,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                       {(isPrinted || effectivePrintingUpcharge > 0) && (
                         <div>
-                          <div style={labelStyle}>Printing upcharge</div>
+                          <div style={labelStyle}>{printModel === "per_color" ? "Printing plates (one time)" : "Printing upcharge"}</div>
                           <div style={{ fontSize: 13 }}>{effectivePrintingUpcharge > 0 ? formatUsd(effectivePrintingUpcharge) : "TBD"}</div>
                         </div>
                       )}
@@ -3140,9 +3146,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 marginBottom: 2,
                               }}
                             >
-                              Packaging – Print upcharge
+                              {printModel === "per_color" ? "Packaging – Printing plates (one time)" : "Packaging – Print upcharge"}
                             </div>
-                            <div style={{ fontWeight: 500 }}>Custom printed mailer / box</div>
+                            <div style={{ fontWeight: 500 }}>
+                              {printModel === "per_color" ? printSummary || "Printed box" : "Custom printed mailer / box"}
+                            </div>
                           </td>
                           <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
                           <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>

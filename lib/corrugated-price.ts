@@ -190,3 +190,75 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     warnings,
   };
 }
+
+// ---------- Step 3B: per-color printing for any box ----------
+
+/** Cleans a stored / posted print spec. Not an object with a colors array → null. */
+export function parsePrintSpec(raw: unknown): PrintSpec | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as { colors?: unknown; sides?: unknown };
+  if (!Array.isArray(r.colors)) return null;
+  const colors = r.colors
+    .filter((c): c is Coverage => c === "spot" || c === "flood")
+    .slice(0, MAX_COLORS);
+  const sides: 1 | 2 = Number(r.sides) === 2 ? 2 : 1;
+  return { colors, sides };
+}
+
+/** "2-color print (1 spot, 1 flood), two sides" — or "No print". */
+export function describePrintSpec(p: PrintSpec | null): string {
+  if (!p || p.colors.length === 0) return "No print";
+  const spot = p.colors.filter((c) => c === "spot").length;
+  const flood = p.colors.length - spot;
+  const parts: string[] = [];
+  if (spot) parts.push(`${spot} spot`);
+  if (flood) parts.push(`${flood} flood`);
+  return `${p.colors.length}-color print (${parts.join(", ")}), ${p.sides === 2 ? "two sides" : "one side"}`;
+}
+
+export type PrintAdderResult = {
+  print_total_usd: number; // (print run + print setup) x (1 + markup), for the qty
+  unit_adder_usd: number; // print_total / qty, 4 decimals
+  plates_line_usd: number; // one-time plates x (1 + markup)
+  warnings: string[];
+};
+
+/**
+ * Print cost for a box that isn't engine-priced (stock catalog box, custom
+ * mailer, nearest-stock fallback), from the shop's per-color rates:
+ *   run    = qty / 1000 x sum(run $/M per color, spot or flood) x sides
+ *   setup  = print setup per color x colors x sides
+ *   plates = sum(plate $ per color, spot or flood) x sides   (own line)
+ * Run + setup are marked up and spread over the qty; order setup, board,
+ * converting and the minimum order don't apply (the box keeps its own price).
+ */
+export function pricePrintAdder(quantity: number, print: PrintSpec, s: BoxSettings): PrintAdderResult {
+  const colors = (print?.colors ?? []).filter((c) => c === "spot" || c === "flood").slice(0, MAX_COLORS);
+  if (colors.length === 0) {
+    return { print_total_usd: 0, unit_adder_usd: 0, plates_line_usd: 0, warnings: [] };
+  }
+  const qty = Math.max(1, Math.round(quantity || 1));
+  const sides: 1 | 2 = print.sides === 2 ? 2 : 1;
+  const spot = colors.filter((c) => c === "spot").length;
+  const flood = colors.length - spot;
+  const mk = 1 + s.markup_pct / 100;
+
+  const run = (qty / 1000) * (spot * s.print_run_spot_per_m + flood * s.print_run_flood_per_m) * sides;
+  const setup = s.print_setup_per_color_usd * colors.length * sides;
+  const total = (run + setup) * mk;
+  const plates = (spot * s.plate_spot_usd + flood * s.plate_flood_usd) * sides * mk;
+
+  const warnings: string[] = [];
+  if (s.print_setup_per_color_usd === 0) warnings.push("Print setup is $0.");
+  if (spot > 0 && s.print_run_spot_per_m === 0) warnings.push("Spot print run rate is $0.");
+  if (flood > 0 && s.print_run_flood_per_m === 0) warnings.push("Flood print run rate is $0.");
+  if (spot > 0 && s.plate_spot_usd === 0) warnings.push("Spot plate cost is $0.");
+  if (flood > 0 && s.plate_flood_usd === 0) warnings.push("Flood plate cost is $0.");
+
+  return {
+    print_total_usd: r2(total),
+    unit_adder_usd: r4(total / qty),
+    plates_line_usd: r2(plates),
+    warnings,
+  };
+}

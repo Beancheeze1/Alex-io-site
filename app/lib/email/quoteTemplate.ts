@@ -82,6 +82,8 @@ export type TemplateInput = {
   printingUpchargePct?: number | null;
   printingUpchargeAmt?: number | null;
   printingUpcharge?: number | null;       // combined total (artSetupFee + printingUpchargeAmt)
+  printLabel?: string | null;             // per-color quotes: "Packaging – Printing plates (one time)"
+  printSublabel?: string | null;          // per-color quotes: e.g. "2-color print (1 spot, 1 flood), one side"
   dieCuttingCharge?: number | null;
   dieCutTriggerQty?: number | null;
   grandTotal?: number | null;
@@ -787,8 +789,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>`).join("")}
                         ${hasPrinting ? `<tr>
                           <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Packaging &ndash; Print upcharge</div>
-                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">Custom printed mailer / box</div>
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${input.printLabel ?? "Packaging &ndash; Print upcharge"}</div>
+                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">${input.printSublabel ?? "Custom printed mailer / box"}</div>
                           </td>
                           <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
                             <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(printingUpchargeAmt as number)}</div>

@@ -30,7 +30,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
-import { resolveStockSelection } from "@/app/lib/packaging-selection";
+import {
+  printSpecForQuote,
+  repriceQuoteBoxes,
+  resolveStockSelection,
+} from "@/app/lib/packaging-selection";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -345,6 +349,15 @@ export async function POST(req: NextRequest) {
     );
 
     const pricedSelection = (priced?.[0] ?? selection) as SelectionRow;
+
+    // Per-color printing (Corrugated Step 3B): on a per-color quote, reprice
+    // every box on it so this box gets its print adder (and plates).
+    try {
+      const spec = await printSpecForQuote(quote.quote_no);
+      if (spec) await repriceQuoteBoxes(quote.id, quote.tenant_id, spec);
+    } catch (e) {
+      console.error("[boxes/add-to-quote] per-color print reprice failed", e);
+    }
 
     // 4) Insert a carton line into quote_items (best-effort, only on first create)
     let boxItemId: number | null = null;

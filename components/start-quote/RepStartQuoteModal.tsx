@@ -329,6 +329,13 @@ export default function RepStartQuoteModal({
   const [boxD, setBoxD] = React.useState("");
   const [boxStyle, setBoxStyle] = React.useState<BoxStyle>("mailer");
   const [printed, setPrinted] = React.useState(false);
+  // Per-color printing (Corrugated Step 3B); `printed` kept in sync.
+  const [printColors, setPrintColors] = React.useState<("spot" | "flood")[]>([]);
+  const [printSides, setPrintSides] = React.useState<1 | 2>(1);
+  const setPrintColorCount = (n: number) => {
+    setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
+    setPrinted(n > 0);
+  };
   const [foamConfig, setFoamConfig] = React.useState<FoamConfig>("bottom_top");
   const [bottomThk, setBottomThk] = React.useState("");
   const [topThk, setTopThk] = React.useState(String(DEFAULT_TOP_PAD_IN));
@@ -594,6 +601,8 @@ export default function RepStartQuoteModal({
     setBoxD("");
     setBoxStyle("mailer");
     setPrinted(false);
+    setPrintColors([]);
+    setPrintSides(1);
     setFoamConfig("bottom_top");
     setBottomThk("");
     setTopThk(String(DEFAULT_TOP_PAD_IN));
@@ -754,7 +763,9 @@ export default function RepStartQuoteModal({
         if (toNumOrNull(boxW)) p.set("box_w", String(toNumOrNull(boxW)));
         if (toNumOrNull(boxD)) p.set("box_d", String(toNumOrNull(boxD)));
         p.set("box_style", boxStyle);
-        p.set("printed", printed ? "1" : "0");
+        p.set("print_colors", printColors.join(","));
+        p.set("print_sides", String(printSides));
+        p.set("printed", printColors.length > 0 ? "1" : "0");
         p.set("pack_type", "complete_pack");
         p.set("foam_config", foamConfig);
         p.set("fit_allow_in", String(FIT_ALLOW_IN));
@@ -1250,15 +1261,52 @@ export default function RepStartQuoteModal({
                             </div>
                           ) : null}
 
-                          <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                            <input
-                              type="checkbox"
-                              checked={printed}
-                              onChange={(e) => setPrinted(e.target.checked)}
-                              className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
-                            />
-                            Printed box
-                          </label>
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <Field label="Printing">
+                              <select
+                                value={String(printColors.length)}
+                                onChange={(e) => setPrintColorCount(Number(e.target.value))}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                              >
+                                {[0, 1, 2, 3, 4].map((n) => (
+                                  <option key={n} value={String(n)} style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                    {n === 0 ? "No print" : `${n} color${n > 1 ? "s" : ""}`}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                            {printColors.length > 0 ? (
+                              <Field label="Sides">
+                                <select
+                                  value={String(printSides)}
+                                  onChange={(e) => setPrintSides(e.target.value === "2" ? 2 : 1)}
+                                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                                >
+                                  <option value="1" style={{ color: "#0f172a", backgroundColor: "#fff" }}>One side</option>
+                                  <option value="2" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Two sides</option>
+                                </select>
+                              </Field>
+                            ) : null}
+                          </div>
+                          {printColors.length > 0 ? (
+                            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                              {printColors.map((c, i) => (
+                                <Field key={i} label={`Color ${i + 1}`}>
+                                  <select
+                                    value={c}
+                                    onChange={(e) => {
+                                      const v: "spot" | "flood" = e.target.value === "flood" ? "flood" : "spot";
+                                      setPrintColors((cs) => cs.map((x, j) => (j === i ? v : x)));
+                                    }}
+                                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                                  >
+                                    <option value="spot" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Spot</option>
+                                    <option value="flood" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Flood</option>
+                                  </select>
+                                </Field>
+                              ))}
+                            </div>
+                          ) : null}
 
                           {foamConfig === "bottom_top" ? (
                             <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">

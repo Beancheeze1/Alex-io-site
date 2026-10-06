@@ -11,7 +11,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
-import { customSelectionUpdate, resolveCustomSelection } from "@/app/lib/packaging-selection";
+import {
+  customSelectionUpdate,
+  printSpecForQuote,
+  resolveCustomSelection,
+} from "@/app/lib/packaging-selection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,7 +130,7 @@ export async function POST(req: NextRequest) {
       row.custom_style,
       Number(row.qty) || 1,
       Number(quote.tenant_id),
-      { gradeId },
+      { gradeId, print: await printSpecForQuote(quote.quote_no) },
     );
     const upd = customSelectionUpdate(row.id, resolved);
     const saved = await q(upd.text, upd.values);

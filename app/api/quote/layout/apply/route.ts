@@ -49,8 +49,11 @@ import { one, q } from "@/lib/db";
 import {
   customSelectionInsert,
   customSelectionUpdate,
+  printSpecForQuote,
+  repriceQuoteBoxes,
   resolveCustomSelection,
 } from "@/app/lib/packaging-selection";
+import { parsePrintSpec } from "@/lib/corrugated-price";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
@@ -2479,6 +2482,30 @@ export async function POST(req: NextRequest) {
       }
     }
     // ---- END selectedCarton ----
+
+    // ---- Per-color printing (Corrugated Step 3B) ----
+    // The editor sends printSpec for quotes on the per-color model (started
+    // from the Start Quote / rep forms): save it to the quote's facts, then
+    // reprice every box on the quote with it. No printSpec in the body: use a
+    // previously saved one. Quotes with neither stay on the legacy art-setup
+    // fee + % (applied at display time), and their boxes aren't touched here.
+    try {
+      const bodySpec = parsePrintSpec((body as any)?.printSpec);
+      let spec = bodySpec;
+      if (bodySpec) {
+        const f = (await loadFacts(String(quoteNo))) || {};
+        await saveFacts(String(quoteNo), {
+          ...(f as any),
+          print_spec: bodySpec,
+          printed: bodySpec.colors.length > 0 ? 1 : 0,
+        });
+      } else {
+        spec = await printSpecForQuote(String(quoteNo));
+      }
+      if (spec) await repriceQuoteBoxes(quote.id, tenantId, spec);
+    } catch (e) {
+      console.error("[layout/apply] per-color print reprice failed", { quoteNo, err: String(e) });
+    }
 
     return ok(
       {

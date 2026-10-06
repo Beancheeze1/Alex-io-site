@@ -1856,6 +1856,10 @@ function LayoutEditorHostReady(props: {
     React.useState(showSampleOverlay)
 
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
+  // Per-color printing (Corrugated Step 3B). Set when the quote is on the
+  // per-color model: from the Start Quote / rep URL (print_colors,
+  // print_sides) or from the quote's saved print_spec. null = legacy flag only.
+  const [printSpec, setPrintSpec] = React.useState<{ colors: ("spot" | "flood")[]; sides: 1 | 2 } | null>(null);
   const persistPrinted = React.useCallback(
     (next: boolean) => {
       const key = hasRealQuoteNo ? quoteNo.trim() : "";
@@ -1960,6 +1964,19 @@ function LayoutEditorHostReady(props: {
         // persistPrinted is called by the checkbox handler; just set state here.
       }
 
+      // Per-color print spec from the Start Quote / rep URL (Step 3B).
+      const printColorsParam = url.searchParams.get("print_colors");
+      if (printColorsParam !== null) {
+        const colors = printColorsParam
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter((c): c is "spot" | "flood" => c === "spot" || c === "flood")
+          .slice(0, 4);
+        const sides: 1 | 2 = url.searchParams.get("print_sides") === "2" ? 2 : 1;
+        setPrintSpec({ colors, sides });
+        setIsPrinted(colors.length > 0);
+      }
+
       // If URL provides customer box dims, honor + persist them.
       if (hasBoxParams) {
         const L = parseBoxNum(boxLParam);
@@ -2008,6 +2025,14 @@ function LayoutEditorHostReady(props: {
 
           if (printedParam === null && typeof (data as any)?.printed === "boolean") {
             setIsPrinted(!!(data as any).printed);
+          }
+          // Saved per-color print spec (re-entry without print_colors in the URL).
+          const ps = (data as any)?.print_spec;
+          if (printColorsParam === null && ps && Array.isArray(ps.colors)) {
+            const colors = (ps.colors as unknown[])
+              .filter((c): c is "spot" | "flood" => c === "spot" || c === "flood")
+              .slice(0, 4);
+            setPrintSpec({ colors, sides: Number(ps.sides) === 2 ? 2 : 1 });
           }
         })
         .catch(() => null);
@@ -3955,6 +3980,8 @@ const handleGoToFoamAdvisor = () => {
       }
 
       const payload: any = {
+        // Per-color printing spec (Corrugated Step 3B); null keeps the legacy flag.
+        printSpec: printSpec ? { colors: isPrinted ? printSpec.colors : [], sides: printSpec.sides } : null,
         quoteNo,
         layout: layoutToSave,
         notes,
@@ -5382,7 +5409,11 @@ const tenantCssVars = React.useMemo(() => {
                     <div className="text-[11px] text-[var(--text-secondary)]">
                       Printed box
                       <div className="text-[10px] text-[var(--text-muted)]">
-                        Adds printing upcharge to the quote total.
+                        {printSpec
+                          ? printSpec.colors.length
+                            ? `${printSpec.colors.length} color${printSpec.colors.length > 1 ? "s" : ""} (${printSpec.colors.join(", ")}), ${printSpec.sides === 2 ? "two sides" : "one side"} · priced per color on Apply`
+                            : "Not printed"
+                          : "Adds printing upcharge to the quote total."}
                       </div>
                     </div>
 
@@ -5394,6 +5425,11 @@ const tenantCssVars = React.useMemo(() => {
                           const next = !!e.target.checked;
                           setIsPrinted(next);
                           persistPrinted(next);
+                          // Per-color quotes: checking with no colors picks 1 spot color;
+                          // unchecking clears the colors. Repriced on Apply.
+                          setPrintSpec((ps) =>
+                            ps ? { colors: next ? (ps.colors.length ? ps.colors : ["spot"]) : [], sides: ps.sides } : ps,
+                          );
                         }}
                         className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)] accent-[var(--tenant-secondary)]"
                       />

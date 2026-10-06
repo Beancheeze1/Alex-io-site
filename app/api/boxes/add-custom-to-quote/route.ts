@@ -30,7 +30,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, withTxn } from "@/lib/db";
-import { customSelectionInsert, resolveCustomSelection } from "@/app/lib/packaging-selection";
+import {
+  customSelectionInsert,
+  printSpecForQuote,
+  resolveCustomSelection,
+} from "@/app/lib/packaging-selection";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -151,7 +155,8 @@ export async function POST(req: NextRequest) {
         ? Number(existing.board_grade_id)
         : parseGradeId(body.grade_id);
 
-    const resolved = await resolveCustomSelection(L, W, H, style, qty, quote.tenant_id, { gradeId });
+    const print = await printSpecForQuote(quote.quote_no);
+    const resolved = await resolveCustomSelection(L, W, H, style, qty, quote.tenant_id, { gradeId, print });
 
     const selection = await withTxn(async (tx) => {
       // A quote has at most one custom selection — replace, don't accumulate.

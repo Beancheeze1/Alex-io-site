@@ -32,6 +32,7 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -661,6 +662,8 @@ export async function GET(req: NextRequest) {
         qbs.qty,
         qbs.unit_price_usd,
         qbs.extended_price_usd,
+        -- via to_jsonb so this keeps working before migration 027 adds the column
+        (to_jsonb(qbs) ->> 'plates_usd')::numeric as plates_usd,
         b.vendor,
         coalesce(b.style, qbs.custom_style) as style,
         coalesce(qbs.description, b.description) as description,
@@ -689,18 +692,16 @@ export async function GET(req: NextRequest) {
     );
 
     const settings = await getPricingSettings(tenantId);
-    const isPrinted = !!(facts?.printed === 1 || facts?.printed === "1" || facts?.printed === true);
 
-    // Flat "Art Setup" fee — one-time charge independent of order size
-    const artSetupFee = isPrinted ? Number(settings.printing_upcharge_usd || 0) : 0;
-
-    // Percentage upcharge applied to (foam + packaging) subtotal when printed
-    const printableBasis = foamSubtotal + packagingSubtotal;
-    const printingUpchargePct = isPrinted ? Number(settings.printing_upcharge_pct || 0) : 0;
-    const printingUpchargeAmt = Math.round(printableBasis * (printingUpchargePct / 100) * 100) / 100;
-
-    // Combined printing total (backward-compat field clients already read)
-    const printingUpcharge = artSetupFee + printingUpchargeAmt;
+    // Printing (app/lib/pricing/print-charges.ts): per-color quotes (Corrugated
+    // Step 3B, facts.print_spec) have print inside each box price and only a
+    // plates line here; other quotes keep the legacy art-setup fee + %.
+    const platesTotal = packagingLinesForDisplay.reduce(
+      (s, l) => s + (Number((l as any).plates_usd) || 0),
+      0,
+    );
+    const pc = computePrintCharges({ facts, settings, foamSubtotal, packagingSubtotal, platesTotal });
+    const { isPrinted, artSetupFee, printingUpchargePct, printingUpchargeAmt, printingUpcharge } = pc;
 
     // Die-cutting charge: flat fee triggered once order qty reaches the
     // configured threshold. items[] is already sorted primary-first
@@ -731,6 +732,9 @@ export async function GET(req: NextRequest) {
       dieCuttingCharge,
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge,
       isPrinted,
+      printModel: pc.printModel,
+      printSummary: pc.printSummary,
+      platesTotal: pc.platesTotal,
       customerBoxDims: customerBox ?? null,
       facts,
       salesRepEmail,

@@ -5,7 +5,14 @@
 // Run: npm run test:corrugated   (= npx --yes tsx scripts/test-corrugated-price.ts)
 
 import { DEFAULT_FLUTES } from "../lib/corrugated-blank";
-import { priceRscBox, type BoxSettings, type PriceRscInput } from "../lib/corrugated-price";
+import {
+  describePrintSpec,
+  parsePrintSpec,
+  pricePrintAdder,
+  priceRscBox,
+  type BoxSettings,
+  type PriceRscInput,
+} from "../lib/corrugated-price";
 
 const C = DEFAULT_FLUTES.find((f) => f.flute === "C")!;
 
@@ -100,6 +107,34 @@ check(
   "quantities sorted + de-duplicated",
   r5.ok && r5.quantities.map((q) => q.quantity).join(",") === "1000,5000",
   r5.ok ? r5.quantities.map((q) => q.quantity) : r5,
+);
+
+// 6. Step 3B: print adder for stock / mailer / fallback boxes
+const a1 = pricePrintAdder(1000, { colors: ["spot"], sides: 1 }, settings);
+check(
+  "adder 1 spot @1,000: total $97.50, unit $0.0975, plates $195",
+  a1.print_total_usd === 97.5 && a1.unit_adder_usd === 0.0975 && a1.plates_line_usd === 195,
+  a1,
+);
+const a2 = pricePrintAdder(1000, { colors: ["spot", "flood"], sides: 2 }, settings);
+check(
+  "adder 2c/2s @1,000: total $429, unit $0.429, plates $910",
+  a2.print_total_usd === 429 && a2.unit_adder_usd === 0.429 && a2.plates_line_usd === 910,
+  a2,
+);
+const a0 = pricePrintAdder(1000, { colors: [], sides: 1 }, settings);
+check("adder with no print = 0", a0.print_total_usd === 0 && a0.unit_adder_usd === 0 && a0.plates_line_usd === 0, a0);
+check(
+  "parsePrintSpec cleans input",
+  JSON.stringify(parsePrintSpec({ colors: ["spot", "bad", "flood"], sides: "2" })) ===
+    JSON.stringify({ colors: ["spot", "flood"], sides: 2 }),
+  parsePrintSpec({ colors: ["spot", "bad", "flood"], sides: "2" }),
+);
+check("parsePrintSpec rejects non-specs", parsePrintSpec("x") === null && parsePrintSpec({}) === null);
+check(
+  "describePrintSpec",
+  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }) === "2-color print (1 spot, 1 flood), two sides",
+  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }),
 );
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
