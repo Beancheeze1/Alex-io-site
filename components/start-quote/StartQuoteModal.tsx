@@ -352,6 +352,29 @@ export default function StartQuoteModal({
   const [stockCandidatesLoading, setStockCandidatesLoading] = React.useState<boolean>(false);
   const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
 
+  // Board grade for a custom-size RSC (Corrugated Step 3A). "" = "Not sure —
+  // recommend one" (the shop's default grade). Options are the shop's active
+  // grades; the picker is hidden when the shop has none.
+  type GradeOption = { id: number; name: string; flute: string; ect_label: string; is_default: boolean };
+  const [boxGrades, setBoxGrades] = React.useState<GradeOption[]>([]);
+  const [boxGradeId, setBoxGradeId] = React.useState<string>((searchParams.get("box_grade") || "").trim());
+  React.useEffect(() => {
+    if (quoteType !== "complete_pack") return;
+    let cancelled = false;
+    const tenant = (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase();
+    const qs = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
+    fetch(`/api/public/corrugated/grades${qs}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j?.ok && Array.isArray(j.grades)) setBoxGrades(j.grades);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteType, searchParams]);
+  const customRscBox = boxStyle === "rsc" && !prefillPackagingSku.trim();
+
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
   // in Next.js App Router. This effect fires as soon as it's available.
@@ -1088,6 +1111,9 @@ export default function StartQuoteModal({
       } else if (boxChoice === "custom") {
         p.set("box_choice", "custom");
       }
+      if (customRscBox && /^\d+$/.test(boxGradeId)) {
+        p.set("box_grade", boxGradeId);
+      }
       p.set("printed", printed ? "1" : "0");
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
@@ -1419,6 +1445,30 @@ export default function StartQuoteModal({
                             </div>
                           )}
                         </div>
+
+                        {customRscBox && boxGrades.length > 0 ? (
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                              BOARD GRADE
+                            </div>
+                            <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                              The corrugated board for your custom box. Not sure? We&apos;ll recommend one.
+                            </div>
+                            <select
+                              aria-label="Board grade"
+                              value={boxGradeId}
+                              onChange={(e) => setBoxGradeId(e.target.value)}
+                              className="mt-3 w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                            >
+                              <option value="">Not sure — recommend one</option>
+                              {boxGrades.map((g) => (
+                                <option key={g.id} value={String(g.id)}>
+                                  {g.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : null}
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="flex items-center justify-between gap-3">
@@ -1874,6 +1924,12 @@ export default function StartQuoteModal({
                                   v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "(missing)"}
                                 />
                                 <Row k="Style" v={boxStyle.toUpperCase()} />
+                                {customRscBox && boxGrades.length > 0 ? (
+                                  <Row
+                                    k="Board grade"
+                                    v={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Recommended by the shop"}
+                                  />
+                                ) : null}
                                 <Row k="Printed" v={printed ? "Yes (+$50)" : "No"} />
                                 <Row
                                   k="Foam fit (L/W)"

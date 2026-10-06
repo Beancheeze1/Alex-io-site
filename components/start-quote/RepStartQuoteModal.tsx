@@ -344,6 +344,26 @@ export default function RepStartQuoteModal({
   const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
   const [selectedStockSku, setSelectedStockSku] = React.useState("");
 
+  // Board grade for a custom RSC (Corrugated Step 3A). "" = shop default.
+  // /api/public/corrugated/grades resolves the rep's own shop from the session.
+  const [boxGrades, setBoxGrades] = React.useState<
+    { id: number; name: string; flute: string; ect_label: string; is_default: boolean }[]
+  >([]);
+  const [boxGradeId, setBoxGradeId] = React.useState("");
+  React.useEffect(() => {
+    if (quoteType !== "complete_pack") return;
+    let cancelled = false;
+    fetch("/api/public/corrugated/grades", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j?.ok && Array.isArray(j.grades)) setBoxGrades(j.grades);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteType]);
+
   // A pick only applies to the exact box L/W/D/qty/style it was made for —
   // reset it whenever any of those change so a stale choice can't silently
   // carry over onto a different box. Deliberately does NOT depend on
@@ -748,6 +768,7 @@ export default function RepStartQuoteModal({
           p.set("box_sku", selectedStockSku);
         } else if (boxChoice === "custom") {
           p.set("box_choice", "custom");
+          if (boxStyle === "rsc" && /^\d+$/.test(boxGradeId)) p.set("box_grade", boxGradeId);
         }
       }
 
@@ -1206,6 +1227,28 @@ export default function RepStartQuoteModal({
                               </Field>
                             ) : null}
                           </div>
+
+                          {boxStyle === "rsc" && boxChoice === "custom" && boxGrades.length > 0 ? (
+                            <div className="mt-4">
+                              <Field label="Board grade">
+                                <select
+                                  value={boxGradeId}
+                                  onChange={(e) => setBoxGradeId(e.target.value)}
+                                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                                >
+                                  <option value="" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                    Shop default
+                                  </option>
+                                  {boxGrades.map((g) => (
+                                    <option key={g.id} value={String(g.id)} style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                      {g.name}
+                                      {g.is_default ? " (default)" : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                              </Field>
+                            </div>
+                          ) : null}
 
                           <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                             <input

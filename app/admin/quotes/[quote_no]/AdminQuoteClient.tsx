@@ -148,6 +148,14 @@ type RequestedBoxRow = {
   inside_height_in?: number | string | null;
   unit_price_usd?: number | string | null;
   extended_price_usd?: number | string | null;
+
+  // Corrugated Step 3A (custom RSC): grade + staff-only review info.
+  kind?: "stock" | "custom" | string;
+  board_grade_id?: number | string | null;
+  board_grade_name?: string | null;
+  pricing_source?: string | null;
+  needs_review?: boolean;
+  pricing_note?: string | null;
 };
 
 type BoxesForQuoteOk = {
@@ -1185,6 +1193,53 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
   const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
   const [boxSelectionsError, setBoxSelectionsError] = React.useState<string | null>(null);
+
+  // Board grade picker for a custom RSC box (Corrugated Step 3A).
+  const [gradeOptions, setGradeOptions] = React.useState<{ id: number; name: string; flute: string }[]>([]);
+  const [gradeSaving, setGradeSaving] = React.useState<boolean>(false);
+  const [gradeMsg, setGradeMsg] = React.useState<string | null>(null);
+
+  const hasCustomRsc = !!boxSelections?.some(
+    (s) => s.kind === "custom" && String(s.style || "").toLowerCase() === "rsc",
+  );
+
+  React.useEffect(() => {
+    if (!quoteNoValue || !hasCustomRsc) return;
+    let cancelled = false;
+    fetch("/api/boxes/custom-grade?quote_no=" + encodeURIComponent(quoteNoValue), { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j?.ok && Array.isArray(j.grades)) setGradeOptions(j.grades);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteNoValue, hasCustomRsc]);
+
+  async function changeBoardGrade(gradeId: number) {
+    if (!quoteNoValue) return;
+    setGradeSaving(true);
+    setGradeMsg(null);
+    try {
+      const res = await fetch("/api/boxes/custom-grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNoValue, grade_id: gradeId }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setGradeMsg(j?.message || j?.error || `Couldn't change the board grade (HTTP ${res.status}).`);
+        return;
+      }
+      setGradeMsg("Board grade changed and the box was repriced.");
+      setRefreshTick((x) => x + 1);
+    } catch (e: any) {
+      setGradeMsg(String(e?.message || e));
+    } finally {
+      setGradeSaving(false);
+    }
+  }
 
   const [rebuildBusy, setRebuildBusy] = React.useState<boolean>(false);
   const [rebuildError, setRebuildError] = React.useState<string | null>(null);
@@ -2683,6 +2738,59 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                           <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                             {metaParts.join(" • ")} — Qty {sel.qty.toLocaleString()}
                           </div>
+                          {sel.kind === "custom" && String(sel.style || "").toLowerCase() === "rsc" ? (
+                            <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11 }}>
+                              <span style={{ color: "var(--text-muted)" }}>Board grade:</span>
+                              {gradeOptions.length > 0 ? (
+                                <select
+                                  aria-label="Board grade"
+                                  value={sel.board_grade_id == null ? "" : String(Number(sel.board_grade_id))}
+                                  disabled={gradeSaving}
+                                  onChange={(e) => {
+                                    const g = Number(e.target.value);
+                                    if (Number.isInteger(g) && g > 0) changeBoardGrade(g);
+                                  }}
+                                  style={{
+                                    fontSize: 11,
+                                    padding: "2px 6px",
+                                    borderRadius: 6,
+                                    border: "1px solid var(--border)",
+                                    background: "var(--surface-card)",
+                                    color: "var(--text-primary)",
+                                  }}
+                                >
+                                  {sel.board_grade_id == null ? <option value="">Not set</option> : null}
+                                  {sel.board_grade_id != null &&
+                                  !gradeOptions.some((g) => g.id === Number(sel.board_grade_id)) ? (
+                                    <option value={String(Number(sel.board_grade_id))}>
+                                      {(sel.board_grade_name || "Current grade") + " (inactive)"}
+                                    </option>
+                                  ) : null}
+                                  {gradeOptions.map((g) => (
+                                    <option key={g.id} value={String(g.id)}>
+                                      {g.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span style={{ color: "var(--text-primary)" }}>{sel.board_grade_name || "Not set"}</span>
+                              )}
+                              {gradeSaving ? <span style={{ color: "var(--text-muted)" }}>Repricing…</span> : null}
+                              {gradeMsg && !gradeSaving ? <span style={{ color: "var(--text-secondary)" }}>{gradeMsg}</span> : null}
+                            </div>
+                          ) : null}
+                          {sel.needs_review || sel.pricing_note ? (
+                            <div
+                              style={{
+                                marginTop: 4,
+                                fontSize: 11,
+                                color: sel.needs_review ? "var(--attention)" : "var(--text-muted)",
+                              }}
+                            >
+                              {sel.needs_review ? "Needs review: " : ""}
+                              {sel.pricing_note}
+                            </div>
+                          ) : null}
                         </li>
                       );
                     })}

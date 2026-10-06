@@ -35,7 +35,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
-import { getCurrentUserFromRequest } from "@/lib/auth";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 
 export const runtime = "nodejs";
@@ -56,6 +56,12 @@ type Row = {
   inside_height_in: number;
   unit_price_usd?: number | null;
   extended_price_usd?: number | null;
+  board_grade_id?: number | string | null;
+  board_grade_name?: string | null;
+  // Staff-only (stripped for public callers):
+  pricing_source?: string | null;
+  needs_review?: boolean;
+  pricing_note?: string | null;
 };
 
 type Ok = {
@@ -125,7 +131,12 @@ export async function GET(req: NextRequest) {
         coalesce(b.inside_width_in, qbs.custom_width_in) as inside_width_in,
         coalesce(b.inside_height_in, qbs.custom_height_in) as inside_height_in,
         qbs.unit_price_usd,
-        qbs.extended_price_usd
+        qbs.extended_price_usd,
+        qbs.board_grade_id,
+        qbs.board_grade_name,
+        qbs.pricing_source,
+        qbs.needs_review,
+        qbs.pricing_note
       FROM public.quote_box_selections AS qbs
       JOIN public."quotes" AS q
         ON q.id = qbs.quote_id
@@ -138,9 +149,20 @@ export async function GET(req: NextRequest) {
       [quoteNo, tenantId],
     )) as Row[];
 
+    // Review flags and pricing notes are internal: staff only.
+    const isStaff = !!user && isRoleAllowed(user, ["admin", "cs", "sales"]);
+    const selections = isStaff
+      ? rows || []
+      : (rows || []).map(({ pricing_source, needs_review, pricing_note, ...rest }) => {
+          void pricing_source;
+          void needs_review;
+          void pricing_note;
+          return rest as Row;
+        });
+
     const body: Ok = {
       ok: true,
-      selections: rows || [],
+      selections,
     };
 
     return NextResponse.json(body);

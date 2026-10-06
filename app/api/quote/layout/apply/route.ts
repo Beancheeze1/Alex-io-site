@@ -46,7 +46,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
-import { resolveCustomSelection } from "@/app/lib/packaging-selection";
+import {
+  customSelectionInsert,
+  customSelectionUpdate,
+  resolveCustomSelection,
+} from "@/app/lib/packaging-selection";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
@@ -1652,6 +1656,40 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
+      // 2b) Custom selections aren't in box_price_tiers, so step 2 never
+      // repriced them (they kept the old qty's price). Re-run the shared
+      // resolver at the new qty, keeping each row's board grade.
+      try {
+        const customRows = await q<{
+          id: number;
+          custom_length_in: string | number;
+          custom_width_in: string | number;
+          custom_height_in: string | number;
+          custom_style: string;
+          board_grade_id: string | number | null;
+        }>(
+          `SELECT id, custom_length_in, custom_width_in, custom_height_in, custom_style, board_grade_id
+             FROM public.quote_box_selections
+            WHERE quote_id = $1 AND kind = 'custom'`,
+          [quote.id],
+        );
+        for (const row of customRows) {
+          const resolved = await resolveCustomSelection(
+            Number(row.custom_length_in),
+            Number(row.custom_width_in),
+            Number(row.custom_height_in),
+            row.custom_style,
+            qtyMaybe,
+            tenantId,
+            { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id) },
+          );
+          const upd = customSelectionUpdate(row.id, resolved);
+          await q(upd.text, upd.values);
+        }
+      } catch (e) {
+        console.error("[layout/apply] custom carton reprice failed", { quoteNo, err: String(e) });
+      }
+
       // 3) Sync the visible carton line(s) in the Interactive Quote (quote_items)
       await q(
         `
@@ -2367,24 +2405,57 @@ export async function POST(req: NextRequest) {
             if (!existingStockSelection) {
               const customStyle =
                 styleStr.toLowerCase() === "rsc" ? "rsc" : "mailer";
-              const { description, unit_price_usd, extended_price_usd } =
-                await resolveCustomSelection(L, W, H, customStyle, qtyForCarton, tenantId);
+              // Board grade: an existing custom row for the SAME box keeps its
+              // stored grade (staff may have changed it on the admin page);
+              // otherwise use the grade the editor sent (from the box_grade
+              // URL param), else the shop default.
+              const prevCustom = await one<{
+                custom_length_in: string | number;
+                custom_width_in: string | number;
+                custom_height_in: string | number;
+                custom_style: string | null;
+                board_grade_id: string | number | null;
+              }>(
+                `SELECT custom_length_in, custom_width_in, custom_height_in, custom_style, board_grade_id
+                   FROM public.quote_box_selections
+                  WHERE quote_id = $1 AND kind = 'custom'
+                  LIMIT 1`,
+                [quote.id],
+              );
+              const prevSameBox =
+                !!prevCustom &&
+                Number(prevCustom.custom_length_in) === L &&
+                Number(prevCustom.custom_width_in) === W &&
+                Number(prevCustom.custom_height_in) === H &&
+                String(prevCustom.custom_style || "").toLowerCase() === customStyle;
+              const scGrade = Number((sc as any).board_grade_id);
+              const gradeIdForCarton =
+                prevSameBox && prevCustom?.board_grade_id != null
+                  ? Number(prevCustom.board_grade_id)
+                  : Number.isInteger(scGrade) && scGrade > 0
+                    ? scGrade
+                    : null;
+
+              const resolved = await resolveCustomSelection(
+                L, W, H, customStyle, qtyForCarton, tenantId,
+                { gradeId: gradeIdForCarton },
+              );
 
               await q(
                 `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,
                 [quote.id],
               );
-              await q(
-                `INSERT INTO public.quote_box_selections
-                   (quote_id, quote_no, kind, box_id, sku,
-                    custom_length_in, custom_width_in, custom_height_in, custom_style,
-                    description, qty, unit_price_usd, extended_price_usd)
-                 VALUES ($1, $2, 'custom', NULL, NULL, $3, $4, $5, $6, $7, $8, $9, $10)`,
-                [
-                  quote.id, quoteNo, L, W, H, customStyle,
-                  description, qtyForCarton, unit_price_usd, extended_price_usd,
-                ],
-              );
+              const ins = customSelectionInsert({
+                quoteId: quote.id,
+                quoteNo: String(quoteNo),
+                L,
+                W,
+                H,
+                style: customStyle,
+                qty: qtyForCarton,
+                resolved,
+              });
+              await q(ins.text, ins.values);
 
               console.log(
                 "[layout/apply] custom carton inserted (no boxes row)",

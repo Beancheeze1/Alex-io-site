@@ -4,31 +4,33 @@
 //
 // The custom-entry counterpart to /api/boxes/add-to-quote: persists a
 // customer/rep-typed box size (no catalog match) as a first-class
-// quote_box_selections row (kind='custom') instead of the ephemeral
-// customer_box_in facts value used before.
+// quote_box_selections row (kind='custom').
 //
-// A quote has at most one custom selection at a time — "the customer's
-// custom box" is one fact about the quote, not a list — unlike stock
-// selections, which can legitimately be multiple distinct SKUs. A second
-// call replaces the existing custom row rather than adding another.
+// A quote has at most one custom selection at a time — a second call
+// replaces the existing custom row rather than adding another.
 //
 // Description + price are resolved once, at write time, via the shared
-// app/lib/packaging-selection.ts resolver (freezes the closest matching
-// stock box's tier price rather than recomputing it live on every render).
+// app/lib/packaging-selection.ts resolver: custom RSC → corrugated engine
+// with the board grade (fallback: nearest stock + needs_review); mailer →
+// nearest stock.
+//
+// Board grade: grade_id from the body (the Start Quote / rep pick, carried
+// in the editor URL as box_grade). If the quote already has a custom row for
+// the SAME box, its stored grade wins — the editor re-posts on every load,
+// and that must not undo a grade staff changed on the admin quote page.
 //
 // Body JSON:
 //   {
-//     "quote_no": "Q-REP-...",
-//     "length_in": 10,
-//     "width_in": 10,
-//     "height_in": 3,
+//     "quote_no": "Q-A-...",
+//     "length_in": 10, "width_in": 10, "height_in": 3,
 //     "style": "mailer" | "rsc",
-//     "qty": 10   // optional, defaults to 1
+//     "qty": 10,            // optional, defaults to 1
+//     "grade_id": 2 | null  // optional, RSC only; null = shop default
 //   }
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, withTxn } from "@/lib/db";
-import { resolveCustomSelection } from "@/app/lib/packaging-selection";
+import { customSelectionInsert, resolveCustomSelection } from "@/app/lib/packaging-selection";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,30 +42,13 @@ type BodyIn = {
   height_in?: number | string | null;
   style?: string | null;
   qty?: number | string | null;
+  grade_id?: number | string | null;
 };
 
 type QuoteRow = {
   id: number;
   quote_no: string;
   tenant_id: number | null;
-};
-
-type SelectionRow = {
-  id: number;
-  quote_id: number;
-  quote_no: string;
-  kind: string;
-  box_id: number | null;
-  sku: string | null;
-  custom_length_in: string | number | null;
-  custom_width_in: string | number | null;
-  custom_height_in: string | number | null;
-  custom_style: string | null;
-  description: string | null;
-  qty: number;
-  created_at: string;
-  unit_price_usd: string | number | null;
-  extended_price_usd: string | number | null;
 };
 
 function ok(body: any, status = 200) {
@@ -83,6 +68,11 @@ function parseQty(raw: any, fallback: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.round(n);
+}
+
+function parseGradeId(raw: any): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 export async function POST(req: NextRequest) {
@@ -136,14 +126,32 @@ export async function POST(req: NextRequest) {
       return bad({ ok: false, error: "QUOTE_NOT_FOUND" }, 404);
     }
 
-    const { description, unit_price_usd, extended_price_usd } = await resolveCustomSelection(
-      L,
-      W,
-      H,
-      style,
-      qty,
-      quote.tenant_id,
+    // Same box already on the quote with a stored grade → keep that grade.
+    const existing = await one<{
+      custom_length_in: string | number;
+      custom_width_in: string | number;
+      custom_height_in: string | number;
+      custom_style: string | null;
+      board_grade_id: string | number | null;
+    }>(
+      `SELECT custom_length_in, custom_width_in, custom_height_in, custom_style, board_grade_id
+         FROM public.quote_box_selections
+        WHERE quote_id = $1 AND kind = 'custom'
+        LIMIT 1`,
+      [quote.id],
     );
+    const sameBox =
+      !!existing &&
+      Number(existing.custom_length_in) === L &&
+      Number(existing.custom_width_in) === W &&
+      Number(existing.custom_height_in) === H &&
+      String(existing.custom_style || "").toLowerCase() === style;
+    const gradeId =
+      sameBox && existing?.board_grade_id != null
+        ? Number(existing.board_grade_id)
+        : parseGradeId(body.grade_id);
+
+    const resolved = await resolveCustomSelection(L, W, H, style, qty, quote.tenant_id, { gradeId });
 
     const selection = await withTxn(async (tx) => {
       // A quote has at most one custom selection — replace, don't accumulate.
@@ -152,25 +160,18 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
 
-      const result = await tx.query<SelectionRow>(
-        `
-        INSERT INTO public.quote_box_selections
-          (
-            quote_id, quote_no, kind, box_id, sku,
-            custom_length_in, custom_width_in, custom_height_in, custom_style,
-            description, qty, unit_price_usd, extended_price_usd
-          )
-        VALUES
-          ($1, $2, 'custom', NULL, NULL, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING
-          id, quote_id, quote_no, kind, box_id, sku,
-          custom_length_in, custom_width_in, custom_height_in, custom_style,
-          description, qty, created_at, unit_price_usd, extended_price_usd
-        `,
-        [quote.id, quote.quote_no, L, W, H, style, description, qty, unit_price_usd, extended_price_usd],
-      );
-
-      return (result.rows[0] ?? null) as SelectionRow | null;
+      const ins = customSelectionInsert({
+        quoteId: quote.id,
+        quoteNo: quote.quote_no,
+        L,
+        W,
+        H,
+        style,
+        qty,
+        resolved,
+      });
+      const result = await tx.query(ins.text, ins.values);
+      return result.rows[0] ?? null;
     });
 
     if (!selection) {
@@ -184,7 +185,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return ok({ ok: true, selection });
+    // needs_review / pricing_note are staff-only: never returned here (public route).
+    const { needs_review, pricing_note, ...publicSelection } = selection as Record<string, unknown>;
+    void needs_review;
+    void pricing_note;
+    return ok({ ok: true, selection: publicSelection });
   } catch (err: any) {
     console.error("Error in /api/boxes/add-custom-to-quote", err);
     return bad(

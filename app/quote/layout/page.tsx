@@ -4050,6 +4050,10 @@ const handleGoToFoamAdvisor = () => {
               style: urlStyle,
               sku: syntheticSku,
               description: `Custom ${urlL}×${urlW}×${urlD} in`,
+              board_grade_id: (() => {
+                const g = Number(urlParams.get("box_grade"));
+                return Number.isInteger(g) && g > 0 ? g : null;
+              })(),
               inside_length_in: urlL,
               inside_width_in: urlW,
               inside_height_in: urlD,
@@ -4361,6 +4365,11 @@ const handleGoToFoamAdvisor = () => {
           height_in: boxD,
           style: boxStyle,
           qty: numericQty,
+          // Board grade picked in Start Quote / the rep form (RSC only).
+          grade_id: (() => {
+            const g = Number(url.searchParams.get("box_grade"));
+            return Number.isInteger(g) && g > 0 ? g : null;
+          })(),
         }),
       }).catch((err) => {
         console.error("[layout] Error committing custom box choice", err);

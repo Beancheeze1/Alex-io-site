@@ -346,6 +346,19 @@ $r = Get-Url "/api/admin/corrugated"
 if ($r.status -eq 401) { Pass "GET /api/admin/corrugated without login -> 401" }
 else { Fail "GET /api/admin/corrugated without login -> 401" "Got $($r.status)" }
 
+# ── 17. Corrugated grades + custom-grade ─────────────────────
+Write-Section "17. Corrugated grades + custom-grade"
+
+$r = Get-Url "/api/public/corrugated/grades?tenant=default"
+if ($r.status -eq 200 -and $r.body -match '"ok":true') { Pass "GET public corrugated grades (default) -> 200" }
+else { Fail "GET public corrugated grades (default) -> 200" "Got $($r.status)" }
+if ($r.body -notmatch "cost_per_msf") { Pass "Public grades never include costs" }
+else { Fail "Public grades never include costs" "cost_per_msf present" }
+
+$r = Get-Url "/api/boxes/custom-grade?quote_no=Q-A-000000-00000"
+if ($r.status -eq 401) { Pass "GET /api/boxes/custom-grade without login -> 401" }
+else { Fail "GET /api/boxes/custom-grade without login -> 401" "Got $($r.status)" }
+
 # Summary
 $total = $pass + $fail
 Write-Host ""
