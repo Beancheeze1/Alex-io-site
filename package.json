@@ -9,6 +9,7 @@
   "start:prod": "node .next/standalone/server.js",
   "lint": "next lint",
   "guard": "node scripts/guard-checks.mjs",
+  "test:corrugated": "npx --yes tsx scripts/test-corrugated-price.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },

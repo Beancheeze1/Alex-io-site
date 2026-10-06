@@ -150,6 +150,34 @@ function parseNum(raw: string): number | null {
 
 const fi = (n: number) => formatInches(n);
 
+const usd = (n: number) =>
+  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+type PriceCheckRow = {
+  quantity: number;
+  board_usd: number;
+  converting_usd: number;
+  print_run_usd: number;
+  setup_usd: number;
+  box_total_usd: number;
+  min_applied: boolean;
+  unit_price_usd: number;
+  extended_usd: number;
+};
+
+type PriceCheckResponse = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  grade?: { id: number; name: string; flute: string };
+  blank?: { length_in: number; width_in: number; sqft_each_with_waste: number };
+  colors?: number;
+  sides?: number;
+  plates_line_usd?: number;
+  warnings?: string[];
+  quantities?: PriceCheckRow[];
+};
+
 export default function CorrugatedSettingsPage() {
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -170,6 +198,13 @@ export default function CorrugatedSettingsPage() {
   const [flutes, setFlutes] = React.useState<FluteRow[]>([]);
   const [grades, setGrades] = React.useState<GradeRow[]>([]);
   const [pv, setPv] = React.useState({ L: "12", W: "10", D: "8", gradeKey: "" });
+
+  // Price check (uses SAVED settings via /api/admin/corrugated/price)
+  const [pcQty, setPcQty] = React.useState("1000 5000");
+  const [pcColors, setPcColors] = React.useState<("spot" | "flood")[]>([]);
+  const [pcSides, setPcSides] = React.useState<1 | 2>(1);
+  const [pcBusy, setPcBusy] = React.useState(false);
+  const [pcResult, setPcResult] = React.useState<PriceCheckResponse | null>(null);
 
   const applyConfig = React.useCallback((cfg: ApiConfig) => {
     const s = cfg.settings;
@@ -389,6 +424,45 @@ export default function CorrugatedSettingsPage() {
       setSaveMsg({ kind: "error", text: String(e?.message || e) });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function runPriceCheck() {
+    const L = parseInches(pv.L);
+    const W = parseInches(pv.W);
+    const D = parseInches(pv.D);
+    if (L === null || W === null || D === null) {
+      setPcResult({ ok: false, message: "Enter the inside length, width and depth in the blank preview." });
+      return;
+    }
+    const quantities = pcQty
+      .split(/[\s,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number);
+    const selected = grades.find((g) => g.key === pv.gradeKey);
+    setPcBusy(true);
+    setPcResult(null);
+    try {
+      const res = await fetch("/api/admin/corrugated/price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          L,
+          W,
+          D,
+          quantities,
+          grade_id: selected?.id ?? null,
+          colors: pcColors,
+          sides: pcSides,
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as PriceCheckResponse | null;
+      setPcResult(body ?? { ok: false, message: `Price check failed (HTTP ${res.status}).` });
+    } catch (e: any) {
+      setPcResult({ ok: false, message: String(e?.message || e) });
+    } finally {
+      setPcBusy(false);
     }
   }
 
@@ -889,6 +963,147 @@ export default function CorrugatedSettingsPage() {
               </div>
             </div>
           )}
+        </section>
+
+        {/* Price check */}
+        <section className={`${CARD} mt-6`}>
+          <div className={SECTION_LABEL}>Price check</div>
+          <p className="mb-3 mt-1 text-xs">
+            Prices the box from the blank preview (size and board grade) using your <strong>saved</strong>{" "}
+            settings, the same way custom-size box quotes will be priced.
+            {dirty ? " You have unsaved changes; save first to include them." : ""}
+          </p>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <label className={FIELD_LABEL}>
+              <span className="text-[var(--text-primary)]">Quantities (up to 4, e.g. 1000 5000)</span>
+              <input className={INPUT} value={pcQty} onChange={(e) => setPcQty(e.target.value)} />
+            </label>
+            <label className={FIELD_LABEL}>
+              <span className="text-[var(--text-primary)]">Printing</span>
+              <select
+                className={INPUT}
+                value={String(pcColors.length)}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setPcColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
+                }}
+              >
+                {[0, 1, 2, 3, 4].map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n === 0 ? "No print" : `${n} color${n > 1 ? "s" : ""}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={FIELD_LABEL}>
+              <span className="text-[var(--text-primary)]">Sides</span>
+              <select
+                className={INPUT}
+                disabled={pcColors.length === 0}
+                value={String(pcSides)}
+                onChange={(e) => setPcSides(e.target.value === "2" ? 2 : 1)}
+              >
+                <option value="1">One side</option>
+                <option value="2">Two sides</option>
+              </select>
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={runPriceCheck}
+                disabled={pcBusy}
+                className="rounded-md bg-[var(--action-primary)] px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {pcBusy ? "Pricing…" : "Price it"}
+              </button>
+            </div>
+          </div>
+
+          {pcColors.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-3">
+              {pcColors.map((c, i) => (
+                <label key={i} className={FIELD_LABEL}>
+                  <span className="text-[var(--text-primary)]">Color {i + 1} coverage</span>
+                  <select
+                    className={INPUT}
+                    value={c}
+                    onChange={(e) => {
+                      const v: "spot" | "flood" = e.target.value === "flood" ? "flood" : "spot";
+                      setPcColors((cs) => cs.map((x, j) => (j === i ? v : x)));
+                    }}
+                  >
+                    <option value="spot">Spot</option>
+                    <option value="flood">Flood</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+          ) : null}
+
+          {pcResult ? (
+            !pcResult.ok ? (
+              <p className="mt-3 text-xs text-[var(--attention)]" data-testid="price-check-error">
+                {pcResult.message || pcResult.error}
+              </p>
+            ) : (
+              <div className="mt-4" data-testid="price-check-result">
+                <div className="mb-2 text-[11px] text-[var(--text-muted)]">
+                  {pcResult.grade?.name} ({pcResult.grade?.flute} flute)
+                  {pcResult.blank
+                    ? ` · blank ${fi(pcResult.blank.length_in)} × ${fi(pcResult.blank.width_in)} in · ${pcResult.blank.sqft_each_with_waste.toFixed(3)} sq ft per box with waste`
+                    : ""}
+                  {pcResult.colors
+                    ? ` · ${pcResult.colors} color${pcResult.colors > 1 ? "s" : ""}, ${pcResult.sides === 2 ? "two sides" : "one side"}`
+                    : " · no print"}
+                </div>
+                <div className={TABLE_WRAP}>
+                  <table className="min-w-full text-left text-xs">
+                    <thead className={THEAD}>
+                      <tr>
+                        <th className={TH}>Quantity</th>
+                        <th className={`${TH} text-right`}>Board</th>
+                        <th className={`${TH} text-right`}>Converting</th>
+                        <th className={`${TH} text-right`}>Print run</th>
+                        <th className={`${TH} text-right`}>Setup</th>
+                        <th className={`${TH} text-right`}>Box total</th>
+                        <th className={`${TH} text-right`}>Unit price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(pcResult.quantities ?? []).map((qr) => (
+                        <tr key={qr.quantity} className="border-t border-[var(--border)]">
+                          <td className={TD}>{qr.quantity.toLocaleString("en-US")}</td>
+                          <td className={`${TD} text-right`}>{usd(qr.board_usd)}</td>
+                          <td className={`${TD} text-right`}>{usd(qr.converting_usd)}</td>
+                          <td className={`${TD} text-right`}>{usd(qr.print_run_usd)}</td>
+                          <td className={`${TD} text-right`}>{usd(qr.setup_usd)}</td>
+                          <td className={`${TD} text-right`}>
+                            {usd(qr.box_total_usd)}
+                            {qr.min_applied ? " (minimum)" : ""}
+                          </td>
+                          <td className={`${TD} text-right font-medium text-[var(--text-primary)]`}>
+                            ${qr.unit_price_usd.toFixed(4)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {pcResult.colors ? (
+                  <p className="mt-2 text-[11px]">
+                    Plates (one time, with markup): {usd(pcResult.plates_line_usd ?? 0)}
+                  </p>
+                ) : null}
+                {pcResult.warnings && pcResult.warnings.length ? (
+                  <p className="mt-2 text-[11px] text-[var(--attention)]">Check: {pcResult.warnings.join(" ")}</p>
+                ) : null}
+                <p className="mt-2 text-[11px] text-[var(--text-faint)]">
+                  Board, converting, print run and setup are your costs before markup. Box total and unit price
+                  include markup and the minimum order.
+                </p>
+              </div>
+            )
+          ) : null}
         </section>
 
         <div className="mt-6 flex justify-end">{saveBar}</div>

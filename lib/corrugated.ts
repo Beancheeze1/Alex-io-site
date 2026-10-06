@@ -15,6 +15,7 @@ import {
   type FluteSpec,
   type JointType,
 } from "@/lib/corrugated-blank";
+import { priceRscBox, type BoxPriceResult, type Coverage } from "@/lib/corrugated-price";
 
 export type CorrugatedSettings = CorrugatedRates & {
   joint_type: JointType;
@@ -234,6 +235,52 @@ export async function saveCorrugated(tenantId: number, input: CorrugatedInput): 
       }
     }
   });
+}
+
+// ---------- pricing (Step 2) ----------
+
+export type CustomRscRequest = {
+  dims: { L: number; W: number; D: number };
+  quantities: number[];
+  grade_id: number | null; // null = the shop's default grade
+  colors: Coverage[];
+  sides: 1 | 2;
+};
+
+export type CustomRscQuote = BoxPriceResult & {
+  grade?: { id: number; name: string; flute: string };
+};
+
+/** Prices a custom-size RSC from the tenant's saved corrugated settings. */
+export async function priceCustomRsc(tenantId: number, req: CustomRscRequest): Promise<CustomRscQuote> {
+  const cfg = await loadCorrugated(tenantId);
+  const active = cfg.grades.filter((g) => g.active);
+  const grade =
+    req.grade_id !== null ? active.find((g) => g.id === req.grade_id) : active.find((g) => g.is_default);
+  if (!grade) {
+    return req.grade_id !== null
+      ? { ok: false, error: "grade_not_found", message: "That board grade isn't active for this shop." }
+      : { ok: false, error: "no_default_grade", message: "This shop has no active default board grade." };
+  }
+
+  const flute = cfg.flutes.find((f) => f.flute === grade.flute);
+  if (!flute) {
+    return {
+      ok: false,
+      error: "flute_missing",
+      message: `Board grade "${grade.name}" uses flute ${grade.flute}, which has no scoring row.`,
+    };
+  }
+
+  const result = priceRscBox({
+    dims: req.dims,
+    quantities: req.quantities,
+    print: { colors: req.colors, sides: req.sides },
+    grade: { name: grade.name, cost_per_msf: grade.cost_per_msf },
+    flute,
+    settings: cfg.settings,
+  });
+  return { ...result, grade: { id: grade.id, name: grade.name, flute: grade.flute } };
 }
 
 // ---------- validation ----------
