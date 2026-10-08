@@ -133,11 +133,16 @@ export async function getCommissionableTotal(
   );
 
   // ── Box selections (always stored when a carton is committed) ──
-  const boxes = await q<{ extended_price_usd: string | null }>(
-    `SELECT extended_price_usd FROM public.quote_box_selections WHERE quote_id = $1`,
+  // Box totals include one-time printing plates (Chuck, Oct 2026). On
+  // per-color quotes, print run + setup are already inside extended_price_usd.
+  // plates_usd is read via to_jsonb so this works on any schema version.
+  const boxes = await q<{ extended_price_usd: string | null; plates_usd: string | null }>(
+    `SELECT qbs.extended_price_usd, (to_jsonb(qbs) ->> 'plates_usd') AS plates_usd
+       FROM public.quote_box_selections qbs
+      WHERE qbs.quote_id = $1`,
     [quoteId],
   );
-  let boxTotal = boxes.reduce((s, b) => s + safeNum(b.extended_price_usd), 0);
+  let boxTotal = boxes.reduce((s, b) => s + safeNum(b.extended_price_usd) + safeNum(b.plates_usd), 0);
 
   let foamTotal = 0;
 

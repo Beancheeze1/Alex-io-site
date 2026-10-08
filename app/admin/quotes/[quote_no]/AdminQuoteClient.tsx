@@ -102,6 +102,8 @@ type ApiOk = {
   packagingSubtotal?: number;
   grandSubtotal?: number;
   printingUpcharge?: number;
+  printModel?: "per_color" | "legacy";
+  printSummary?: string | null;
   dieCuttingCharge?: number;
   dieCuttingTriggered?: boolean;
   dieCutTriggerQty?: number;
@@ -1171,6 +1173,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [printModel, setPrintModel] = React.useState<"per_color" | "legacy">("legacy");
+  const [printSummary, setPrintSummary] = React.useState<string | null>(null);
   const [dieCuttingCharge, setDieCuttingCharge] = React.useState<number>(0);
   const [dieCuttingTriggered, setDieCuttingTriggered] = React.useState<boolean>(false);
   const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
@@ -1347,6 +1351,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 ? Number((json as ApiOk).printingUpcharge)
                 : 0,
             );
+            setPrintModel((json as ApiOk).printModel === "per_color" ? "per_color" : "legacy");
+            setPrintSummary(typeof (json as ApiOk).printSummary === "string" ? ((json as ApiOk).printSummary as string) : null);
             setDieCuttingCharge(
               Number.isFinite((json as ApiOk)?.dieCuttingCharge as any)
                 ? Number((json as ApiOk).dieCuttingCharge)
@@ -3317,9 +3323,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       <tr style={{ color: "var(--text-primary)" }}>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
                           <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 2 }}>
-                            Packaging – Print upcharge
+                            {printModel === "per_color" ? "Packaging – Printing plates (one time)" : "Packaging – Print upcharge"}
                           </div>
-                          <div style={{ fontWeight: 500 }}>Custom printed mailer / box</div>
+                          <div style={{ fontWeight: 500 }}>
+                            {printModel === "per_color" ? printSummary || "Printed box" : "Custom printed mailer / box"}
+                          </div>
                         </td>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>

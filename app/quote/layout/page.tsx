@@ -1988,6 +1988,26 @@ function LayoutEditorHostReady(props: {
             : null;
         setCustomerBox(nextBox);
         persistCustomerBox(nextBox);
+        // Saved per-color print spec (Step 3B) when the URL has box params but
+        // no print_colors (e.g. re-opened from a link): show it in the editor.
+        if (printColorsParam === null) {
+          fetch(`/api/quote/customer-box?quote_no=${encodeURIComponent(key)}&t=${Math.random()}`, {
+            cache: "no-store",
+          })
+            .then((r) => r.json())
+            .then((data) => {
+              const ps = (data as any)?.print_spec;
+              if (ps && Array.isArray(ps.colors)) {
+                const colors = (ps.colors as unknown[])
+                  .filter((c): c is "spot" | "flood" => c === "spot" || c === "flood")
+                  .slice(0, 4);
+                setPrintSpec({ colors, sides: Number(ps.sides) === 2 ? 2 : 1 });
+                if (printedParam === null) setIsPrinted(colors.length > 0);
+              }
+            })
+            .catch(() => null);
+        }
+
         // Load persisted printed state from the print API if not set via URL.
         // /api/quote/print is public and includes isPrinted in its response.
         if (printedParam === null) {

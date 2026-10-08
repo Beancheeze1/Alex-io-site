@@ -31,7 +31,7 @@ import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
 
-type QuoteType = "foam_insert" | "complete_pack";
+type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 type BoxStyle = "mailer" | "rsc";
 type FoamConfig = "bottom_top" | "bottom_only" | "custom";
 
@@ -358,7 +358,7 @@ export default function RepStartQuoteModal({
   >([]);
   const [boxGradeId, setBoxGradeId] = React.useState("");
   React.useEffect(() => {
-    if (quoteType !== "complete_pack") return;
+    if (quoteType !== "complete_pack" && quoteType !== "boxes_only") return;
     let cancelled = false;
     fetch("/api/public/corrugated/grades", { cache: "no-store" })
       .then((r) => r.json())
@@ -392,7 +392,7 @@ export default function RepStartQuoteModal({
   // `dims` on submit, so the candidates shown here match what the editor
   // would independently suggest for the same inputs.
   React.useEffect(() => {
-    if (quoteType !== "complete_pack") {
+    if (quoteType !== "complete_pack" && quoteType !== "boxes_only") {
       setStockCandidates([]);
       setStockCandidatesLoading(false);
       return;
@@ -413,7 +413,8 @@ export default function RepStartQuoteModal({
 
     const bottomThkNum = toNumOrNull(bottomThk) ?? 0;
     const topThkNum = foamConfig === "bottom_top" ? (toNumOrNull(topThk) ?? 0) : 0;
-    const stackDepth = bottomThkNum + topThkNum;
+    // Boxes only: no foam stack — match on the box's own depth.
+    const stackDepth = quoteType === "boxes_only" ? 0 : bottomThkNum + topThkNum;
 
     const footprintL = Math.max(0, boxLNum - FIT_ALLOW_IN);
     const footprintW = Math.max(0, boxWNum - FIT_ALLOW_IN);
@@ -559,7 +560,12 @@ export default function RepStartQuoteModal({
   // ---------- Step machine ----------
   const stepIndex = STEP_ORDER.indexOf(activeStep);
 
-  const railSteps: ProgressStep[] = STEP_ORDER.map((key) => {
+  // Boxes only (Corrugated Step 4) skips the foam-only steps.
+  const visibleSteps: StepKey[] = STEP_ORDER.filter(
+    (k) => !(quoteType === "boxes_only" && (k === "cav" || k === "mat")),
+  );
+
+  const railSteps: ProgressStep[] = visibleSteps.map((key) => {
     let state: ProgressState = "upcoming";
     if (key === activeStep) state = "active";
     else if (completedSteps.has(key)) state = "done";
@@ -568,12 +574,12 @@ export default function RepStartQuoteModal({
 
   function goNext() {
     setCompletedSteps((prev) => new Set(prev).add(activeStep));
-    const next = STEP_ORDER[stepIndex + 1];
+    const next = visibleSteps[visibleSteps.indexOf(activeStep) + 1];
     if (next) setActiveStep(next);
   }
 
   function goBack() {
-    const prev = STEP_ORDER[stepIndex - 1];
+    const prev = visibleSteps[visibleSteps.indexOf(activeStep) - 1];
     if (prev) setActiveStep(prev);
   }
 
@@ -635,7 +641,7 @@ export default function RepStartQuoteModal({
       return;
     }
 
-    if (quoteType === "complete_pack" && !boxChoice) {
+    if ((quoteType === "complete_pack" || quoteType === "boxes_only") && !boxChoice) {
       setSubmitError('Choose a stock box or "Use custom instead" before creating the quote.');
       setActiveStep("specs");
       return;
@@ -673,6 +679,45 @@ export default function RepStartQuoteModal({
       const json = await createRes.json().catch(() => null);
       if (!createRes.ok || !json?.ok) {
         throw new Error(json?.error || "Failed to create quote.");
+      }
+
+      // Boxes only (Corrugated Step 4): price the boxes on the quote just
+      // created, then open it on the admin quote page. No layout editor.
+      if (quoteType === "boxes_only") {
+        const boRes = await fetch("/api/quote/boxes-only", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote_no,
+            sales_rep_slug: salesRepSlug.trim() || null,
+            customer: {
+              name: customerName.trim(),
+              email: email.trim() || null,
+              phone: phone.trim() || null,
+            },
+            qty: toNumOrNull(qty),
+            box:
+              boxChoice === "stock" && selectedStockSku
+                ? { sku: selectedStockSku }
+                : {
+                    L: toNumOrNull(boxL),
+                    W: toNumOrNull(boxW),
+                    D: toNumOrNull(boxD),
+                    style: boxStyle,
+                    grade_id: boxStyle === "rsc" && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
+                  },
+            print_spec: { colors: printColors, sides: printSides },
+            notes: customerNotes.trim() || null,
+          }),
+        });
+        const bo = await boRes.json().catch(() => null);
+        if (!boRes.ok || !bo?.ok) {
+          throw new Error(bo?.message || bo?.error || "Failed to price the boxes.");
+        }
+        resetForm();
+        onClose();
+        router.push(`/admin/quotes/${encodeURIComponent(quote_no)}`);
+        return;
       }
 
       // Build the same URL param contract StartQuoteModal uses so
@@ -1018,6 +1063,12 @@ export default function RepStartQuoteModal({
                           selected={quoteType === "complete_pack"}
                           onClick={() => setQuoteType("complete_pack")}
                         />
+                        <ChoiceCard
+                          title="Boxes only"
+                          desc="Corrugated boxes, plain or printed — no foam"
+                          selected={quoteType === "boxes_only"}
+                          onClick={() => setQuoteType("boxes_only")}
+                        />
                       </div>
                     </StepCard>
                   ) : null}
@@ -1121,17 +1172,19 @@ export default function RepStartQuoteModal({
                                 <option value="rsc" style={{ color: "#0f172a", backgroundColor: "#fff" }}>RSC</option>
                               </select>
                             </Field>
-                            <Field label="Foam config">
-                              <select
-                                value={foamConfig}
-                                onChange={(e) => setFoamConfig(e.target.value as FoamConfig)}
-                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
-                              >
-                                <option value="bottom_top" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom + Top</option>
-                                <option value="bottom_only" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom only</option>
-                                <option value="custom" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Custom</option>
-                              </select>
-                            </Field>
+                            {quoteType === "complete_pack" ? (
+                              <Field label="Foam config">
+                                <select
+                                  value={foamConfig}
+                                  onChange={(e) => setFoamConfig(e.target.value as FoamConfig)}
+                                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                                >
+                                  <option value="bottom_top" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom + Top</option>
+                                  <option value="bottom_only" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Bottom only</option>
+                                  <option value="custom" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Custom</option>
+                                </select>
+                              </Field>
+                            ) : null}
                           </div>
 
                           <div className="mt-4">
@@ -1228,16 +1281,18 @@ export default function RepStartQuoteModal({
                             )}
                           </div>
 
-                          <div className="mt-4 grid grid-cols-2 gap-3">
-                            <Field label="Bottom thickness (in)">
-                              <Input value={bottomThk} onChange={setBottomThk} placeholder="1" />
-                            </Field>
-                            {foamConfig === "bottom_top" ? (
-                              <Field label="Top pad thickness (in)">
-                                <Input value={topThk} onChange={setTopThk} placeholder="1" />
+                          {quoteType === "complete_pack" ? (
+                            <div className="mt-4 grid grid-cols-2 gap-3">
+                              <Field label="Bottom thickness (in)">
+                                <Input value={bottomThk} onChange={setBottomThk} placeholder="1" />
                               </Field>
-                            ) : null}
-                          </div>
+                              {foamConfig === "bottom_top" ? (
+                                <Field label="Top pad thickness (in)">
+                                  <Input value={topThk} onChange={setTopThk} placeholder="1" />
+                                </Field>
+                              ) : null}
+                            </div>
+                          ) : null}
 
                           {boxStyle === "rsc" && boxChoice === "custom" && boxGrades.length > 0 ? (
                             <div className="mt-4">
@@ -1308,7 +1363,7 @@ export default function RepStartQuoteModal({
                             </div>
                           ) : null}
 
-                          {foamConfig === "bottom_top" ? (
+                          {quoteType === "complete_pack" && foamConfig === "bottom_top" ? (
                             <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                               <input
                                 type="checkbox"
@@ -1322,25 +1377,29 @@ export default function RepStartQuoteModal({
                         </>
                       )}
 
-                      <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                        <input
-                          type="checkbox"
-                          checked={roundCorners}
-                          onChange={(e) => setRoundCorners(e.target.checked)}
-                          className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
-                        />
-                        Rounded corners?
-                      </label>
-                      {roundCorners ? (
-                        <div className="mt-3 w-32">
-                          <Field label="Radius (in)">
-                            <Input
-                              value={roundRadiusIn}
-                              onChange={setRoundRadiusIn}
-                              placeholder={String(DEFAULT_ROUND_RADIUS_IN)}
+                      {quoteType !== "boxes_only" ? (
+                        <>
+                          <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={roundCorners}
+                              onChange={(e) => setRoundCorners(e.target.checked)}
+                              className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
                             />
-                          </Field>
-                        </div>
+                            Rounded corners?
+                          </label>
+                          {roundCorners ? (
+                            <div className="mt-3 w-32">
+                              <Field label="Radius (in)">
+                                <Input
+                                  value={roundRadiusIn}
+                                  onChange={setRoundRadiusIn}
+                                  placeholder={String(DEFAULT_ROUND_RADIUS_IN)}
+                                />
+                              </Field>
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                     </StepCard>
                   ) : null}
@@ -1646,7 +1705,10 @@ export default function RepStartQuoteModal({
                               : "—"
                           }
                         />
-                        <ReviewRow label="Quote type" value={quoteType === "foam_insert" ? "Foam Insert" : "Complete Pack"} />
+                        <ReviewRow
+                          label="Quote type"
+                          value={quoteType === "foam_insert" ? "Foam Insert" : quoteType === "boxes_only" ? "Boxes only" : "Complete Pack"}
+                        />
                         <ReviewRow label="Material" value={materialText || "—"} />
                         {layerOptions.map((opt) => (
                           <ReviewRow
@@ -1716,13 +1778,13 @@ export default function RepStartQuoteModal({
                   disabled={submitting}
                   className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-60"
                 >
-                  {submitting ? "Creating…" : "Create quote & open editor"}
+                  {submitting ? "Creating…" : quoteType === "boxes_only" ? "Create box quote" : "Create quote & open editor"}
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={goNext}
-                  disabled={activeStep === "specs" && quoteType === "complete_pack" && !boxChoice}
+                  disabled={activeStep === "specs" && (quoteType === "complete_pack" || quoteType === "boxes_only") && !boxChoice}
                   className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-40"
                 >
                   Next

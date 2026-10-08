@@ -805,6 +805,8 @@ export default function QuotePrintClient({
   }, [quote]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
 const [facts, setFacts] = React.useState<QuoteFacts | null>(null);
+// Boxes-only quotes (Corrugated Step 4) have no foam or layout.
+const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
 
   // Revision label actually shown/used on this page (pill + downloaded
   // filenames). Prefers quote.revision -- computed server-side by
@@ -2657,8 +2659,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </div>
                   ) : (
                     <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                      Pricing is still being finalized for this quote. Once pricing is applied, the per-piece and subtotal
-                      values will appear here and in the line items below.
+                      {isBoxesOnly
+                        ? "Boxes-only quote — box prices, printing and plates are in the line items below."
+                        : "Pricing is still being finalized for this quote. Once pricing is applied, the per-piece and subtotal values will appear here and in the line items below."}
                     </div>
                   )}
                 </div>
@@ -2715,9 +2718,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </>
                   ) : (
                     <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                      No foam layout has been saved yet. Use the layout editor link in your emailed quote to place cavities
-                      where you’d like your parts to sit, then click <strong>Apply to quote</strong> to store the layout
-                      with this quote.
+                      {isBoxesOnly ? (
+                        "This is a boxes-only quote, so there's no foam layout."
+                      ) : (
+                        <>
+                          No foam layout has been saved yet. Use the layout editor link in your emailed quote to place cavities
+                          where you’d like your parts to sit, then click <strong>Apply to quote</strong> to store the layout
+                          with this quote.
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3276,9 +3285,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               <div style={{ ...cardBase, background: "var(--surface-card)" }}>
                 {!layoutPkg ? (
                   <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                    No foam layout has been saved for this quote yet. Use the <strong>Open layout preview</strong> button
-                    in the emailed quote to arrange cavities, then click <strong>Apply to quote</strong> to store the
-                    layout here.
+                    {isBoxesOnly ? (
+                      "This is a boxes-only quote, so there's no foam layout package."
+                    ) : (
+                      <>
+                        No foam layout has been saved for this quote yet. Use the <strong>Open layout preview</strong> button
+                        in the emailed quote to arrange cavities, then click <strong>Apply to quote</strong> to store the
+                        layout here.
+                      </>
+                    )}
                   </p>
                 ) : (
                   <>

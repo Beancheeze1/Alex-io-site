@@ -21,7 +21,7 @@ import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
 
-type QuoteType = "foam_insert" | "complete_pack";
+type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 type BoxStyle = "mailer" | "rsc";
 type FoamConfig = "bottom_top" | "bottom_only" | "custom";
 
@@ -373,7 +373,7 @@ export default function StartQuoteModal({
   const [boxGrades, setBoxGrades] = React.useState<GradeOption[]>([]);
   const [boxGradeId, setBoxGradeId] = React.useState<string>((searchParams.get("box_grade") || "").trim());
   React.useEffect(() => {
-    if (quoteType !== "complete_pack") return;
+    if (quoteType !== "complete_pack" && quoteType !== "boxes_only") return;
     let cancelled = false;
     const tenant = (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase();
     const qs = tenant ? `?tenant=${encodeURIComponent(tenant)}` : "";
@@ -388,6 +388,15 @@ export default function StartQuoteModal({
     };
   }, [quoteType, searchParams]);
   const customRscBox = boxStyle === "rsc" && !prefillPackagingSku.trim();
+
+  // Boxes only (Corrugated Step 4): contact details are collected on the
+  // review step, and the quote is created + priced by /api/quote/boxes-only.
+  const [boName, setBoName] = React.useState<string>("");
+  const [boEmail, setBoEmail] = React.useState<string>("");
+  const [boCompany, setBoCompany] = React.useState<string>("");
+  const [boPhone, setBoPhone] = React.useState<string>("");
+  const [boBusy, setBoBusy] = React.useState<boolean>(false);
+  const [boError, setBoError] = React.useState<string | null>(null);
 
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
@@ -513,7 +522,7 @@ export default function StartQuoteModal({
   // box_sku was never invalidated by later dimension edits), and this effect
   // preserves that instead of introducing a new reset behavior.
   React.useEffect(() => {
-    if (quoteType !== "complete_pack") {
+    if (quoteType !== "complete_pack" && quoteType !== "boxes_only") {
       setStockCandidates([]);
       setStockCandidatesLoading(false);
       return;
@@ -533,7 +542,8 @@ export default function StartQuoteModal({
 
     const bottomThkNum = toNumOrNull(bottomThk) ?? 0;
     const topThkNum = foamConfig === "bottom_top" ? (toNumOrNull(topThk) ?? 0) : 0;
-    const stackDepth = bottomThkNum + topThkNum;
+    // Boxes only: no foam stack — match on the box's own depth.
+    const stackDepth = quoteType === "boxes_only" ? 0 : bottomThkNum + topThkNum;
 
     const footprintL = Math.max(0, boxLNum - FIT_ALLOW_IN);
     const footprintW = Math.max(0, boxWNum - FIT_ALLOW_IN);
@@ -763,7 +773,7 @@ export default function StartQuoteModal({
       : true;
 
   const boxOk =
-    quoteType === "complete_pack"
+    quoteType === "complete_pack" || quoteType === "boxes_only"
       ? !!(
           toNumOrNull(boxL) &&
           toNumOrNull(boxW) &&
@@ -818,6 +828,11 @@ export default function StartQuoteModal({
       return qtyOk;
     }
 
+    if (quoteType === "boxes_only") {
+      if (step === "box" || step === "rev") return qtyOk && boxOk;
+      return qtyOk;
+    }
+
     if (step === "box") return qtyOk && boxOk;
     if (step === "foam") return qtyOk && boxOk && foamFitOk && foamConfigOk && thicknessOk;
     if (step === "cav") return qtyOk && boxOk && foamFitOk && foamConfigOk && thicknessOk;
@@ -834,6 +849,7 @@ export default function StartQuoteModal({
       if (step === "mat") return "rev";
       return "rev";
     }
+    if (quoteType === "boxes_only") return step === "type" ? "box" : "rev";
     if (step === "type") return "box";
     if (step === "box") return "foam";
     if (step === "foam") return "cav";
@@ -850,6 +866,7 @@ export default function StartQuoteModal({
       if (step === "specs") return "type";
       return "type";
     }
+    if (quoteType === "boxes_only") return step === "rev" ? "box" : "type";
     if (step === "rev") return "mat";
     if (step === "mat") return "cav";
     if (step === "cav") return "foam";
@@ -935,6 +952,18 @@ export default function StartQuoteModal({
               : "upcoming",
         ),
       );
+      return steps;
+    }
+
+    if (quoteType === "boxes_only") {
+      steps.push(
+        mk(
+          "box",
+          "Box Setup",
+          activeStep === "box" ? "active" : boxOk && qtyOk && completedSteps.has("box") ? "done" : "upcoming",
+        ),
+      );
+      steps.push(mk("rev", "Review", activeStep === "rev" ? "active" : "upcoming"));
       return steps;
     }
 
@@ -1162,6 +1191,63 @@ export default function StartQuoteModal({
     router.push(`/quote/layout?${p.toString()}`);
   };
 
+  // ---------- Boxes only: create + price the quote, then show it ----------
+  const onSubmitBoxesOnly = async () => {
+    if (!qtyOk || !boxOk || boBusy) return;
+    const name = boName.trim();
+    const email = boEmail.trim();
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setBoError("Enter your name and a valid email so we can save your quote.");
+      return;
+    }
+    setBoBusy(true);
+    setBoError(null);
+    try {
+      const quote_no = await fetchNewQuoteNo("A");
+      const salesSlug = (
+        searchParams.get("sales_rep_slug") ||
+        searchParams.get("sales") ||
+        searchParams.get("rep") ||
+        (typeof prefillData?.salesRepSlug === "string" ? prefillData.salesRepSlug : "") ||
+        ""
+      ).trim();
+      const tenantSlug = (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase();
+      const res = await fetch("/api/quote/boxes-only", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quote_no,
+          tenant_slug: tenantSlug || null,
+          quote_source: quoteSource || null,
+          sales_rep_slug: salesSlug || null,
+          customer: { name, email, company: boCompany.trim() || null, phone: boPhone.trim() || null },
+          qty: qtyNum,
+          box: prefillPackagingSku.trim()
+            ? { sku: prefillPackagingSku.trim() }
+            : {
+                L: boxLNum,
+                W: boxWNum,
+                D: boxDNum,
+                style: boxStyle,
+                grade_id: customRscBox && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
+              },
+          print_spec: { colors: printColors, sides: printSides },
+          notes: customerNotes.trim() || null,
+        }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setBoError(j?.message || `We couldn't save your quote (HTTP ${res.status}). Please try again.`);
+        return;
+      }
+      router.push(`/quote?quote_no=${encodeURIComponent(j.quote_no)}`);
+    } catch (e: any) {
+      setBoError(String(e?.message || e));
+    } finally {
+      setBoBusy(false);
+    }
+  };
+
   // ---------- Step handlers ----------
   const onNext = () => {
     if (!canGoNext(activeStep)) return;
@@ -1242,7 +1328,9 @@ export default function StartQuoteModal({
               <div className="mt-1 text-sm text-[var(--text-secondary)]">
                 {quoteType === "complete_pack"
                   ? "Complete Pack: box + foam (bottom insert + optional top pad)."
-                  : "Foam Insert: foam only (block + cavities)."}
+                  : quoteType === "boxes_only"
+                    ? "Boxes only: corrugated boxes, plain or printed."
+                    : "Foam Insert: foam only (block + cavities)."}
               </div>
             </div>
 
@@ -1316,7 +1404,7 @@ export default function StartQuoteModal({
                   {activeStep === "type" ? (
                     <StepCard title="Quote Type" hint="Choose what you're quoting">
                       <div className="space-y-4">
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                           <ChoiceCard
                             title="Foam Insert"
                             desc="Foam only (block + cavities)"
@@ -1328,6 +1416,12 @@ export default function StartQuoteModal({
                             desc="Box + foam (mailer/RSC + optional printing)"
                             selected={quoteType === "complete_pack"}
                             onClick={() => setQuoteType("complete_pack")}
+                          />
+                          <ChoiceCard
+                            title="Boxes only"
+                            desc="Corrugated boxes, plain or printed — no foam"
+                            selected={quoteType === "boxes_only"}
+                            onClick={() => setQuoteType("boxes_only")}
                           />
                         </div>
 
@@ -1351,7 +1445,7 @@ export default function StartQuoteModal({
                     </StepCard>
                   ) : null}
 
-                  {activeStep === "box" && quoteType === "complete_pack" ? (
+                  {activeStep === "box" && (quoteType === "complete_pack" || quoteType === "boxes_only") ? (
                     <StepCard
                       title="Box Setup"
                       hint="Internal box size (ID) + style + printing"
@@ -1558,20 +1652,22 @@ export default function StartQuoteModal({
                           ) : null}
                         </div>
 
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
-                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                            FOAM FIT (AUTO)
-                          </div>
-                          <div className="mt-2 text-sm text-[var(--text-secondary)]">
-                            Foam L/W = Box ID − {FIT_ALLOW_IN}" for fit.
-                          </div>
+                        {quoteType === "complete_pack" ? (
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                              FOAM FIT (AUTO)
+                            </div>
+                            <div className="mt-2 text-sm text-[var(--text-secondary)]">
+                              Foam L/W = Box ID − {FIT_ALLOW_IN}" for fit.
+                            </div>
 
-                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            <MiniStat label="Foam Length (in)" value={fmtIn(liveFoamLen)} />
-                            <MiniStat label="Foam Width (in)" value={fmtIn(liveFoamWid)} />
-                            <MiniStat label="Max Depth (in)" value={fmtIn(boxDNum)} />
+                            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <MiniStat label="Foam Length (in)" value={fmtIn(liveFoamLen)} />
+                              <MiniStat label="Foam Width (in)" value={fmtIn(liveFoamWid)} />
+                              <MiniStat label="Max Depth (in)" value={fmtIn(boxDNum)} />
+                            </div>
                           </div>
-                        </div>
+                        ) : null}
                       </div>
                     </StepCard>
                   ) : null}
@@ -1951,7 +2047,131 @@ export default function StartQuoteModal({
                     </StepCard>
                   ) : null}
 
-                  {activeStep === "rev" ? (
+                  {activeStep === "rev" && quoteType === "boxes_only" ? (
+                    <StepCard title="Review" hint="Check your boxes and get your price">
+                      <div className="space-y-4">
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            SUMMARY
+                          </div>
+                          <div className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
+                            <Row k="Quote type" v="Boxes only" />
+                            {prefillPackagingSku.trim() ? (
+                              <Row k="Stock box" v={prefillPackagingSku.trim()} />
+                            ) : (
+                              <>
+                                <Row k="Box ID" v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "(missing)"} />
+                                <Row k="Style" v={boxStyle.toUpperCase()} />
+                                {customRscBox && boxGrades.length > 0 ? (
+                                  <Row
+                                    k="Board grade"
+                                    v={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Recommended by the shop"}
+                                  />
+                                ) : null}
+                              </>
+                            )}
+                            <Row
+                              k="Printing"
+                              v={
+                                printColors.length
+                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
+                                  : "No print"
+                              }
+                            />
+                            <Row k="Qty" v={qtyNum ? String(qtyNum) : "(missing)"} />
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            WHERE SHOULD WE SEND YOUR QUOTE?
+                          </div>
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label className="block">
+                              <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">NAME *</div>
+                              <input
+                                value={boName}
+                                onChange={(e) => setBoName(e.target.value)}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                            </label>
+                            <label className="block">
+                              <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">EMAIL *</div>
+                              <input
+                                type="email"
+                                value={boEmail}
+                                onChange={(e) => setBoEmail(e.target.value)}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                            </label>
+                            <label className="block">
+                              <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">COMPANY</div>
+                              <input
+                                value={boCompany}
+                                onChange={(e) => setBoCompany(e.target.value)}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                            </label>
+                            <label className="block">
+                              <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">PHONE</div>
+                              <input
+                                value={boPhone}
+                                onChange={(e) => setBoPhone(e.target.value)}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            NOTES
+                          </div>
+                          <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                            Anything we should know about this order?
+                          </div>
+                          <textarea
+                            value={customerNotes}
+                            onChange={(e) => setCustomerNotes(e.target.value)}
+                            rows={3}
+                            className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--surface-page)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)] focus:outline-none"
+                            placeholder="e.g. artwork coming separately, needs to ship by a certain date..."
+                          />
+                        </div>
+
+                        {boError ? (
+                          <div className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]">
+                            {boError}
+                          </div>
+                        ) : null}
+
+                        <div className="flex flex-wrap items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={onBack}
+                            className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                          >
+                            Back
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onSubmitBoxesOnly}
+                            disabled={!qtyOk || !boxOk || boBusy}
+                            className={[
+                              "rounded-md px-6 py-3 text-sm font-medium",
+                              qtyOk && boxOk && !boBusy
+                                ? "bg-[var(--action-primary)] text-white hover:bg-[var(--action-primary-hover)]"
+                                : "cursor-not-allowed bg-[var(--action-primary)]/30 text-white/60",
+                            ].join(" ")}
+                          >
+                            {boBusy ? "Pricing your boxes…" : "Get my box price"}
+                          </button>
+                        </div>
+                      </div>
+                    </StepCard>
+                  ) : null}
+
+                  {activeStep === "rev" && quoteType !== "boxes_only" ? (
                     <StepCard title="Review" hint="Confirm setup and launch the editor">
                       <div className="space-y-4">
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
@@ -2060,6 +2280,14 @@ export default function StartQuoteModal({
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={onBack}
+                            className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                          >
+                            Back
+                          </button>
+
                           <button
                             type="button"
                             onClick={close}

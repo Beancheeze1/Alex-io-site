@@ -7,12 +7,14 @@
 //
 // Which shop: a real tenant subdomain wins; on the core host a valid
 // ?tenant= slug; else the logged-in user's tenant (rep form); else "default".
-// Read-only: does not seed defaults. 30/min per IP.
+// Seeds the shop's default corrugated settings on first use (Chuck, Oct 2026:
+// every shop gets defaults automatically). 30/min per IP.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { ensureCorrugatedDefaults } from "@/lib/corrugated";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +52,9 @@ export async function GET(req: NextRequest) {
       tenantId = Number.isInteger(userTenant) && userTenant > 0 ? userTenant : await tenantIdForSlug("default");
     }
     if (!tenantId) return json({ ok: true, grades: [] });
+
+    // Every shop gets the default flutes + grades the first time (no-op after).
+    await ensureCorrugatedDefaults(tenantId);
 
     const rows = await q<{ id: string | number; name: string; flute: string; ect_label: string | null; is_default: boolean }>(
       `SELECT id, name, flute, ect_label, is_default
