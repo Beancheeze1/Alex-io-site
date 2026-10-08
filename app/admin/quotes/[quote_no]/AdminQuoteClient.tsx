@@ -3216,7 +3216,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             {/* optional: quick line items table (admin view) */}
             <div style={{ ...cardBase, background: "var(--surface-card)" }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Line items (admin view)</div>
-              {items.length === 0 ? (
+              {items.length === 0 && !(boxSelections && boxSelections.length > 0) ? (
                 <p style={{ color: "var(--text-muted)", fontSize: 13 }}>No line items stored for this quote.</p>
               ) : (
                 <table
@@ -3319,6 +3319,40 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         );
                       });
                     })()}
+                    {/* Boxes only (Corrugated Step 4B): no foam items, so list the boxes themselves. */}
+                    {items.length === 0 &&
+                      (boxSelections || []).map((sel) => {
+                        const boxUnit = parsePriceField(sel.unit_price_usd ?? null);
+                        const boxTotal = parsePriceField(sel.extended_price_usd ?? null);
+                        const dimParts = [sel.inside_length_in, sel.inside_width_in, sel.inside_height_in].map((v) =>
+                          v == null || v === "" || !Number.isFinite(Number(v)) ? null : String(Number(v)),
+                        );
+                        const boxDims = dimParts.every((p) => p != null) ? dimParts.join(" × ") : "—";
+                        return (
+                          <tr key={`box-${sel.id}`} style={{ color: "var(--text-primary)" }}>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>Box</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              <span>{sel.description || sel.sku || "Box"}</span>
+                              <span style={{
+                                marginLeft: 6,
+                                padding: "2px 7px",
+                                borderRadius: 999,
+                                border: "1px solid var(--border)",
+                                background: "var(--surface-subtle)",
+                                color: "var(--text-secondary)",
+                                fontSize: 10,
+                                fontWeight: 600,
+                              }}>{sel.kind === "custom" ? "Custom box" : "Stock box"}</span>
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{boxDims}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{sel.qty}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {boxUnit == null ? "—" : `$${boxUnit.toFixed(4)}`}
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(boxTotal)}</td>
+                          </tr>
+                        );
+                      })}
                     {effectivePrintingUpcharge > 0 && (
                       <tr style={{ color: "var(--text-primary)" }}>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
@@ -3334,6 +3368,22 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
                         <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
+                      </tr>
+                    )}
+                    {/* Boxes only: one total line (boxes + one-time plates). */}
+                    {items.length === 0 && (boxSelections || []).length > 0 && (
+                      <tr style={{ color: "var(--text-primary)" }}>
+                        <td colSpan={5} style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>
+                          Total{effectivePrintingUpcharge > 0 ? " (boxes + plates)" : ""}
+                        </td>
+                        <td style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>
+                          {formatUsd(
+                            (boxSelections || []).reduce(
+                              (sum, sel) => sum + (parsePriceField(sel.extended_price_usd ?? null) ?? 0),
+                              0,
+                            ) + effectivePrintingUpcharge,
+                          )}
+                        </td>
                       </tr>
                     )}
                   </tbody>

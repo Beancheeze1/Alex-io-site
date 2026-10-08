@@ -1273,8 +1273,12 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const overallQty = React.useMemo(() => {
     const q0 = Number(primaryItem?.qty ?? 0);
     if (Number.isFinite(q0) && q0 > 0) return q0;
+    // Boxes only (Corrugated Step 4B): no foam items, so count the boxes.
+    if (isBoxesOnly && requestedBoxes.length > 0) {
+      return requestedBoxes.reduce((sum, b) => sum + (Number(b.qty) || 0), 0);
+    }
     return items.reduce((sum, i) => sum + (i.qty || 0), 0);
-  }, [items, primaryItem]);
+  }, [items, primaryItem, isBoxesOnly, requestedBoxes]);
 
 // Planning notes from layout (strip [REV:X] tags for customer view)
   const notesFull = React.useMemo(() => {
@@ -3229,26 +3233,38 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Total quantity</div>
+                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{isBoxesOnly ? "Total boxes" : "Total quantity"}</div>
                       <div style={{ fontSize: 18, fontWeight: 600 }}>{overallQty}</div>
                       {anyPricing && (
                         <>
-                          {/* Foam subtotal always shown */}
-                          <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Foam subtotal</div>
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(foamSubtotal)}</div>
-
-                          {/* Packaging subtotal includes printing upcharge */}
-                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
+                          {/* Foam subtotal (not shown on boxes-only quotes) */}
+                          {!isBoxesOnly && (
                             <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Packaging subtotal</div>
-                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePackagingSubtotal + effectivePrintingUpcharge)}</div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Foam subtotal</div>
+                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(foamSubtotal)}</div>
                             </>
                           )}
 
-                          {/* Printing upcharge line in summary */}
+                          {/* Packaging subtotal. Legacy quotes fold the print upcharge in here;
+                              per-color quotes list the one-time plates on their own line below
+                              instead, so they're not counted twice on screen. */}
+                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
+                            <>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                                {isBoxesOnly ? "Boxes subtotal" : "Packaging subtotal"}
+                              </div>
+                              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                                {formatUsd(effectivePackagingSubtotal + (printModel === "per_color" ? 0 : effectivePrintingUpcharge))}
+                              </div>
+                            </>
+                          )}
+
+                          {/* Printing line in summary */}
                           {effectivePrintingUpcharge > 0 && (
                             <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Printing upcharge</div>
+                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
+                                {printModel === "per_color" ? "Printing plates (one time)" : "Printing upcharge"}
+                              </div>
                               <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePrintingUpcharge)}</div>
                             </>
                           )}

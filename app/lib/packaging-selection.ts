@@ -454,6 +454,11 @@ export async function repriceQuoteBoxes(
     const adder = await printAdderFor(tenantId, qty, print);
     const priced = withAdder(base.unit_price_usd, base.extended_price_usd, qty, adder);
     const pf = printFields(print, adder, adder ? adder.plates_line_usd : null);
+    // Step 4B: stock rows say how they're printed, like custom rows do.
+    const stockDescription =
+      print && print.colors.length > 0
+        ? `${base.description} · ${describePrintSpec(print)}`
+        : base.description;
     await q(
       `UPDATE public.quote_box_selections
           SET unit_price_usd = $2,
@@ -462,7 +467,8 @@ export async function repriceQuoteBoxes(
               print_sides = $5,
               print_usd = $6,
               plates_usd = $7,
-              pricing_note = $8
+              pricing_note = $8,
+              description = $9
         WHERE id = $1`,
       [
         row.id,
@@ -473,6 +479,7 @@ export async function repriceQuoteBoxes(
         pf.print_usd,
         pf.plates_usd,
         adder && adder.warnings.length ? `Check corrugated print rates: ${adder.warnings.join(" ")}` : null,
+        stockDescription,
       ],
     );
   }

@@ -545,8 +545,10 @@ export default function StartQuoteModal({
     // Boxes only: no foam stack — match on the box's own depth.
     const stackDepth = quoteType === "boxes_only" ? 0 : bottomThkNum + topThkNum;
 
-    const footprintL = Math.max(0, boxLNum - FIT_ALLOW_IN);
-    const footprintW = Math.max(0, boxWNum - FIT_ALLOW_IN);
+    // Boxes only: the entered size is the box inside size, so no foam fit
+    // allowance comes off it (the suggester is told via inside_match).
+    const footprintL = quoteType === "boxes_only" ? boxLNum : Math.max(0, boxLNum - FIT_ALLOW_IN);
+    const footprintW = quoteType === "boxes_only" ? boxWNum : Math.max(0, boxWNum - FIT_ALLOW_IN);
 
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -558,6 +560,7 @@ export default function StartQuoteModal({
             footprint_length_in: footprintL,
             footprint_width_in: footprintW,
             stack_depth_in: stackDepth > 0 ? stackDepth : boxDNum,
+            inside_match: quoteType === "boxes_only",
           }),
         });
         const json = await res.json().catch(() => null);
@@ -1363,18 +1366,43 @@ export default function StartQuoteModal({
                         <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Qty</div>
                         <div className="mt-1 text-sm text-[var(--text-primary)]">{qty || "—"}</div>
                       </div>
-                      <div>
-                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Cavities</div>
-                        <div className="mt-1 text-sm text-[var(--text-primary)]">{normalizedSeed || "—"}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material</div>
-                        <div className="mt-1 text-sm text-[var(--text-primary)]">{materialText || "—"}</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material ID</div>
-                        <div className="mt-1 text-sm text-[var(--text-primary)]">{materialId || "—"}</div>
-                      </div>
+                      {quoteType === "boxes_only" ? (
+                        <>
+                          <div>
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Box ID</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">
+                              {prefillPackagingSku.trim() || normalizeDims3(boxLNum, boxWNum, boxDNum) || "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Style</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{boxStyle.toUpperCase()}</div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Printing</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">
+                              {printColors.length
+                                ? `${printColors.length} color${printColors.length > 1 ? "s" : ""}`
+                                : "No print"}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Cavities</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{normalizedSeed || "—"}</div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{materialText || "—"}</div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material ID</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{materialId || "—"}</div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -1464,7 +1492,9 @@ export default function StartQuoteModal({
 
                           {!boxOk ? (
                             <div className="mt-3 text-sm text-[var(--attention)]">
-                              Box L/W/D are required, and L/W must be greater than {FIT_ALLOW_IN}" (fit allowance).
+                              {quoteType === "boxes_only"
+                                ? "Enter the box inside length, width and depth."
+                                : `Box L/W/D are required, and L/W must be greater than ${FIT_ALLOW_IN}" (fit allowance).`}
                             </div>
                           ) : null}
                         </div>

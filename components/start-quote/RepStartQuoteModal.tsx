@@ -416,8 +416,10 @@ export default function RepStartQuoteModal({
     // Boxes only: no foam stack — match on the box's own depth.
     const stackDepth = quoteType === "boxes_only" ? 0 : bottomThkNum + topThkNum;
 
-    const footprintL = Math.max(0, boxLNum - FIT_ALLOW_IN);
-    const footprintW = Math.max(0, boxWNum - FIT_ALLOW_IN);
+    // Boxes only: the entered size is the box inside size, so no foam fit
+    // allowance comes off it (the suggester is told via inside_match).
+    const footprintL = quoteType === "boxes_only" ? boxLNum : Math.max(0, boxLNum - FIT_ALLOW_IN);
+    const footprintW = quoteType === "boxes_only" ? boxWNum : Math.max(0, boxWNum - FIT_ALLOW_IN);
 
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -433,6 +435,7 @@ export default function RepStartQuoteModal({
             // failing on a zero/blank stack depth.
             stack_depth_in: stackDepth > 0 ? stackDepth : boxDNum,
             qty: qtyNum,
+            inside_match: quoteType === "boxes_only",
           }),
         });
         const json = await res.json().catch(() => null);
@@ -1079,7 +1082,9 @@ export default function RepStartQuoteModal({
                       hint={
                         quoteType === "foam_insert"
                           ? "Foam block outside dimensions"
-                          : "Box dimensions + foam thickness"
+                          : quoteType === "boxes_only"
+                            ? "Box inside dimensions, style and printing"
+                            : "Box dimensions + foam thickness"
                       }
                     >
                       {quoteType === "foam_insert" ? (
@@ -1709,17 +1714,46 @@ export default function RepStartQuoteModal({
                           label="Quote type"
                           value={quoteType === "foam_insert" ? "Foam Insert" : quoteType === "boxes_only" ? "Boxes only" : "Complete Pack"}
                         />
-                        <ReviewRow label="Material" value={materialText || "—"} />
-                        {layerOptions.map((opt) => (
-                          <ReviewRow
-                            key={opt.index}
-                            label={`Cavities — ${opt.label}`}
-                            value={(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "none"}
-                          />
-                        ))}
+                        {quoteType === "boxes_only" ? (
+                          <>
+                            <ReviewRow
+                              label="Box"
+                              value={
+                                boxChoice === "stock" && selectedStockSku
+                                  ? `Stock ${selectedStockSku}`
+                                  : `Custom ${boxL || "?"} × ${boxW || "?"} × ${boxD || "?"} in (${boxStyle.toUpperCase()})`
+                              }
+                            />
+                            {boxChoice !== "stock" && boxStyle === "rsc" ? (
+                              <ReviewRow
+                                label="Board grade"
+                                value={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Shop default"}
+                              />
+                            ) : null}
+                            <ReviewRow
+                              label="Printing"
+                              value={
+                                printColors.length
+                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
+                                  : "No print"
+                              }
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <ReviewRow label="Material" value={materialText || "—"} />
+                            {layerOptions.map((opt) => (
+                              <ReviewRow
+                                key={opt.index}
+                                label={`Cavities — ${opt.label}`}
+                                value={(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "none"}
+                              />
+                            ))}
+                          </>
+                        )}
                       </div>
 
-                      {cavityBuild.incompleteRowIds.size > 0 ? (
+                      {quoteType !== "boxes_only" && cavityBuild.incompleteRowIds.size > 0 ? (
                         <div className="mt-4 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]">
                           {cavityBuild.incompleteRowIds.size === 1
                             ? "1 cavity row is missing dimensions and will be excluded from the quote."

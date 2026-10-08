@@ -58,6 +58,9 @@ type BoxSuggestIn = {
   footprint_width_in: number;
   stack_depth_in: number;
   qty?: number | null;
+  // Boxes only (Corrugated Step 4B): the dims are the box inside size the
+  // buyer wants, so match them directly with no foam clearance.
+  inside_match?: boolean;
 };
 
 type StubBoxRow = {
@@ -245,10 +248,11 @@ async function suggestBoxes(
   rawFootprintW: number,
   rawStackDepth: number,
   tenantId: number | null,
+  clearanceIn: number = CLEARANCE_IN,
 ) {
-  const requiredL = rawFootprintL + CLEARANCE_IN * 2;
-  const requiredW = rawFootprintW + CLEARANCE_IN * 2;
-  const requiredH = rawStackDepth + CLEARANCE_IN * 2;
+  const requiredL = rawFootprintL + clearanceIn * 2;
+  const requiredW = rawFootprintW + clearanceIn * 2;
+  const requiredH = rawStackDepth + clearanceIn * 2;
 
   const [rscRows, mailerRows] = await Promise.all([
     fetchBoxesForStyle(requiredL, requiredW, requiredH, "rsc", tenantId),
@@ -327,8 +331,10 @@ export async function POST(req: NextRequest) {
     const tenantId = tenantResult.ok && tenantResult.tenant_id ? tenantResult.tenant_id : null;
 
     // Use the live Box Partners catalog stored in public.boxes.
+    // Boxes only: match the entered inside size directly (no foam clearance).
+    const insideMatch = body.inside_match === true;
     const { requiredL, requiredW, requiredH, rscRows, mailerRows, bestRsc, bestMailer } =
-      await suggestBoxes(L, W, H, tenantId);
+      await suggestBoxes(L, W, H, tenantId, insideMatch ? 0 : CLEARANCE_IN);
 
     if (!bestRsc && !bestMailer) {
       const resp: BoxSuggestOut = {
