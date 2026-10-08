@@ -710,6 +710,9 @@ export default function RepStartQuoteModal({
                     grade_id: boxStyle === "rsc" && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
                   },
             print_spec: { colors: printColors, sides: printSides },
+            // Step 5: the rep's qty breaks become the quote's compare quantities
+            // (their price column is for foam and is ignored for boxes).
+            qty_breaks: cleanBreaks.map((b) => b.qty),
             notes: customerNotes.trim() || null,
           }),
         });

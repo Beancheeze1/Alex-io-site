@@ -396,6 +396,8 @@ export default function StartQuoteModal({
   const [boCompany, setBoCompany] = React.useState<string>("");
   const [boPhone, setBoPhone] = React.useState<string>("");
   const [boBusy, setBoBusy] = React.useState<boolean>(false);
+  // Up to 3 more quantities to compare on the quote (Corrugated Step 5).
+  const [boBreaks, setBoBreaks] = React.useState<string[]>(["", "", ""]);
   const [boError, setBoError] = React.useState<string | null>(null);
 
   // ---------- Seed all state from prefillData once it resolves ----------
@@ -1235,6 +1237,9 @@ export default function StartQuoteModal({
                 grade_id: customRscBox && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
               },
           print_spec: { colors: printColors, sides: printSides },
+          qty_breaks: boBreaks
+            .map((s) => Number(s.trim()))
+            .filter((n) => Number.isInteger(n) && n > 0),
           notes: customerNotes.trim() || null,
         }),
       });
@@ -2109,6 +2114,32 @@ export default function StartQuoteModal({
                               }
                             />
                             <Row k="Qty" v={qtyNum ? String(qtyNum) : "(missing)"} />
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            COMPARE OTHER QUANTITIES (OPTIONAL)
+                          </div>
+                          <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                            Add up to 3 more quantities. Your quote will show the price at each one, and you can switch to any of them.
+                          </div>
+                          <div className="mt-3 grid grid-cols-3 gap-3">
+                            {boBreaks.map((v, i) => (
+                              <input
+                                key={i}
+                                value={v}
+                                inputMode="numeric"
+                                aria-label={`Other quantity ${i + 1}`}
+                                placeholder={`e.g. ${["1000", "2500", "5000"][i]}`}
+                                onChange={(e) => {
+                                  const next = [...boBreaks];
+                                  next[i] = e.target.value.replace(/[^\d]/g, "");
+                                  setBoBreaks(next);
+                                }}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                            ))}
                           </div>
                         </div>
 

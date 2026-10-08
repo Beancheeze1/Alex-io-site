@@ -1280,6 +1280,58 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     return items.reduce((sum, i) => sum + (i.qty || 0), 0);
   }, [items, primaryItem, isBoxesOnly, requestedBoxes]);
 
+  // Boxes only (Corrugated Step 5): price at each buyer-picked quantity, with
+  // a switch that makes a break the ordered quantity.
+  const [boxBreaks, setBoxBreaks] = React.useState<
+    { qty: number; boxes_usd: number | null; plates_usd: number; total_usd: number | null; unit_usd: number | null }[]
+  >([]);
+  const [boxBreaksCurrent, setBoxBreaksCurrent] = React.useState<number | null>(null);
+  const [boxBreaksLocked, setBoxBreaksLocked] = React.useState<boolean>(false);
+  const [boxBreakBusy, setBoxBreakBusy] = React.useState<number | null>(null);
+  const [boxBreakError, setBoxBreakError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!isBoxesOnly || !quoteNo) {
+      setBoxBreaks([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/quote/box-breaks?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j?.ok) return;
+        setBoxBreaks(Array.isArray(j.breaks) ? j.breaks : []);
+        setBoxBreaksCurrent(Number.isFinite(Number(j.current_qty)) && j.current_qty != null ? Number(j.current_qty) : null);
+        setBoxBreaksLocked(!!j.locked);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isBoxesOnly, quoteNo]);
+
+  const switchToBoxBreak = async (qty: number) => {
+    setBoxBreakBusy(qty);
+    setBoxBreakError(null);
+    try {
+      const res = await fetch("/api/quote/box-breaks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNo, qty }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setBoxBreakError(j?.message || "We couldn't change the quantity. Please try again.");
+        return;
+      }
+      window.location.reload();
+    } catch {
+      setBoxBreakError("We couldn't change the quantity. Please try again.");
+    } finally {
+      setBoxBreakBusy(null);
+    }
+  };
+
 // Planning notes from layout (strip [REV:X] tags for customer view)
   const notesFull = React.useMemo(() => {
     if (!layoutPkg?.notes) return null;
@@ -3281,7 +3333,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0 || effectiveDieCuttingCharge > 0) && (
                             <>
                               <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                                Estimated subtotal (foam + packaging{effectivePrintingUpcharge > 0 ? " + printing" : ""}{effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})
+                                {isBoxesOnly
+                                  ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""})`
+                                  : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})`}
                               </div>
                               <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}</div>
                             </>
@@ -3293,6 +3347,85 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 </>
               )}
             </div>
+
+            {/* Boxes only: price at each buyer-picked quantity (Corrugated Step 5) */}
+            {isBoxesOnly && boxBreaks.length > 1 && (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Price by quantity</div>
+                <div style={{ ...cardBase, background: "var(--surface-card)" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Quantity</th>
+                        {boxBreaks.some((b) => b.unit_usd != null) && (
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per box</th>
+                        )}
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Plates (one time)</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Total</th>
+                        <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {boxBreaks.map((b) => {
+                        const isCurrent = boxBreaksCurrent === b.qty;
+                        return (
+                          <tr key={b.qty} style={{ color: "var(--text-primary)", fontWeight: isCurrent ? 600 : 400 }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              {b.qty.toLocaleString("en-US")}
+                            </td>
+                            {boxBreaks.some((x) => x.unit_usd != null) && (
+                              <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                                {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
+                              </td>
+                            )}
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {formatUsd(b.boxes_usd)}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {formatUsd(b.total_usd)}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
+                              {isCurrent ? (
+                                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
+                              ) : boxBreaksLocked ? null : (
+                                <button
+                                  type="button"
+                                  onClick={() => switchToBoxBreak(b.qty)}
+                                  disabled={boxBreakBusy !== null}
+                                  style={{
+                                    padding: "4px 10px",
+                                    borderRadius: 8,
+                                    border: "1px solid var(--border)",
+                                    background: "var(--surface-card)",
+                                    color: "var(--text-primary)",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: boxBreakBusy !== null ? "default" : "pointer",
+                                    opacity: boxBreakBusy !== null && boxBreakBusy !== b.qty ? 0.5 : 1,
+                                  }}
+                                >
+                                  {boxBreakBusy === b.qty ? "Updating…" : "Use this quantity"}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {boxBreakError ? (
+                    <p style={{ color: "var(--attention)", fontSize: 13, marginTop: 8 }}>{boxBreakError}</p>
+                  ) : null}
+                  <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 8 }}>
+                    Plates are a one-time charge, so they stay the same at every quantity. Switching updates the line items above.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Foam layout package section */}
             <div style={{ marginTop: 4 }}>

@@ -484,3 +484,119 @@ export async function repriceQuoteBoxes(
     );
   }
 }
+
+export type BoxBreakPrice = {
+  qty: number;
+  boxes_usd: number | null; // all boxes on the quote at this qty (null if any box has no price)
+  plates_usd: number; // one-time plates, once per quote
+  total_usd: number | null; // boxes + plates
+  unit_usd: number | null; // per box, only when the quote has exactly one box row
+};
+
+/**
+ * Read-only: price every box on a quote at each of the given quantities
+ * (Corrugated Step 5, buyer-picked quantity breaks). Same pricing as
+ * repriceQuoteBoxes — custom rows through resolveCustomSelection (engine or
+ * nearest stock), stock rows at their catalog tier + print adder — but
+ * nothing is written.
+ */
+export async function priceQuoteBoxesAtQtys(
+  quoteId: number,
+  tenantId: number | null,
+  print: PrintSpec | null,
+  qtys: number[],
+): Promise<BoxBreakPrice[]> {
+  const rows = await q<{
+    id: number;
+    kind: string;
+    custom_length_in: string | number | null;
+    custom_width_in: string | number | null;
+    custom_height_in: string | number | null;
+    custom_style: string | null;
+    board_grade_id: string | number | null;
+    b_id: number | null;
+    sku: string | null;
+    vendor: string | null;
+    style: string | null;
+    b_description: string | null;
+    inside_length_in: number | null;
+    inside_width_in: number | null;
+    inside_height_in: number | null;
+  }>(
+    `SELECT qbs.id, qbs.kind,
+            qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
+            qbs.board_grade_id,
+            b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
+            b.inside_length_in, b.inside_width_in, b.inside_height_in
+       FROM public.quote_box_selections qbs
+       LEFT JOIN public.boxes b ON b.id = qbs.box_id
+      WHERE qbs.quote_id = $1
+      ORDER BY qbs.id`,
+    [quoteId],
+  );
+
+  const out: BoxBreakPrice[] = [];
+  for (const rawQty of qtys) {
+    const qty = Math.max(1, Math.round(Number(rawQty) || 1));
+    let boxes: number | null = 0;
+    let plates = 0;
+    let unit: number | null = null;
+    let priced = 0;
+
+    for (const row of rows) {
+      let ext: number | null = null;
+      let u: number | null = null;
+      let pl: number | null = null;
+
+      if (row.kind === "custom") {
+        const r = await resolveCustomSelection(
+          Number(row.custom_length_in),
+          Number(row.custom_width_in),
+          Number(row.custom_height_in),
+          String(row.custom_style || ""),
+          qty,
+          tenantId,
+          { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print },
+        );
+        ext = r.extended_price_usd;
+        u = r.unit_price_usd;
+        pl = r.plates_usd;
+      } else if (row.b_id != null) {
+        const base = await resolveStockSelection(
+          {
+            id: row.b_id,
+            sku: String(row.sku || ""),
+            vendor: row.vendor,
+            style: row.style,
+            description: row.b_description,
+            inside_length_in: Number(row.inside_length_in),
+            inside_width_in: Number(row.inside_width_in),
+            inside_height_in: Number(row.inside_height_in),
+          },
+          qty,
+        );
+        const adder = await printAdderFor(tenantId, qty, print);
+        const p = withAdder(base.unit_price_usd, base.extended_price_usd, qty, adder);
+        ext = p.extended;
+        u = p.unit;
+        pl = adder ? adder.plates_line_usd : null;
+      } else {
+        continue;
+      }
+
+      priced += 1;
+      boxes = boxes == null || ext == null ? null : r2(boxes + ext);
+      plates = r2(plates + (pl ?? 0));
+      unit = u;
+    }
+
+    out.push({
+      qty,
+      boxes_usd: priced > 0 ? boxes : null,
+      plates_usd: plates,
+      total_usd: priced > 0 && boxes != null ? r2(boxes + plates) : null,
+      unit_usd: priced === 1 ? unit : null,
+    });
+  }
+  return out;
+}

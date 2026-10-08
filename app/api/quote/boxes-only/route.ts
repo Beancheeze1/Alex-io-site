@@ -26,6 +26,7 @@
 //   qty,
 //   box: { sku } | { L, W, D, style: "rsc"|"mailer", grade_id? },
 //   print_spec?: { colors: ("spot"|"flood")[], sides: 1|2 },
+//   qty_breaks?: number[],   // up to 3 more quantities to compare (Step 5)
 //   notes?
 // }
 // -> { ok, quote_no, url }
@@ -118,6 +119,19 @@ export async function POST(req: NextRequest) {
 
     const print: PrintSpec = parsePrintSpec(b.print_spec) ?? { colors: [], sides: 1 };
     const notes = str(b.notes, 2000);
+
+    // Quantity breaks (Step 5): the ordered qty plus up to 3 more, ascending.
+    const extraBreaks: number[] = [];
+    if (Array.isArray(b.qty_breaks)) {
+      for (const v of b.qty_breaks) {
+        const n = Number(v);
+        if (Number.isInteger(n) && n >= 1 && n <= 10_000_000 && n !== qty && !extraBreaks.includes(n)) {
+          extraBreaks.push(n);
+        }
+        if (extraBreaks.length >= 3) break;
+      }
+    }
+    const qtyBreaks = [qty, ...extraBreaks].sort((x, y) => x - y);
 
     // ---- Quote row + shop ----
     let quote = await one<QuoteRow>(
@@ -217,6 +231,7 @@ export async function POST(req: NextRequest) {
       printed: print.colors.length > 0 ? 1 : 0,
       ...(custom ? { customer_box_in: { L: custom.L, W: custom.W, H: custom.D, style: custom.style } } : {}),
       ...(notes ? { customer_notes: notes } : {}),
+      ...(qtyBreaks.length > 1 ? { box_qty_breaks: qtyBreaks } : {}),
     });
 
     // ---- Box selection, priced ----
