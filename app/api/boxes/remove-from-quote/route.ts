@@ -123,6 +123,7 @@ export async function POST(req: NextRequest) {
       DELETE FROM public."quote_box_selections"
       WHERE id = $1
         AND quote_id = $2
+      RETURNING id
     `,
       [selIdNum, quoteId],
     );

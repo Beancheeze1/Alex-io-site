@@ -2722,6 +2722,22 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     bestMailer: null,
   });
 
+  // Step 8: staff (admin / cs / sales) see the full carton suggester; buyers
+  // see stock sizes as an optional, collapsed section.
+  const [isStaffViewer, setIsStaffViewer] = React.useState<boolean>(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/is-staff", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled) setIsStaffViewer(!!j?.staff);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [selectedCartonKind, setSelectedCartonKind] =
     React.useState<"RSC" | "MAILER" | null>(null);
 
@@ -5401,12 +5417,17 @@ const tenantCssVars = React.useMemo(() => {
                   className={`mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-page)] p-3 ${guidedClass("box-suggester")}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs font-medium text-[var(--text-primary)]">Closest matching cartons</div>
-                    <span className="inline-flex items-center rounded-full bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--status-neutral-text)]">
-                      Box suggester · V2
-                    </span>
+                    <div className="text-xs font-medium text-[var(--text-primary)]">
+                      {isStaffViewer ? "Closest matching cartons" : "Box & printing"}
+                    </div>
+                    {isStaffViewer ? (
+                      <span className="inline-flex items-center rounded-full bg-[var(--status-neutral-bg)] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--status-neutral-text)]">
+                        Box suggester · V2
+                      </span>
+                    ) : null}
                   </div>
 
+                  {isStaffViewer ? (
                   <p className="text-[11px] text-[var(--text-muted)] mb-2">
                     Uses the foam footprint{" "}
                     <span className="font-mono text-[var(--text-primary)]">{footprintLabel}</span>, stack depth{" "}
@@ -5415,6 +5436,7 @@ const tenantCssVars = React.useMemo(() => {
                     <span className="text-[var(--text-primary)] font-medium">RSC</span> and{" "}
                     <span className="text-[var(--text-primary)] font-medium">mailer</span>.
                   </p>
+                  ) : null}
 
                   {selectedCartonKind && (
                     <div className="mb-2 text-[11px] text-[var(--text-primary)]">
@@ -5576,7 +5598,14 @@ const tenantCssVars = React.useMemo(() => {
                       No good carton matches found in the current stub catalog.
                     </div>
                   ) : (
-                    <div className="space-y-2 text-[11px]">
+                    <details
+                      open={isStaffViewer || !!selectedCartonKind}
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2"
+                    >
+                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--text-primary)]">
+                        Stock sizes that fit (optional)
+                      </summary>
+                    <div className="mt-2 space-y-2 text-[11px]">
                       {boxSuggest.bestRsc && (
                         <div className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2">
                           <div className="flex items-center justify-between mb-0.5">
@@ -5659,6 +5688,7 @@ const tenantCssVars = React.useMemo(() => {
                         </div>
                       )}
                     </div>
+                    </details>
                   )}
                 </div>
 

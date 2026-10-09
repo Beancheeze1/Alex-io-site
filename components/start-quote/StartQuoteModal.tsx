@@ -365,7 +365,10 @@ export default function StartQuoteModal({
   // every stock match, so submit can tell the editor via box_choice=custom.
   const [stockCandidates, setStockCandidates] = React.useState<StockCandidate[]>([]);
   const [stockCandidatesLoading, setStockCandidatesLoading] = React.useState<boolean>(false);
-  const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
+  // Step 8: the buyer's own size is the default; a stock size is an optional pick.
+  const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">(() =>
+    (searchParams.get("box_sku") || "").trim() ? "stock" : "custom",
+  );
 
   // Board grade for a custom-size RSC (Corrugated Step 3A). "" = "Not sure —
   // recommend one" (the shop's default grade). Options are the shop's active
@@ -1534,72 +1537,66 @@ export default function StartQuoteModal({
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                            BOX SELECTION
+                            BOX SIZE
                           </div>
 
                           {!boxLNum || !boxWNum || !boxDNum ? (
                             <div className="mt-2 text-xs text-[var(--text-muted)]">
-                              Enter box L/W/D above to see matching stock cartons.
-                            </div>
-                          ) : stockCandidatesLoading ? (
-                            <div className="mt-2 text-sm text-[var(--text-secondary)]">
-                              Looking up matching cartons…
+                              Enter the box size above.
                             </div>
                           ) : (
-                            <div className="mt-2 space-y-2">
-                              {stockCandidates.length === 0 ? (
-                                <div className="text-xs text-[var(--text-muted)]">
-                                  No close stock matches found for these dimensions.
-                                </div>
-                              ) : (
-                                stockCandidates.map((c) => {
-                                  const selected = boxChoice === "stock" && prefillPackagingSku === c.sku;
-                                  return (
-                                    <button
-                                      key={c.sku}
-                                      type="button"
-                                      onClick={() => {
-                                        setBoxChoice("stock");
-                                        setPrefillPackagingSku(c.sku);
-                                      }}
-                                      className={[
-                                        "w-full rounded-md border px-3 py-2 text-left text-sm",
-                                        selected
-                                          ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
-                                          : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
-                                      ].join(" ")}
-                                    >
-                                      <div className="font-medium text-[var(--text-primary)]">
-                                        {c.description || c.sku}
-                                      </div>
-                                      <div className="mt-0.5 text-xs text-[var(--text-muted)]">
-                                        Inside {c.inside_length_in} x {c.inside_width_in} x {c.inside_height_in} in · {c.sku}
-                                      </div>
-                                    </button>
-                                  );
-                                })
-                              )}
+                            <div className="mt-2 space-y-3">
+                              <div className="text-sm text-[var(--text-secondary)]">
+                                {prefillPackagingSku.trim() ? (
+                                  <>
+                                    Quoting stock box <span className="font-medium text-[var(--text-primary)]">{prefillPackagingSku.trim()}</span>.
+                                  </>
+                                ) : (
+                                  <>
+                                    We&apos;ll quote your size:{" "}
+                                    <span className="font-medium text-[var(--text-primary)]">
+                                      {normalizeDims3(boxLNum, boxWNum, boxDNum)} in
+                                    </span>
+                                    .
+                                  </>
+                                )}
+                              </div>
 
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setBoxChoice("custom");
-                                  setPrefillPackagingSku("");
-                                }}
-                                className={[
-                                  "w-full rounded-md border px-3 py-2 text-left text-sm",
-                                  boxChoice === "custom"
-                                    ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
-                                    : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
-                                ].join(" ")}
-                              >
-                                <div className="font-medium text-[var(--text-primary)]">
-                                  Use my own size instead
-                                </div>
-                                <div className="mt-0.5 text-xs text-[var(--text-muted)]">
-                                  Skip stock matching — use the box dimensions entered above as-is.
-                                </div>
-                              </button>
+                              {/* Step 8: stock sizes are an optional dropdown for buyers, not a
+                                  list that looks like it must be picked from. Your own size is
+                                  the default (boxChoice "custom"). */}
+                              {stockCandidatesLoading ? (
+                                <div className="text-xs text-[var(--text-muted)]">Checking stock sizes…</div>
+                              ) : stockCandidates.length > 0 ? (
+                                <label className="block">
+                                  <div className="mb-1 text-xs text-[var(--text-muted)]">
+                                    Stock sizes that fit (optional)
+                                  </div>
+                                  <select
+                                    aria-label="Stock sizes that fit (optional)"
+                                    value={boxChoice === "stock" ? prefillPackagingSku : ""}
+                                    onChange={(e) => {
+                                      const sku = e.target.value;
+                                      if (sku) {
+                                        setBoxChoice("stock");
+                                        setPrefillPackagingSku(sku);
+                                      } else {
+                                        setBoxChoice("custom");
+                                        setPrefillPackagingSku("");
+                                      }
+                                    }}
+                                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                  >
+                                    <option value="">Use my size ({normalizeDims3(boxLNum, boxWNum, boxDNum)} in)</option>
+                                    {stockCandidates.map((c) => (
+                                      <option key={c.sku} value={c.sku}>
+                                        {(c.description || c.sku) +
+                                          ` — inside ${c.inside_length_in} x ${c.inside_width_in} x ${c.inside_height_in} in`}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ) : null}
                             </div>
                           )}
                         </div>
