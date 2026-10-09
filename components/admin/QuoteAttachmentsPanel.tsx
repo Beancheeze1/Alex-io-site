@@ -15,6 +15,7 @@ type Attachment = {
   filename: string;
   content_type: string | null;
   size_bytes: number | null;
+  kind?: string | null; // 'artwork' for print artwork (Corrugated Step 6)
 };
 
 const HIDDEN_FILENAMES = new Set(["forge_faces.json", "forge_manifest.json"]);
@@ -119,6 +120,22 @@ export default function QuoteAttachmentsPanel({ quoteNo }: { quoteNo: string }) 
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 500, color: "#111827", overflowWrap: "anywhere" }}>
                   {a.filename}
+                  {a.kind === "artwork" && (
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        padding: "1px 7px",
+                        borderRadius: 999,
+                        border: "1px solid #a7f3d0",
+                        background: "#ecfdf5",
+                        color: "#047857",
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Artwork
+                    </span>
+                  )}
                 </div>
                 <div style={{ color: "#6b7280", fontSize: 11 }}>
                   {[a.content_type, formatSize(a.size_bytes)].filter(Boolean).join(" • ")}

@@ -30,6 +30,7 @@ import ProgressRail, {
 import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
+import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 type BoxStyle = "mailer" | "rsc";
@@ -332,6 +333,9 @@ export default function RepStartQuoteModal({
   // Per-color printing (Corrugated Step 3B); `printed` kept in sync.
   const [printColors, setPrintColors] = React.useState<("spot" | "flood")[]>([]);
   const [printSides, setPrintSides] = React.useState<1 | 2>(1);
+  // Print artwork (Step 6): uploaded right after POST /api/quotes creates the quote.
+  const [artworkFiles, setArtworkFiles] = React.useState<File[]>([]);
+  const [artworkNote, setArtworkNote] = React.useState<string | null>(null);
   const setPrintColorCount = (n: number) => {
     setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
     setPrinted(n > 0);
@@ -591,6 +595,8 @@ export default function RepStartQuoteModal({
     setCompletedSteps(new Set());
     setSubmitError("");
     setCustomerName("");
+    setArtworkFiles([]);
+    setArtworkNote(null);
     setEmail("");
     setPhone("");
     setSalesRepSlug("");
@@ -682,6 +688,14 @@ export default function RepStartQuoteModal({
       const json = await createRes.json().catch(() => null);
       if (!createRes.ok || !json?.ok) {
         throw new Error(json?.error || "Failed to create quote.");
+      }
+
+      // Print artwork (Step 6): the quote row exists now, so attach the files
+      // before opening the editor / admin page. Failures don't block the quote;
+      // they can be re-uploaded from the quote page.
+      if (quoteType !== "foam_insert" && printColors.length > 0 && artworkFiles.length > 0) {
+        const up = await uploadArtwork(quote_no, artworkFiles);
+        if (up.failed.length) console.warn("[rep-start-quote] artwork upload issues", up.failed);
       }
 
       // Boxes only (Corrugated Step 4): price the boxes on the quote just
@@ -1755,6 +1769,40 @@ export default function RepStartQuoteModal({
                           </>
                         )}
                       </div>
+
+                      {quoteType !== "foam_insert" && printColors.length > 0 ? (
+                        <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            ARTWORK (OPTIONAL)
+                          </div>
+                          <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                            Attach the customer&apos;s print art. PDF, AI or EPS print best; PNG, JPG, TIFF and SVG also work. Up to 8 MB each.
+                          </div>
+                          <input
+                            type="file"
+                            multiple
+                            accept={ARTWORK_ACCEPT}
+                            aria-label="Artwork files"
+                            onChange={(e) => {
+                              const picked = Array.from(e.target.files || []);
+                              const problems = picked
+                                .map((f) => artworkProblem(f.name, f.size))
+                                .filter((p): p is string => !!p);
+                              setArtworkFiles(picked.filter((f) => !artworkProblem(f.name, f.size)));
+                              setArtworkNote(problems.length ? problems.join(" ") : null);
+                            }}
+                            className="mt-2 block w-full text-sm text-[var(--text-secondary)]"
+                          />
+                          {artworkFiles.length > 0 ? (
+                            <div className="mt-1 text-xs text-[var(--text-muted)]">
+                              {artworkFiles.map((f) => f.name).join(", ")}
+                            </div>
+                          ) : null}
+                          {artworkNote ? (
+                            <div className="mt-1 text-sm text-[var(--attention)]">{artworkNote}</div>
+                          ) : null}
+                        </div>
+                      ) : null}
 
                       {quoteType !== "boxes_only" && cavityBuild.incompleteRowIds.size > 0 ? (
                         <div className="mt-4 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]">

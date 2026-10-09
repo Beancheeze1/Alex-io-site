@@ -1221,6 +1221,30 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     };
   }, [quoteNoValue, hasCustomRsc]);
 
+  // Boxes only (Corrugated Step 6): the buyer's compare quantities, read-only.
+  // /api/quote/box-breaks returns [] for quotes that aren't boxes-only.
+  const [adminBoxBreaks, setAdminBoxBreaks] = React.useState<
+    { qty: number; boxes_usd: number | null; plates_usd: number; total_usd: number | null; unit_usd: number | null }[]
+  >([]);
+  const [adminBoxBreaksCurrent, setAdminBoxBreaksCurrent] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (!quoteNoValue) return;
+    let cancelled = false;
+    fetch("/api/quote/box-breaks?quote_no=" + encodeURIComponent(quoteNoValue), { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j?.ok) return;
+        setAdminBoxBreaks(Array.isArray(j.breaks) ? j.breaks : []);
+        setAdminBoxBreaksCurrent(
+          j.current_qty != null && Number.isFinite(Number(j.current_qty)) ? Number(j.current_qty) : null,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteNoValue]);
+
   async function changeBoardGrade(gradeId: number) {
     if (!quoteNoValue) return;
     setGradeSaving(true);
@@ -3390,6 +3414,48 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </table>
               )}
             </div>
+
+            {/* Boxes only: buyer's compare quantities (Corrugated Step 6) */}
+            {adminBoxBreaks.length > 1 && (
+              <div style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
+                  Price by quantity (buyer&apos;s compare quantities)
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Per box</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Plates</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
+                      <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminBoxBreaks.map((b) => (
+                      <tr
+                        key={b.qty}
+                        style={{ color: "var(--text-primary)", fontWeight: adminBoxBreaksCurrent === b.qty ? 600 : 400 }}
+                      >
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{b.qty.toLocaleString("en-US")}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", fontSize: 11, color: "var(--text-muted)" }}>
+                          {adminBoxBreaksCurrent === b.qty ? "On quote" : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <p style={{ marginTop: 24, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
               Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use the public /quote link in their email.

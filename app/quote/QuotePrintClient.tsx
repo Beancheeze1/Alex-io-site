@@ -29,6 +29,7 @@ import { useSearchParams } from "next/navigation";
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { isDemoQuoteNo } from "@/lib/quote-no";
+import { ARTWORK_ACCEPT, uploadArtwork } from "@/lib/artwork";
 
 type QuoteRow = {
   id: number;
@@ -1330,6 +1331,60 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     } finally {
       setBoxBreakBusy(null);
     }
+  };
+
+  // Print artwork (Corrugated Step 6): shown for any printed quote.
+  const [artwork, setArtwork] = React.useState<
+    { id: number; filename: string; size_bytes: number | null; url: string }[]
+  >([]);
+  const [artworkBusy, setArtworkBusy] = React.useState<boolean>(false);
+  const [artworkMsg, setArtworkMsg] = React.useState<string | null>(null);
+
+  const loadArtwork = React.useCallback(async () => {
+    if (!quoteNo) return;
+    try {
+      const res = await fetch(`/api/quote/artwork?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" });
+      const j = await res.json().catch(() => null);
+      if (j?.ok) setArtwork(Array.isArray(j.files) ? j.files : []);
+    } catch {
+      // leave the list as is
+    }
+  }, [quoteNo]);
+
+  React.useEffect(() => {
+    if (isPrinted && !isDemo) loadArtwork();
+  }, [isPrinted, isDemo, loadArtwork]);
+
+  const onArtworkPicked = async (list: FileList | null) => {
+    const files = Array.from(list || []);
+    if (!files.length || !quoteNo) return;
+    setArtworkBusy(true);
+    setArtworkMsg(null);
+    const r = await uploadArtwork(quoteNo, files);
+    setArtworkBusy(false);
+    setArtworkMsg(
+      r.failed.length
+        ? r.failed.join(" ")
+        : `${r.ok} file${r.ok === 1 ? "" : "s"} uploaded.`,
+    );
+    loadArtwork();
+  };
+
+  const removeArtwork = async (id: number) => {
+    if (!quoteNo) return;
+    setArtworkMsg(null);
+    try {
+      const res = await fetch("/api/quote/artwork", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNo, id }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) setArtworkMsg(j?.message || "We couldn't remove that file.");
+    } catch {
+      setArtworkMsg("We couldn't remove that file.");
+    }
+    loadArtwork();
   };
 
 // Planning notes from layout (strip [REV:X] tags for customer view)
@@ -3347,6 +3402,99 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 </>
               )}
             </div>
+
+            {/* Print artwork for printed boxes / mailers, every flow (Corrugated Step 6) */}
+            {isPrinted && !isDemo && !!quoteNo && (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Artwork for printing</div>
+                <div style={{ ...cardBase, background: "var(--surface-card)" }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 0 }}>
+                    Upload the art for your printed box. PDF, AI or EPS (vector) files print best; PNG, JPG, TIFF and SVG also work. Up to 8 MB per file.
+                  </p>
+
+                  {artwork.length === 0 ? (
+                    <p style={{ color: "var(--text-muted)", fontSize: 13 }}>No artwork uploaded yet.</p>
+                  ) : (
+                    <ul style={{ listStyle: "none", padding: 0, margin: "8px 0" }}>
+                      {artwork.map((a) => (
+                        <li
+                          key={a.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            padding: "6px 0",
+                            borderBottom: "1px solid var(--surface-subtle)",
+                            fontSize: 13,
+                          }}
+                        >
+                          <span style={{ color: "var(--text-primary)", overflowWrap: "anywhere" }}>
+                            {a.filename}
+                            {a.size_bytes != null ? (
+                              <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                                {" "}· {a.size_bytes < 1024 * 1024 ? `${Math.max(1, Math.round(a.size_bytes / 1024))} KB` : `${(a.size_bytes / (1024 * 1024)).toFixed(1)} MB`}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span style={{ display: "inline-flex", gap: 8, flexShrink: 0 }}>
+                            <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--text-primary)" }}>
+                              View
+                            </a>
+                            {!quote?.locked && (
+                              <button
+                                type="button"
+                                onClick={() => removeArtwork(a.id)}
+                                style={{ fontSize: 12, color: "var(--text-muted)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {quote?.locked ? (
+                    <p style={{ color: "var(--text-muted)", fontSize: 12 }}>This quote is locked. Email any artwork changes to us.</p>
+                  ) : (
+                    <label
+                      style={{
+                        display: "inline-block",
+                        marginTop: 4,
+                        padding: "6px 12px",
+                        borderRadius: 8,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface-card)",
+                        color: "var(--text-primary)",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: artworkBusy ? "default" : "pointer",
+                        opacity: artworkBusy ? 0.6 : 1,
+                      }}
+                    >
+                      {artworkBusy ? "Uploading…" : "Upload artwork"}
+                      <input
+                        type="file"
+                        multiple
+                        accept={ARTWORK_ACCEPT}
+                        disabled={artworkBusy}
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          onArtworkPicked(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
+
+                  {artworkMsg ? (
+                    <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 8 }}>{artworkMsg}</p>
+                  ) : null}
+                </div>
+              </div>
+            )}
 
             {/* Boxes only: price at each buyer-picked quantity (Corrugated Step 5) */}
             {isBoxesOnly && boxBreaks.length > 1 && (

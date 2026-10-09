@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     // quote_attachments has no tenant_id of its own, so scope through quotes.
     const rows = (await q<Row>(
       `
-      SELECT qa.id, qa.filename, qa.content_type, qa.size_bytes
+      SELECT qa.id, qa.filename, qa.content_type, qa.size_bytes, qa.kind
       FROM public.quote_attachments AS qa
       JOIN public."quotes" AS quo
         ON quo.id = qa.quote_id

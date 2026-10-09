@@ -20,6 +20,7 @@ import ProgressRail, {
 import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
+import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 type BoxStyle = "mailer" | "rsc";
@@ -398,6 +399,9 @@ export default function StartQuoteModal({
   const [boBusy, setBoBusy] = React.useState<boolean>(false);
   // Up to 3 more quantities to compare on the quote (Corrugated Step 5).
   const [boBreaks, setBoBreaks] = React.useState<string[]>(["", "", ""]);
+  // Print artwork picked on the review step; uploaded once the quote exists (Step 6).
+  const [boArtwork, setBoArtwork] = React.useState<File[]>([]);
+  const [boArtworkNote, setBoArtworkNote] = React.useState<string | null>(null);
   const [boError, setBoError] = React.useState<string | null>(null);
 
   // ---------- Seed all state from prefillData once it resolves ----------
@@ -1247,6 +1251,11 @@ export default function StartQuoteModal({
       if (!res.ok || !j?.ok) {
         setBoError(j?.message || `We couldn't save your quote (HTTP ${res.status}). Please try again.`);
         return;
+      }
+      if (printColors.length > 0 && boArtwork.length > 0) {
+        // Upload after the quote exists. Anything that fails can be re-uploaded
+        // from the quote page's "Artwork for printing" card.
+        await uploadArtwork(j.quote_no, boArtwork);
       }
       router.push(`/quote?quote_no=${encodeURIComponent(j.quote_no)}`);
     } catch (e: any) {
@@ -2142,6 +2151,40 @@ export default function StartQuoteModal({
                             ))}
                           </div>
                         </div>
+
+                        {printColors.length > 0 ? (
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                              ARTWORK (OPTIONAL)
+                            </div>
+                            <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                              Have your print art ready? Attach it here. PDF, AI or EPS print best; PNG, JPG, TIFF and SVG also work. Up to 8 MB each. You can also add it later from your quote.
+                            </div>
+                            <input
+                              type="file"
+                              multiple
+                              accept={ARTWORK_ACCEPT}
+                              aria-label="Artwork files"
+                              onChange={(e) => {
+                                const picked = Array.from(e.target.files || []);
+                                const problems = picked
+                                  .map((f) => artworkProblem(f.name, f.size))
+                                  .filter((p): p is string => !!p);
+                                setBoArtwork(picked.filter((f) => !artworkProblem(f.name, f.size)));
+                                setBoArtworkNote(problems.length ? problems.join(" ") : null);
+                              }}
+                              className="mt-3 block w-full text-sm text-[var(--text-secondary)]"
+                            />
+                            {boArtwork.length > 0 ? (
+                              <div className="mt-2 text-xs text-[var(--text-muted)]">
+                                {boArtwork.map((f) => f.name).join(", ")}
+                              </div>
+                            ) : null}
+                            {boArtworkNote ? (
+                              <div className="mt-2 text-sm text-[var(--attention)]">{boArtworkNote}</div>
+                            ) : null}
+                          </div>
+                        ) : null}
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
