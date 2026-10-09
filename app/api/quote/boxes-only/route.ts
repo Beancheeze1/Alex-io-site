@@ -40,6 +40,7 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { parsePrintSpec, type PrintSpec } from "@/lib/corrugated-price";
+import { addAdminAlert } from "@/lib/admin-alerts";
 import {
   customSelectionInsert,
   repriceQuoteBoxes,
@@ -261,6 +262,19 @@ export async function POST(req: NextRequest) {
       );
       // Adds the print adder + plates (and records the per-color print fields).
       await repriceQuoteBoxes(quote.id, tenantId, print);
+    }
+
+    // Step 7: alert the shop about a buyer's new quote (rep-made quotes don't alert).
+    if (!isStaff) {
+      await addAdminAlert({
+        tenantId: Number(quote.tenant_id),
+        quoteNo: quote.quote_no,
+        kind: "new_quote",
+        title: "New boxes-only quote",
+        detail: [name, company, `${qty.toLocaleString("en-US")} boxes`, print.colors.length ? "printed" : null]
+          .filter(Boolean)
+          .join(" · "),
+      });
     }
 
     return json({ ok: true, quote_no: quote.quote_no, url: `/quote?quote_no=${encodeURIComponent(quote.quote_no)}` });

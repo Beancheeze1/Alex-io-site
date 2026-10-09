@@ -30,6 +30,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, withTxn } from "@/lib/db";
+import { addAdminAlert } from "@/lib/admin-alerts";
 import {
   customSelectionInsert,
   printSpecForQuote,
@@ -194,6 +195,15 @@ export async function POST(req: NextRequest) {
     const { needs_review, pricing_note, ...publicSelection } = selection as Record<string, unknown>;
     void needs_review;
     void pricing_note;
+    await addAdminAlert({
+      req,
+      tenantId: quote.tenant_id,
+      quoteNo: quote.quote_no,
+      kind: "buyer_change",
+      title: "Custom box added",
+      detail: (selection as any)?.description || null,
+    });
+
     return ok({ ok: true, selection: publicSelection });
   } catch (err: any) {
     console.error("Error in /api/boxes/add-custom-to-quote", err);

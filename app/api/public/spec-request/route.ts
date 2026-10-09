@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q, withTxn } from "@/lib/db";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { escapeHtml, sendHtmlEmail } from "@/lib/email/send-html";
+import { addAdminAlert } from "@/lib/admin-alerts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -208,6 +209,14 @@ ${row("Name", name)}${row("Company", company)}${row("Email", email)}${row("Phone
   } catch (err: any) {
     console.error("[spec-request] post-save email step failed:", requestId, err);
   }
+
+  await addAdminAlert({
+    tenantId: Number(tenant.id),
+    kind: "spec_request",
+    title: "New spec request",
+    detail: [name, company].filter(Boolean).join(" · ") || null,
+    link: "/admin/spec-requests",
+  });
 
   return NextResponse.json({ ok: true, id: requestId }, { status: 201 });
 }

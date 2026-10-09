@@ -21,6 +21,7 @@ import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { ARTWORK_CONTENT_TYPES, ARTWORK_MAX_FILES, artworkExt, artworkProblem } from "@/lib/artwork";
+import { addAdminAlert } from "@/lib/admin-alerts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -159,6 +160,16 @@ export async function POST(req: NextRequest) {
       [quote.id, quote.quote_no, cleanFilename(file.name), contentType, buf.length, buf],
     );
     if (!row) return bad("server_error", "We couldn't save the file. Please try again.", 500);
+
+    if (!staff) {
+      await addAdminAlert({
+        tenantId: Number(quote.tenant_id),
+        quoteNo: quote.quote_no,
+        kind: "artwork",
+        title: "Artwork uploaded",
+        detail: row.filename,
+      });
+    }
 
     return json({ ok: true, file: fileOut(row, quote.quote_no) }, 201);
   } catch (e) {

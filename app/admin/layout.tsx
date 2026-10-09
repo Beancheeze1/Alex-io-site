@@ -12,6 +12,7 @@ import { headers } from "next/headers";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import LogoutButton from "@/components/LogoutButton";
+import AdminAlertsBell from "@/components/admin/AdminAlertsBell";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -190,6 +191,7 @@ export default async function AdminLayout({ children }: Props) {
         </div>
 
         <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)]">
+          <AdminAlertsBell />
           <span>{user.name || user.email}</span>
           <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
             {user.role}

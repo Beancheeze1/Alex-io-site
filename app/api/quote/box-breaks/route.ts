@@ -22,6 +22,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { parsePrintSpec } from "@/lib/corrugated-price";
+import { addAdminAlert } from "@/lib/admin-alerts";
 import { priceQuoteBoxesAtQtys, repriceQuoteBoxes } from "@/app/lib/packaging-selection";
 
 export const runtime = "nodejs";
@@ -127,6 +128,15 @@ export async function POST(req: NextRequest) {
     await q(`UPDATE public.quote_box_selections SET qty = $2 WHERE quote_id = $1`, [quote.id, qty]);
     await saveFacts(quoteNo, { ...facts, qty });
     await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), parsePrintSpec(facts.print_spec));
+
+    await addAdminAlert({
+      req,
+      tenantId: Number(quote.tenant_id),
+      quoteNo,
+      kind: "buyer_change",
+      title: `Quantity changed to ${qty.toLocaleString("en-US")}`,
+      detail: "The buyer switched to one of their compare quantities.",
+    });
 
     return json({ ok: true, qty });
   } catch (e) {

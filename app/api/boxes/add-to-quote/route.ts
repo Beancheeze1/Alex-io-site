@@ -30,6 +30,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
+import { addAdminAlert } from "@/lib/admin-alerts";
 import {
   printSpecForQuote,
   repriceQuoteBoxes,
@@ -440,6 +441,15 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+
+    await addAdminAlert({
+      req,
+      tenantId: quote.tenant_id,
+      quoteNo: quote.quote_no,
+      kind: "buyer_change",
+      title: "Box added",
+      detail: (pricedSelection as any)?.description || (pricedSelection as any)?.sku || null,
+    });
 
     return ok({
       ok: true,

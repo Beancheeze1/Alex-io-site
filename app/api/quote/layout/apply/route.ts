@@ -60,6 +60,7 @@ import { resolveTenantFromHost } from "@/lib/tenant";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { findOrCreateCustomer } from "@/app/lib/customers";
+import { addAdminAlert } from "@/lib/admin-alerts";
 import {
   buildLayoutExports,
   computeGeometryHash,
@@ -338,7 +339,19 @@ async function ensureQuoteHeader(args: {
     `,
     [args.quoteNo, args.tenantId],
   );
-  if (existing) return existing;
+  if (existing) {
+    // Step 7: a logged-out buyer re-applied a layout on an existing quote.
+    if (!args.currentUserId) {
+      await addAdminAlert({
+        tenantId: args.tenantId,
+        quoteNo: args.quoteNo,
+        kind: "buyer_change",
+        title: "Layout applied",
+        detail: "The buyer applied a layout in the editor.",
+      });
+    }
+    return existing;
+  }
 
   const customer = await findOrCreateCustomer(args.tenantId, {
     name: args.customerName,
@@ -348,6 +361,16 @@ async function ensureQuoteHeader(args: {
   });
 
   async function linkCustomerAndReturn(row: QuoteRow): Promise<QuoteRow> {
+    // Step 7: a new quote header was just created by a buyer's first Apply.
+    if (!args.currentUserId) {
+      await addAdminAlert({
+        tenantId: args.tenantId,
+        quoteNo: row.quote_no,
+        kind: "new_quote",
+        title: "New quote",
+        detail: [args.customerName, args.customerCompany].filter(Boolean).join(" · ") || "Web lead",
+      });
+    }
     if (customer?.id) {
       try {
         await q(`update quotes set customer_id = $1 where id = $2`, [customer.id, row.id]);

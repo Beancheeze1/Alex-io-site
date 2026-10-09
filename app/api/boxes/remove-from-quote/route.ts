@@ -18,6 +18,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
+import { addAdminAlert } from "@/lib/admin-alerts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -165,6 +166,16 @@ try {
   console.warn("[boxes/remove-from-quote] carton shadow cleanup skipped", err);
 }
 
+
+    if (deletedCount > 0) {
+      await addAdminAlert({
+        req,
+        quoteNo: quote.quote_no,
+        kind: "buyer_change",
+        title: "Box removed",
+        detail: sku ? `Removed ${sku}` : "A box was removed from the quote.",
+      });
+    }
 
     return NextResponse.json({
       ok: true,
