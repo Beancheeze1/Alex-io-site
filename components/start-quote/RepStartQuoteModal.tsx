@@ -31,6 +31,12 @@ import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
+import BoxSizesEditor, {
+  describeExtraSize,
+  extraSizePayload,
+  extraSizesProblem,
+  type ExtraBoxSize,
+} from "@/components/start-quote/BoxSizesEditor";
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 type BoxStyle = "mailer" | "rsc";
@@ -336,6 +342,9 @@ export default function RepStartQuoteModal({
   // Print artwork (Step 6): uploaded right after POST /api/quotes creates the quote.
   const [artworkFiles, setArtworkFiles] = React.useState<File[]>([]);
   const [artworkNote, setArtworkNote] = React.useState<string | null>(null);
+  // Step 9B: sizes 2..10 on a boxes-only quote. Size 1 is the box fields.
+  const [extraSizes, setExtraSizes] = React.useState<ExtraBoxSize[]>([]);
+  const extraPrinted = quoteType === "boxes_only" && extraSizes.some((s) => s.colors.length > 0);
   const setPrintColorCount = (n: number) => {
     setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
     setPrinted(n > 0);
@@ -597,6 +606,7 @@ export default function RepStartQuoteModal({
     setCustomerName("");
     setArtworkFiles([]);
     setArtworkNote(null);
+    setExtraSizes([]);
     setEmail("");
     setPhone("");
     setSalesRepSlug("");
@@ -656,6 +666,15 @@ export default function RepStartQuoteModal({
       return;
     }
 
+    if (quoteType === "boxes_only" && extraSizes.length > 0) {
+      const sizeProblem = extraSizesProblem(extraSizes);
+      if (sizeProblem || !toNumOrNull(qty)) {
+        setSubmitError(sizeProblem || "Enter a quantity for size 1.");
+        if (sizeProblem) setActiveStep("specs");
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const quote_no = await fetchNewQuoteNo("R");
@@ -693,7 +712,7 @@ export default function RepStartQuoteModal({
       // Print artwork (Step 6): the quote row exists now, so attach the files
       // before opening the editor / admin page. Failures don't block the quote;
       // they can be re-uploaded from the quote page.
-      if (quoteType !== "foam_insert" && printColors.length > 0 && artworkFiles.length > 0) {
+      if (quoteType !== "foam_insert" && (printColors.length > 0 || extraPrinted) && artworkFiles.length > 0) {
         const up = await uploadArtwork(quote_no, artworkFiles);
         if (up.failed.length) console.warn("[rep-start-quote] artwork upload issues", up.failed);
       }
@@ -701,35 +720,58 @@ export default function RepStartQuoteModal({
       // Boxes only (Corrugated Step 4): price the boxes on the quote just
       // created, then open it on the admin quote page. No layout editor.
       if (quoteType === "boxes_only") {
-        const boRes = await fetch("/api/quote/boxes-only", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            quote_no,
-            sales_rep_slug: salesRepSlug.trim() || null,
-            customer: {
-              name: customerName.trim(),
-              email: email.trim() || null,
-              phone: phone.trim() || null,
-            },
-            qty: toNumOrNull(qty),
-            box:
-              boxChoice === "stock" && selectedStockSku
-                ? { sku: selectedStockSku }
-                : {
-                    L: toNumOrNull(boxL),
-                    W: toNumOrNull(boxW),
-                    D: toNumOrNull(boxD),
-                    style: boxStyle,
-                    grade_id: boxStyle === "rsc" && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
-                  },
-            print_spec: { colors: printColors, sides: printSides },
-            // Step 5: the rep's qty breaks become the quote's compare quantities
-            // (their price column is for foam and is ignored for boxes).
-            qty_breaks: cleanBreaks.map((b) => b.qty),
-            notes: customerNotes.trim() || null,
-          }),
-        });
+        const size1Box =
+          boxChoice === "stock" && selectedStockSku
+            ? { sku: selectedStockSku }
+            : {
+                L: toNumOrNull(boxL),
+                W: toNumOrNull(boxW),
+                D: toNumOrNull(boxD),
+                style: boxStyle,
+                grade_id: boxStyle === "rsc" && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
+              };
+        const repCustomer = {
+          name: customerName.trim(),
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+        };
+        const boRes =
+          extraSizes.length > 0
+            ? await fetch("/api/quote/boxes-only/multi", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  quote_no,
+                  sales_rep_slug: salesRepSlug.trim() || null,
+                  customer: repCustomer,
+                  notes: customerNotes.trim() || null,
+                  boxes: [
+                    {
+                      qty: toNumOrNull(qty),
+                      ...size1Box,
+                      print_spec: { colors: printColors, sides: printSides },
+                      qty_breaks: cleanBreaks.map((b) => b.qty),
+                    },
+                    ...extraSizes.map(extraSizePayload),
+                  ],
+                }),
+              })
+            : await fetch("/api/quote/boxes-only", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  quote_no,
+                  sales_rep_slug: salesRepSlug.trim() || null,
+                  customer: repCustomer,
+                  qty: toNumOrNull(qty),
+                  box: size1Box,
+                  print_spec: { colors: printColors, sides: printSides },
+                  // Step 5: the rep's qty breaks become the quote's compare quantities
+                  // (their price column is for foam and is ignored for boxes).
+                  qty_breaks: cleanBreaks.map((b) => b.qty),
+                  notes: customerNotes.trim() || null,
+                }),
+              });
         const bo = await boRes.json().catch(() => null);
         if (!boRes.ok || !bo?.ok) {
           throw new Error(bo?.message || bo?.error || "Failed to price the boxes.");
@@ -1385,6 +1427,30 @@ export default function RepStartQuoteModal({
                             </div>
                           ) : null}
 
+                          {quoteType === "boxes_only" ? (
+                            <div className="mt-6">
+                              <BoxSizesEditor
+                                sizes={extraSizes}
+                                onChange={setExtraSizes}
+                                grades={boxGrades}
+                                gradeDefaultLabel="Shop default"
+                                seed={() => ({
+                                  style: boxStyle,
+                                  gradeId: boxGradeId,
+                                  colors: [...printColors],
+                                  sides: printSides,
+                                })}
+                                size1Summary={
+                                  boxChoice === "stock" && selectedStockSku
+                                    ? `stock ${selectedStockSku}${qty ? `, qty ${qty}` : ""}`
+                                    : toNumOrNull(boxL) && toNumOrNull(boxW) && toNumOrNull(boxD)
+                                      ? `${boxL} x ${boxW} x ${boxD} in ${boxStyle.toUpperCase()}${qty ? `, qty ${qty}` : ""}`
+                                      : undefined
+                                }
+                              />
+                            </div>
+                          ) : null}
+
                           {quoteType === "complete_pack" && foamConfig === "bottom_top" ? (
                             <label className="mt-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                               <input
@@ -1755,6 +1821,13 @@ export default function RepStartQuoteModal({
                                   : "No print"
                               }
                             />
+                            {extraSizes.map((s, i) => (
+                              <ReviewRow
+                                key={s.key}
+                                label={`Size ${i + 2}`}
+                                value={describeExtraSize(s, boxGrades, "Shop default")}
+                              />
+                            ))}
                           </>
                         ) : (
                           <>
@@ -1770,7 +1843,7 @@ export default function RepStartQuoteModal({
                         )}
                       </div>
 
-                      {quoteType !== "foam_insert" && printColors.length > 0 ? (
+                      {quoteType !== "foam_insert" && (printColors.length > 0 || extraPrinted) ? (
                         <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             ARTWORK (OPTIONAL)

@@ -21,6 +21,12 @@ import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
+import BoxSizesEditor, {
+  describeExtraSize,
+  extraSizePayload,
+  extraSizesProblem,
+  type ExtraBoxSize,
+} from "@/components/start-quote/BoxSizesEditor";
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 type BoxStyle = "mailer" | "rsc";
@@ -406,6 +412,11 @@ export default function StartQuoteModal({
   const [boArtwork, setBoArtwork] = React.useState<File[]>([]);
   const [boArtworkNote, setBoArtworkNote] = React.useState<string | null>(null);
   const [boError, setBoError] = React.useState<string | null>(null);
+  // Step 9B: sizes 2..10 on a boxes-only quote. Size 1 is the box fields above.
+  const [extraSizes, setExtraSizes] = React.useState<ExtraBoxSize[]>([]);
+  const extraSizesProblemText = extraSizesProblem(extraSizes);
+  const extraSizesOk = !extraSizesProblemText;
+  const boAnyPrinted = printColors.length > 0 || extraSizes.some((s) => s.colors.length > 0);
 
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
@@ -841,7 +852,7 @@ export default function StartQuoteModal({
     }
 
     if (quoteType === "boxes_only") {
-      if (step === "box" || step === "rev") return qtyOk && boxOk;
+      if (step === "box" || step === "rev") return qtyOk && boxOk && extraSizesOk;
       return qtyOk;
     }
 
@@ -1206,6 +1217,10 @@ export default function StartQuoteModal({
   // ---------- Boxes only: create + price the quote, then show it ----------
   const onSubmitBoxesOnly = async () => {
     if (!qtyOk || !boxOk || boBusy) return;
+    if (!extraSizesOk) {
+      setBoError(extraSizesProblemText);
+      return;
+    }
     const name = boName.trim();
     const email = boEmail.trim();
     if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -1224,38 +1239,65 @@ export default function StartQuoteModal({
         ""
       ).trim();
       const tenantSlug = (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase();
-      const res = await fetch("/api/quote/boxes-only", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          quote_no,
-          tenant_slug: tenantSlug || null,
-          quote_source: quoteSource || null,
-          sales_rep_slug: salesSlug || null,
-          customer: { name, email, company: boCompany.trim() || null, phone: boPhone.trim() || null },
-          qty: qtyNum,
-          box: prefillPackagingSku.trim()
-            ? { sku: prefillPackagingSku.trim() }
-            : {
-                L: boxLNum,
-                W: boxWNum,
-                D: boxDNum,
-                style: boxStyle,
-                grade_id: customRscBox && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
-              },
-          print_spec: { colors: printColors, sides: printSides },
-          qty_breaks: boBreaks
-            .map((s) => Number(s.trim()))
-            .filter((n) => Number.isInteger(n) && n > 0),
-          notes: customerNotes.trim() || null,
-        }),
-      });
+      // Size 1 = the box fields; Step 9B extra sizes go to /multi with it.
+      const size1Box = prefillPackagingSku.trim()
+        ? { sku: prefillPackagingSku.trim() }
+        : {
+            L: boxLNum,
+            W: boxWNum,
+            D: boxDNum,
+            style: boxStyle,
+            grade_id: customRscBox && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
+          };
+      const size1Breaks = boBreaks
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      const boCustomer = { name, email, company: boCompany.trim() || null, phone: boPhone.trim() || null };
+      const res =
+        extraSizes.length > 0
+          ? await fetch("/api/quote/boxes-only/multi", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                quote_no,
+                tenant_slug: tenantSlug || null,
+                quote_source: quoteSource || null,
+                sales_rep_slug: salesSlug || null,
+                customer: boCustomer,
+                notes: customerNotes.trim() || null,
+                boxes: [
+                  {
+                    qty: qtyNum,
+                    ...size1Box,
+                    print_spec: { colors: printColors, sides: printSides },
+                    qty_breaks: size1Breaks,
+                  },
+                  ...extraSizes.map(extraSizePayload),
+                ],
+              }),
+            })
+          : await fetch("/api/quote/boxes-only", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                quote_no,
+                tenant_slug: tenantSlug || null,
+                quote_source: quoteSource || null,
+                sales_rep_slug: salesSlug || null,
+                customer: boCustomer,
+                qty: qtyNum,
+                box: size1Box,
+                print_spec: { colors: printColors, sides: printSides },
+                qty_breaks: size1Breaks,
+                notes: customerNotes.trim() || null,
+              }),
+            });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) {
         setBoError(j?.message || `We couldn't save your quote (HTTP ${res.status}). Please try again.`);
         return;
       }
-      if (printColors.length > 0 && boArtwork.length > 0) {
+      if (boAnyPrinted && boArtwork.length > 0) {
         // Upload after the quote exists. Anything that fails can be re-uploaded
         // from the quote page's "Artwork for printing" card.
         await uploadArtwork(j.quote_no, boArtwork);
@@ -1693,6 +1735,28 @@ export default function StartQuoteModal({
                           ) : null}
                         </div>
 
+                        {quoteType === "boxes_only" ? (
+                          <BoxSizesEditor
+                            sizes={extraSizes}
+                            onChange={setExtraSizes}
+                            grades={boxGrades}
+                            gradeDefaultLabel="Not sure — recommend one"
+                            seed={() => ({
+                              style: boxStyle,
+                              gradeId: boxGradeId,
+                              colors: [...printColors],
+                              sides: printSides,
+                            })}
+                            size1Summary={
+                              prefillPackagingSku.trim()
+                                ? `stock box ${prefillPackagingSku.trim()}${qtyNum ? `, qty ${qtyNum}` : ""}`
+                                : normalizeDims3(boxLNum, boxWNum, boxDNum)
+                                  ? `${normalizeDims3(boxLNum, boxWNum, boxDNum)} in ${boxStyle.toUpperCase()}${qtyNum ? `, qty ${qtyNum}` : ""}`
+                                  : undefined
+                            }
+                          />
+                        ) : null}
+
                         {quoteType === "complete_pack" ? (
                           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                             <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
@@ -2120,12 +2184,21 @@ export default function StartQuoteModal({
                               }
                             />
                             <Row k="Qty" v={qtyNum ? String(qtyNum) : "(missing)"} />
+                            {extraSizes.map((s, i) => (
+                              <Row
+                                key={s.key}
+                                k={`Size ${i + 2}`}
+                                v={describeExtraSize(s, boxGrades, "Recommended by the shop")}
+                              />
+                            ))}
                           </div>
                         </div>
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                            COMPARE OTHER QUANTITIES (OPTIONAL)
+                            {extraSizes.length > 0
+                              ? "COMPARE OTHER QUANTITIES FOR SIZE 1 (OPTIONAL)"
+                              : "COMPARE OTHER QUANTITIES (OPTIONAL)"}
                           </div>
                           <div className="mt-1 text-sm text-[var(--text-secondary)]">
                             Add up to 3 more quantities. Your quote will show the price at each one, and you can switch to any of them.
@@ -2149,7 +2222,7 @@ export default function StartQuoteModal({
                           </div>
                         </div>
 
-                        {printColors.length > 0 ? (
+                        {boAnyPrinted ? (
                           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                             <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                               ARTWORK (OPTIONAL)
@@ -2257,10 +2330,10 @@ export default function StartQuoteModal({
                           <button
                             type="button"
                             onClick={onSubmitBoxesOnly}
-                            disabled={!qtyOk || !boxOk || boBusy}
+                            disabled={!qtyOk || !boxOk || !extraSizesOk || boBusy}
                             className={[
                               "rounded-md px-6 py-3 text-sm font-medium",
-                              qtyOk && boxOk && !boBusy
+                              qtyOk && boxOk && extraSizesOk && !boBusy
                                 ? "bg-[var(--action-primary)] text-white hover:bg-[var(--action-primary-hover)]"
                                 : "cursor-not-allowed bg-[var(--action-primary)]/30 text-white/60",
                             ].join(" ")}
