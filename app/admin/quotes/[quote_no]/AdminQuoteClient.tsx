@@ -1227,6 +1227,15 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
     { qty: number; boxes_usd: number | null; plates_usd: number; total_usd: number | null; unit_usd: number | null }[]
   >([]);
   const [adminBoxBreaksCurrent, setAdminBoxBreaksCurrent] = React.useState<number | null>(null);
+  // Step 9A: per-size compare quantities on multi-size quotes.
+  const [adminBoxBreakGroups, setAdminBoxBreakGroups] = React.useState<
+    {
+      id: number;
+      description: string | null;
+      current_qty: number | null;
+      breaks: { qty: number; boxes_usd: number | null; plates_usd: number; total_usd: number | null; unit_usd: number | null }[];
+    }[]
+  >([]);
   React.useEffect(() => {
     if (!quoteNoValue) return;
     let cancelled = false;
@@ -1235,6 +1244,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
       .then((j) => {
         if (cancelled || !j?.ok) return;
         setAdminBoxBreaks(Array.isArray(j.breaks) ? j.breaks : []);
+        setAdminBoxBreakGroups(Array.isArray(j.boxes) ? j.boxes : []);
         setAdminBoxBreaksCurrent(
           j.current_qty != null && Number.isFinite(Number(j.current_qty)) ? Number(j.current_qty) : null,
         );
@@ -3414,6 +3424,45 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </table>
               )}
             </div>
+
+            {/* Boxes only, several sizes: buyer's compare quantities per size (Step 9A) */}
+            {adminBoxBreakGroups.map((g) => (
+              <div key={g.id} style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
+                  Price by quantity — {g.description || `Box ${g.id}`}
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Per box</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Plates</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
+                      <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.breaks.map((b) => (
+                      <tr key={b.qty} style={{ color: "var(--text-primary)", fontWeight: g.current_qty === b.qty ? 600 : 400 }}>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{b.qty.toLocaleString("en-US")}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", fontSize: 11, color: "var(--text-muted)" }}>
+                          {g.current_qty === b.qty ? "On quote" : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
 
             {/* Boxes only: buyer's compare quantities (Corrugated Step 6) */}
             {adminBoxBreaks.length > 1 && (

@@ -1,20 +1,22 @@
 // app/api/quote/box-breaks/route.ts
 //
-// Boxes-only quantity breaks (Corrugated Step 5).
+// Boxes-only quantity breaks.
 //
-// GET  /api/quote/box-breaks?quote_no=Q-...
-//   -> { ok, current_qty, locked, breaks: BoxBreakPrice[] }
-//   Prices every box on the quote at each saved break (facts.box_qty_breaks).
-//   Read-only. Returns breaks: [] for quotes that aren't boxes-only or have
-//   fewer than 2 breaks.
+// Single-size quotes (Step 5) — quote-level compare quantities in
+// facts.box_qty_breaks, one quote-level print_spec:
+//   GET  -> { ok, current_qty, locked, breaks: BoxBreakPrice[], boxes: [] }
+//   POST { quote_no, qty } switches every box to that saved quantity.
 //
-// POST /api/quote/box-breaks  { quote_no, qty }
-//   Switches the quote to one of its saved breaks: every box row gets the new
-//   qty, facts.qty is saved, and the boxes are repriced (repriceQuoteBoxes).
-//   Only boxes-only quotes, only a saved break, never a locked quote.
+// Multi-size quotes (Step 9A) — facts.print_mode = "per_box"; each box row has
+// its own qty_breaks and print:
+//   GET  -> { ok, current_qty: null, locked, breaks: [], boxes: [{ id, description,
+//            current_qty, breaks: BoxBreakPrice[] }] }  (only sizes with 2+ breaks)
+//   POST { quote_no, qty, box_id } switches only that size to one of its own
+//        saved quantities and reprices that size.
 //
-// The quote page is public by quote number, so both are open to logged-out
-// buyers (rate limited); staff are not limited.
+// Prices are always computed at the shop's current rates. Never for locked
+// quotes (POST). The quote page is public by quote number, so both are open to
+// logged-out buyers (rate limited); staff are not limited.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -38,9 +40,17 @@ function bad(error: string, message: string, status = 400) {
 
 /** Whole numbers 1..10M, unique, ascending, at most 4. */
 function cleanBreaks(raw: unknown): number[] {
-  if (!Array.isArray(raw)) return [];
+  let list: unknown = raw;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = null;
+    }
+  }
+  if (!Array.isArray(list)) return [];
   const set = new Set<number>();
-  for (const v of raw) {
+  for (const v of list) {
     const n = Number(v);
     if (Number.isInteger(n) && n >= 1 && n <= 10_000_000) set.add(n);
   }
@@ -48,6 +58,13 @@ function cleanBreaks(raw: unknown): number[] {
 }
 
 type QuoteRow = { id: number; tenant_id: number; locked: boolean | null };
+
+type BoxRow = {
+  id: number;
+  qty: number | string;
+  description: string | null;
+  qty_breaks: unknown;
+};
 
 async function isStaffRequest(req: NextRequest): Promise<boolean> {
   try {
@@ -74,20 +91,48 @@ export async function GET(req: NextRequest) {
     );
     if (!quote) return bad("not_found", "Quote not found.", 404);
 
+    const empty = { ok: true, current_qty: null, locked: !!quote.locked, breaks: [], boxes: [] };
     const facts = ((await loadFacts(quoteNo)) || {}) as Record<string, any>;
-    if (facts.pack_type !== "boxes_only") return json({ ok: true, current_qty: null, locked: !!quote.locked, breaks: [] });
+    if (facts.pack_type !== "boxes_only") return json(empty);
 
+    // ---- Multi-size: per-size compare quantities ----
+    if (facts.print_mode === "per_box") {
+      const rows = await q<BoxRow>(
+        `SELECT id, qty, description, qty_breaks
+           FROM public.quote_box_selections
+          WHERE quote_id = $1
+          ORDER BY id`,
+        [quote.id],
+      );
+      const boxes = [];
+      for (const r of rows || []) {
+        const breaks = cleanBreaks(r.qty_breaks);
+        if (breaks.length < 2) continue;
+        const prices = await priceQuoteBoxesAtQtys(quote.id, Number(quote.tenant_id), "per_box", breaks, {
+          onlyRowId: Number(r.id),
+        });
+        const cur = Number(r.qty);
+        boxes.push({
+          id: Number(r.id),
+          description: r.description,
+          current_qty: Number.isInteger(cur) && cur > 0 ? cur : null,
+          breaks: prices,
+        });
+      }
+      return json({ ...empty, boxes });
+    }
+
+    // ---- Single size (Step 5) ----
     const breaks = cleanBreaks(facts.box_qty_breaks);
-    if (breaks.length < 2) return json({ ok: true, current_qty: null, locked: !!quote.locked, breaks: [] });
+    if (breaks.length < 2) return json(empty);
 
     const print = parsePrintSpec(facts.print_spec);
     const prices = await priceQuoteBoxesAtQtys(quote.id, Number(quote.tenant_id), print, breaks);
     const current = Number(facts.qty);
 
     return json({
-      ok: true,
+      ...empty,
       current_qty: Number.isInteger(current) && current > 0 ? current : null,
-      locked: !!quote.locked,
       breaks: prices,
     });
   } catch (e) {
@@ -106,6 +151,7 @@ export async function POST(req: NextRequest) {
     const b = (await req.json().catch(() => null)) as Record<string, any> | null;
     const quoteNo = typeof b?.quote_no === "string" ? b.quote_no.trim().slice(0, 40) : "";
     const qty = Number(b?.qty);
+    const boxId = b?.box_id == null ? null : Number(b.box_id);
     if (!quoteNo) return bad("missing_quote_no", "quote_no is required.");
     if (!Number.isInteger(qty) || qty < 1) return bad("invalid_qty", "Pick one of the quantities on your quote.");
 
@@ -122,6 +168,40 @@ export async function POST(req: NextRequest) {
     if (facts.pack_type !== "boxes_only") {
       return bad("not_boxes_only", "Quantity breaks are only available on boxes-only quotes.");
     }
+
+    // ---- Multi-size: switch one size ----
+    if (facts.print_mode === "per_box") {
+      if (boxId == null || !Number.isInteger(boxId) || boxId <= 0) {
+        return bad("missing_box_id", "Pick which box size to change.");
+      }
+      const row = await one<BoxRow>(
+        `SELECT id, qty, description, qty_breaks
+           FROM public.quote_box_selections
+          WHERE id = $1 AND quote_id = $2
+          LIMIT 1`,
+        [boxId, quote.id],
+      );
+      if (!row) return bad("not_found", "That box size isn't on this quote.", 404);
+      if (!cleanBreaks(row.qty_breaks).includes(qty)) {
+        return bad("not_a_break", "Pick one of the quantities for that box size.");
+      }
+
+      await q(`UPDATE public.quote_box_selections SET qty = $2 WHERE id = $1`, [row.id, qty]);
+      await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), "per_box", { onlyRowId: Number(row.id) });
+
+      await addAdminAlert({
+        req,
+        tenantId: Number(quote.tenant_id),
+        quoteNo,
+        kind: "buyer_change",
+        title: `Quantity changed to ${qty.toLocaleString("en-US")}`,
+        detail: row.description ? `${row.description}` : "One box size switched to a compare quantity.",
+      });
+
+      return json({ ok: true, qty, box_id: Number(row.id) });
+    }
+
+    // ---- Single size (Step 5) ----
     const breaks = cleanBreaks(facts.box_qty_breaks);
     if (!breaks.includes(qty)) return bad("not_a_break", "Pick one of the quantities on your quote.");
 

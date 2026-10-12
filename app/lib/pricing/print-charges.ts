@@ -30,6 +30,24 @@ export function computePrintCharges(args: {
   packagingSubtotal: number;
   platesTotal: number;
 }): PrintCharges {
+  // Step 9A: multi-size boxes-only quotes print per size (each box row has its
+  // own print spec and plates); there is no quote-level print_spec.
+  if (args.facts?.print_mode === "per_box") {
+    const plates = Math.round((Number(args.platesTotal) || 0) * 100) / 100;
+    const f = args.facts || {};
+    const printed = plates > 0 || f.printed === 1 || f.printed === "1" || f.printed === true;
+    return {
+      printModel: "per_color",
+      isPrinted: printed,
+      artSetupFee: 0,
+      printingUpchargePct: 0,
+      printingUpchargeAmt: 0,
+      printingUpcharge: plates,
+      platesTotal: plates,
+      printSummary: printed ? "Printed per size (see each box)" : null,
+    };
+  }
+
   const spec = parsePrintSpec(args.facts?.print_spec);
   if (spec) {
     const plates = Math.round((Number(args.platesTotal) || 0) * 100) / 100;

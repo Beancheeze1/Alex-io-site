@@ -137,6 +137,22 @@ function withAdder(
   return { unit, extended: r2(unit * qty) };
 }
 
+/**
+ * Step 9A: a box row's own print spec, from its print_colors / print_sides
+ * columns (per-size printing on multi-size boxes-only quotes).
+ */
+export function rowPrintSpec(colors: unknown, sides: unknown): PrintSpec | null {
+  let list: unknown = colors;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = null;
+    }
+  }
+  return parsePrintSpec({ colors: Array.isArray(list) ? list : [], sides: Number(sides) === 2 ? 2 : 1 });
+}
+
 function printFields(print: PrintSpec | null, adder: PrintAdderResult | null, plates: number | null): PrintFields {
   const printed = !!print && print.colors.length > 0;
   return {
@@ -388,8 +404,11 @@ export function customSelectionUpdate(
 export async function repriceQuoteBoxes(
   quoteId: number,
   tenantId: number | null,
-  print: PrintSpec | null,
+  printArg: PrintSpec | null | "per_box",
+  opts: { onlyRowId?: number } = {},
 ): Promise<void> {
+  // Step 9A: printArg "per_box" = each row uses its own print_colors /
+  // print_sides (multi-size boxes-only quotes). onlyRowId reprices one row.
   const rows = await q<{
     id: number;
     kind: string;
@@ -399,6 +418,8 @@ export async function repriceQuoteBoxes(
     custom_height_in: string | number | null;
     custom_style: string | null;
     board_grade_id: string | number | null;
+    print_colors: unknown;
+    print_sides: number | string | null;
     b_id: number | null;
     sku: string | null;
     vendor: string | null;
@@ -410,17 +431,20 @@ export async function repriceQuoteBoxes(
   }>(
     `SELECT qbs.id, qbs.kind, qbs.qty,
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
-            qbs.board_grade_id,
+            qbs.board_grade_id, qbs.print_colors, qbs.print_sides,
             b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
             b.inside_length_in, b.inside_width_in, b.inside_height_in
        FROM public.quote_box_selections qbs
        LEFT JOIN public.boxes b ON b.id = qbs.box_id
-      WHERE qbs.quote_id = $1`,
-    [quoteId],
+      WHERE qbs.quote_id = $1
+        AND ($2::bigint IS NULL OR qbs.id = $2::bigint)`,
+    [quoteId, opts.onlyRowId ?? null],
   );
 
   for (const row of rows) {
     const qty = Math.max(1, Math.round(Number(row.qty) || 1));
+    const print: PrintSpec | null =
+      printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg;
 
     if (row.kind === "custom") {
       const resolved = await resolveCustomSelection(
@@ -503,9 +527,11 @@ export type BoxBreakPrice = {
 export async function priceQuoteBoxesAtQtys(
   quoteId: number,
   tenantId: number | null,
-  print: PrintSpec | null,
+  printArg: PrintSpec | null | "per_box",
   qtys: number[],
+  opts: { onlyRowId?: number } = {},
 ): Promise<BoxBreakPrice[]> {
+  // Step 9A: "per_box" = each row's own print; onlyRowId prices one row.
   const rows = await q<{
     id: number;
     kind: string;
@@ -514,6 +540,8 @@ export async function priceQuoteBoxesAtQtys(
     custom_height_in: string | number | null;
     custom_style: string | null;
     board_grade_id: string | number | null;
+    print_colors: unknown;
+    print_sides: number | string | null;
     b_id: number | null;
     sku: string | null;
     vendor: string | null;
@@ -525,14 +553,15 @@ export async function priceQuoteBoxesAtQtys(
   }>(
     `SELECT qbs.id, qbs.kind,
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
-            qbs.board_grade_id,
+            qbs.board_grade_id, qbs.print_colors, qbs.print_sides,
             b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
             b.inside_length_in, b.inside_width_in, b.inside_height_in
        FROM public.quote_box_selections qbs
        LEFT JOIN public.boxes b ON b.id = qbs.box_id
       WHERE qbs.quote_id = $1
+        AND ($2::bigint IS NULL OR qbs.id = $2::bigint)
       ORDER BY qbs.id`,
-    [quoteId],
+    [quoteId, opts.onlyRowId ?? null],
   );
 
   const out: BoxBreakPrice[] = [];
@@ -544,6 +573,8 @@ export async function priceQuoteBoxesAtQtys(
     let priced = 0;
 
     for (const row of rows) {
+      const print: PrintSpec | null =
+        printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg;
       let ext: number | null = null;
       let u: number | null = null;
       let pl: number | null = null;
