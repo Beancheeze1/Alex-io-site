@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { QUOTE_TYPE_KEYS, QUOTE_TYPE_LABELS, quoteTypesFromTheme, type QuoteTypeKey } from "@/lib/quote-types";
 
 type Tenant = {
   id: number;
@@ -36,6 +37,7 @@ type EditState = {
   aboutText: string;
   products: string[];
   stats: { label: string; value: string }[];
+  quoteTypes: QuoteTypeKey[]; // Step 11
   saving: boolean;
   error: string | null;
   ok: boolean;
@@ -259,6 +261,7 @@ export default function TenantsPage() {
               ) as Record<PageTextField, string>),
               products: getThemeProducts(t.theme_json),
               stats: getThemeStats(t.theme_json),
+              quoteTypes: quoteTypesFromTheme(t.theme_json),
               saving: false,
               error: null,
               ok: false,
@@ -319,6 +322,12 @@ export default function TenantsPage() {
     // Merge onto the tenant's existing theme_json so keys this form doesn't
     // edit are preserved. (Previously the whole object was replaced with six
     // keys, silently deleting anything else stored in theme_json.)
+    // Step 11: a shop must offer at least one quote type.
+    if (!s.quoteTypes || s.quoteTypes.length === 0) {
+      updateEdit(id, { saving: false, error: "Pick at least one quote type." });
+      return;
+    }
+
     const existing = tenants.find((x) => x.id === id)?.theme_json;
     const existingTheme =
       existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
@@ -337,6 +346,7 @@ export default function TenantsPage() {
       heroUseLogo: !!s.heroUseLogo,
       ...pageFields,
       products: s.products,
+      quoteTypes: QUOTE_TYPE_KEYS.filter((k) => s.quoteTypes.includes(k)),
       stats: s.stats
         .map((st) => ({ label: st.label.trim(), value: st.value.trim() }))
         .filter((st) => st.label && st.value)
@@ -631,6 +641,34 @@ export default function TenantsPage() {
 
                       <div className="text-[11px] text-[var(--text-faint)]">
                         If enabled, landing page uses logoUrl. If missing/broken, it falls back to text.
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 md:col-span-2 border-t border-[var(--border)] pt-4">
+                      <div>
+                        <div className="text-sm font-medium">Quote types offered</div>
+                        <div className="text-[11px] text-[var(--text-faint)]">
+                          One list for buyers, reps and admins. Unchecked types disappear from Start Quote, the rep form
+                          and &quot;Skip to blank editor&quot;, and the server refuses new quotes of that type. Existing quotes are not changed.
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-x-5 gap-y-2">
+                        {QUOTE_TYPE_KEYS.map((k) => (
+                          <label key={k} className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                            <input
+                              type="checkbox"
+                              checked={s.quoteTypes.includes(k)}
+                              onChange={(e) =>
+                                updateEdit(t.id, {
+                                  quoteTypes: e.target.checked
+                                    ? [...s.quoteTypes.filter((x) => x !== k), k]
+                                    : s.quoteTypes.filter((x) => x !== k),
+                                })
+                              }
+                            />
+                            {QUOTE_TYPE_LABELS[k]}
+                          </label>
+                        ))}
                       </div>
                     </div>
 

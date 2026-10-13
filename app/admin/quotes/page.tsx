@@ -27,6 +27,8 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import RepStartQuoteModal from "@/components/start-quote/RepStartQuoteModal";
+import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
+import { offersFoam } from "@/lib/quote-types";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
 
 type QuoteRow = {
@@ -68,6 +70,8 @@ export default function AdminQuotesPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
+  // Step 11: "Skip to blank editor" opens the foam editor — hidden when the shop offers no foam.
+  const { types: offeredTypes } = useQuoteTypes(null);
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
   const [showStartModal, setShowStartModal] = React.useState(false);
 
@@ -472,6 +476,7 @@ export default function AdminQuotesPage() {
             >
               Start new quote
             </button>
+            {offersFoam(offeredTypes) ? (
             <button
               type="button"
               onClick={createNewQuoteAndOpenEditor}
@@ -480,6 +485,7 @@ export default function AdminQuotesPage() {
             >
               {creating ? "Starting…" : "Skip to blank editor"}
             </button>
+            ) : null}
             {isAdmin && (
   <Link
     href="/admin"

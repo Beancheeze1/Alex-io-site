@@ -31,6 +31,7 @@ import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
+import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -298,6 +299,12 @@ export default function RepStartQuoteModal({
 
   // ----- Step 3: Quote type -----
   const [quoteType, setQuoteType] = React.useState<QuoteType>("foam_insert");
+  // Step 11: only the quote types this shop offers (the signed-in user's shop).
+  const { types: offeredTypes, loaded: offeredTypesLoaded } = useQuoteTypes(null);
+  React.useEffect(() => {
+    if (!offeredTypesLoaded) return;
+    if (!offeredTypes.includes(quoteType)) setQuoteType(offeredTypes[0]);
+  }, [offeredTypesLoaded, offeredTypes, quoteType]);
 
   // ----- Step 4: Specs -----
   const [insertL, setInsertL] = React.useState("");
@@ -616,7 +623,7 @@ export default function RepStartQuoteModal({
     setQtyBreaks([newQtyBreakRow()]);
     setInternalNotes("");
     setCustomerNotes("");
-    setQuoteType("foam_insert");
+    setQuoteType(offeredTypes[0] ?? "foam_insert");
     setInsertL("");
     setInsertW("");
     setInsertD("");
@@ -1113,24 +1120,30 @@ export default function RepStartQuoteModal({
                   {activeStep === "type" ? (
                     <StepCard title="Quote type" hint="Choose what you're quoting">
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {offeredTypes.includes("foam_insert") ? (
                         <ChoiceCard
                           title="Foam Insert"
                           desc="Foam only (block + cavities)"
                           selected={quoteType === "foam_insert"}
                           onClick={() => setQuoteType("foam_insert")}
                         />
+                        ) : null}
+                        {offeredTypes.includes("complete_pack") ? (
                         <ChoiceCard
                           title="Complete Pack"
                           desc="Box + foam (bottom insert + optional top pad)"
                           selected={quoteType === "complete_pack"}
                           onClick={() => setQuoteType("complete_pack")}
                         />
+                        ) : null}
+                        {offeredTypes.includes("boxes_only") ? (
                         <ChoiceCard
                           title="Boxes only"
                           desc="Corrugated boxes, plain or printed — no foam"
                           selected={quoteType === "boxes_only"}
                           onClick={() => setQuoteType("boxes_only")}
                         />
+                        ) : null}
                       </div>
                     </StepCard>
                   ) : null}

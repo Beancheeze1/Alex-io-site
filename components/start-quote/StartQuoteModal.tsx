@@ -21,6 +21,8 @@ import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
+import { QUOTE_TYPE_LABELS } from "@/lib/quote-types";
+import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -254,6 +256,8 @@ export default function StartQuoteModal({
     seededType === "complete_pack" ||
     seededType === "completepack" ||
     seededType === "pack";
+  // Step 11: ?quote_type=boxes_only presets Boxes only (stays on the first step for the quantity).
+  const seededIsBoxesOnly = seededType === "boxes_only" || seededType === "boxes";
 
   // ---------- State ----------
   const [activeStep, setActiveStep] = React.useState<
@@ -265,8 +269,17 @@ export default function StartQuoteModal({
   );
 
   const [quoteType, setQuoteType] = React.useState<QuoteType>(
-    seededIsCompletePack ? "complete_pack" : "foam_insert",
+    seededIsCompletePack ? "complete_pack" : seededIsBoxesOnly ? "boxes_only" : "foam_insert",
   );
+
+  // Step 11: only the quote types this shop offers (tenants.theme_json.quoteTypes).
+  const { types: offeredTypes, loaded: offeredTypesLoaded } = useQuoteTypes(
+    (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase(),
+  );
+  React.useEffect(() => {
+    if (!offeredTypesLoaded) return;
+    if (!offeredTypes.includes(quoteType)) setQuoteType(offeredTypes[0]);
+  }, [offeredTypesLoaded, offeredTypes, quoteType]);
 
   // Common - prefer prefill data over URL params
   const [qty, setQty] = React.useState<string>(
@@ -1489,28 +1502,43 @@ export default function StartQuoteModal({
                 {/* Right panel (active step) */}
                 <div>
                   {activeStep === "type" ? (
-                    <StepCard title="Quote Type" hint="Choose what you're quoting">
+                    <StepCard
+                      title={offeredTypes.length > 1 ? "Quote Type" : "Quantity"}
+                      hint={
+                        offeredTypes.length > 1
+                          ? "Choose what you're quoting"
+                          : `Quoting: ${QUOTE_TYPE_LABELS[offeredTypes[0]]}`
+                      }
+                    >
                       <div className="space-y-4">
+                        {offeredTypes.length > 1 ? (
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                          {offeredTypes.includes("foam_insert") ? (
                           <ChoiceCard
                             title="Foam Insert"
                             desc="Foam only (block + cavities)"
                             selected={quoteType === "foam_insert"}
                             onClick={() => setQuoteType("foam_insert")}
                           />
+                          ) : null}
+                          {offeredTypes.includes("complete_pack") ? (
                           <ChoiceCard
                             title="Complete Pack"
                             desc="Box + foam (mailer/RSC + optional printing)"
                             selected={quoteType === "complete_pack"}
                             onClick={() => setQuoteType("complete_pack")}
                           />
+                          ) : null}
+                          {offeredTypes.includes("boxes_only") ? (
                           <ChoiceCard
                             title="Boxes only"
                             desc="Corrugated boxes, plain or printed — no foam"
                             selected={quoteType === "boxes_only"}
                             onClick={() => setQuoteType("boxes_only")}
                           />
+                          ) : null}
                         </div>
+                        ) : null}
 
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">

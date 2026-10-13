@@ -34,6 +34,7 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { parsePrintSpec, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { tenantOffersQuoteType } from "@/lib/quote-types-server";
 import {
   customSelectionInsert,
   repriceQuoteBoxes,
@@ -186,6 +187,11 @@ export async function POST(req: NextRequest) {
         if (!t) return bad("tenant_not_found", "Shop not found.", 404);
         tenantId = Number(t.id);
       }
+    }
+
+    // Step 11: the shop must offer boxes-only quotes.
+    if (!(await tenantOffersQuoteType(tenantId, "boxes_only"))) {
+      return bad("quote_type_unavailable", "This shop doesn't offer boxes-only quotes.", 403);
     }
 
     // ---- Stock cartons (validated before any quote row is created) ----

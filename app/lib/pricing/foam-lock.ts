@@ -67,7 +67,8 @@ export async function lockedFoamPrice(
   if (snap && snap.lock_key === key && Number.isFinite(storedTotal)) {
     const storedUnit = item.price_unit_usd == null ? NaN : Number(item.price_unit_usd);
     return {
-      unit: Number.isFinite(storedUnit) ? storedUnit : input.qty > 0 ? storedTotal / input.qty : 0,
+      // The unit column holds 2 decimals; the total is exact, so derive the unit from it.
+      unit: input.qty > 0 ? storedTotal / input.qty : Number.isFinite(storedUnit) ? storedUnit : 0,
       total: storedTotal,
       locked: true,
       detail: snap.detail ?? null,

@@ -61,6 +61,7 @@ import { isDemoQuoteNo } from "@/lib/quote-no";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { tenantQuoteTypes } from "@/lib/quote-types-server";
 import {
   buildLayoutExports,
   computeGeometryHash,
@@ -1384,6 +1385,29 @@ export async function POST(req: NextRequest) {
     }
   }
   // ── End auth gate ─────────────────────────────────────────────────────
+
+  // Step 11: a shop that offers neither Foam insert nor Complete Pack can't
+  // start a new foam quote. Quotes that already have foam lines (made before
+  // the setting changed) can still be revised.
+  if (!isDemoQuote) {
+    const offered = await tenantQuoteTypes(tenantId);
+    if (!offered.includes("foam_insert") && !offered.includes("complete_pack")) {
+      const hasItems = await one<{ id: number }>(
+        `SELECT qi.id
+           FROM public.quote_items qi
+           JOIN public.quotes qq ON qq.id = qi.quote_id
+          WHERE qq.quote_no = $1
+          LIMIT 1`,
+        [quoteNo],
+      );
+      if (!hasItems) {
+        return bad(
+          { ok: false, error: "quote_type_unavailable", message: "This shop doesn't offer foam quotes." },
+          403,
+        );
+      }
+    }
+  }
 
   const rawCustomer = body.customer && typeof body.customer === "object" ? body.customer : null;
 
