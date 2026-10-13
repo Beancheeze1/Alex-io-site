@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q } from "@/lib/db";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { detectQuoteKind, handleBoxesTurn } from "@/app/lib/widget/boxes-chat";
+import { QUOTE_TYPE_KEYS, offersFoam } from "@/lib/quote-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +15,8 @@ function requireEnv(name: string) {
 }
 
 type WidgetFacts = {
+  /** Step 12: "foam" (inserts, with or without a box) or "boxes" (boxes only). */
+  quoteKind?: "foam" | "boxes" | null;
   outsideL?: string;
   outsideW?: string;
   outsideH?: string;
@@ -66,6 +70,8 @@ type Incoming = {
   messages?: { role: "bot" | "user"; text: string }[];
   userText?: string;
   facts?: WidgetFacts;
+  /** Step 12: the shop's offered quote types (sent by SplashChatWidget). Missing = foam chat as before. */
+  quoteTypes?: string[];
 };
 
 type DbMaterial = {
@@ -871,6 +877,39 @@ export async function POST(req: NextRequest) {
     const userText = String(payload.userText ?? "").trim();
     const facts = (payload.facts ?? {}) as WidgetFacts;
     _parsedFacts = facts; // stash for catch block
+
+    // Step 12: foam or boxes? Follow what the shop offers; when it offers both,
+    // go by the buyer's words, and ask once if they're unclear. Callers that
+    // don't send quoteTypes (the Alex-IO landing chat) keep the foam chat.
+    if (Array.isArray(payload.quoteTypes)) {
+      const listed = QUOTE_TYPE_KEYS.filter((k) => payload.quoteTypes!.includes(k));
+      const types = listed.length ? listed : [...QUOTE_TYPE_KEYS];
+      const foamOk = offersFoam(types);
+      const boxesOk = types.includes("boxes_only");
+      let kind: "foam" | "boxes" | null = facts.quoteKind === "boxes" || facts.quoteKind === "foam" ? facts.quoteKind : null;
+      if (!foamOk && boxesOk) kind = "boxes";
+      else if (foamOk && !boxesOk) kind = "foam";
+      else if (!kind && userText) kind = detectQuoteKind(userText);
+
+      if (!kind && userText) {
+        return NextResponse.json(
+          {
+            assistantMessage: "Happy to help. Are you after foam inserts (with or without a box), or just corrugated boxes?",
+            facts: {},
+            done: false,
+            quickReplies: ["Foam inserts", "Foam + box", "Just boxes"],
+          },
+          { status: 200 },
+        );
+      }
+
+      if (kind === "boxes" && userText) {
+        const turn = await handleBoxesTurn({ messages, userText, facts: { ...(facts as Record<string, unknown>), quoteKind: "boxes" } });
+        return NextResponse.json(turn, { status: 200 });
+      }
+
+      if (kind) facts.quoteKind = kind;
+    }
 
     const simpleFacts = extractSimpleFacts(userText, facts);
     const seededFacts: WidgetFacts = { ...facts, ...simpleFacts };

@@ -450,6 +450,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
           salesRepSlug={salesRepSlug}
           brandName={t.brandName}
           accentColor={t.accentOnLight}
+          tenantSlug={t.slug}
         />
       ) : null}
     </div>

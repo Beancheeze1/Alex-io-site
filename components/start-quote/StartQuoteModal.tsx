@@ -434,6 +434,13 @@ export default function StartQuoteModal({
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
   // in Next.js App Router. This effect fires as soon as it's available.
+  // Step 12: a chat hand-off can choose where the form opens for its quote type
+  // (Boxes only -> the review step). The quote-type reset effect honors it once.
+  const prefillStepRef = React.useRef<{
+    type: QuoteType;
+    step: "type" | "box" | "foam" | "specs" | "cav" | "mat" | "rev";
+    done: string[];
+  } | null>(null);
   const prefillSeededRef = React.useRef(false);
   React.useEffect(() => {
     if (!prefillData || prefillSeededRef.current) return;
@@ -441,6 +448,33 @@ export default function StartQuoteModal({
 
     // Qty
     if (prefillData.qty) setQty(String(prefillData.qty));
+
+    // Step 12: boxes-only chat hand-off — size, style, printing and contact go
+    // straight into Boxes only, and the form opens on the review step.
+    if (prefillData.quoteKind === "boxes") {
+      const b = prefillData.box || {};
+      if (b.l) setBoxL(String(b.l));
+      if (b.w) setBoxW(String(b.w));
+      if (b.d) setBoxD(String(b.d));
+      setBoxStyle(String(b.style || "").toLowerCase() === "mailer" ? "mailer" : "rsc");
+      const colors: ("spot" | "flood")[] = Array.isArray(prefillData.print?.colors)
+        ? prefillData.print.colors
+            .filter((c: unknown) => c === "spot" || c === "flood")
+            .slice(0, 4)
+        : [];
+      setPrintColors(colors);
+      setPrinted(colors.length > 0);
+      setPrintSides(prefillData.print?.sides === 2 ? 2 : 1);
+      if (typeof prefillData.customerName === "string" && prefillData.customerName.trim()) {
+        setBoName(prefillData.customerName.trim());
+      }
+      if (typeof prefillData.customerEmail === "string" && prefillData.customerEmail.trim()) {
+        setBoEmail(prefillData.customerEmail.trim());
+      }
+      prefillStepRef.current = { type: "boxes_only", step: "rev", done: ["type", "box"] };
+      setQuoteType("boxes_only");
+      return;
+    }
 
     // Material
     if (prefillData.material?.text) setMaterialText(prefillData.material.text);
@@ -725,6 +759,14 @@ export default function StartQuoteModal({
 
   // When quote type switches, reset pack state cleanly
   React.useEffect(() => {
+    // Step 12: a chat hand-off picked its own starting step for this type — honor it once.
+    const pending = prefillStepRef.current;
+    if (pending && pending.type === quoteType) {
+      prefillStepRef.current = null;
+      setActiveStep(pending.step);
+      setCompletedSteps(new Set(pending.done));
+      return;
+    }
     setActiveStep("type");
     setCompletedSteps(new Set());
     if (quoteType === "foam_insert") {

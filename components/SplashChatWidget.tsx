@@ -3,6 +3,8 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
+import { offersFoam, type QuoteTypeKey } from "@/lib/quote-types";
 
 type WidgetFacts = {
   // core
@@ -53,6 +55,16 @@ type WidgetFacts = {
    * through the same structured payload as every other fact instead of relying
    * on a bare URL param surviving the whole chat-to-editor navigation. */
   salesRepSlug?: string;
+
+  // Step 12: boxes-only conversation (see app/lib/widget/boxes-chat.ts).
+  quoteKind?: "foam" | "boxes" | null;
+  boxL?: string | null;
+  boxW?: string | null;
+  boxD?: string | null;
+  boxStyle?: "rsc" | "mailer" | null;
+  printColorCount?: "1" | "2" | "3" | "4" | null;
+  printColors?: ("spot" | "flood")[] | null;
+  printSides?: "1" | "2" | null;
 };
 
 type Msg = {
@@ -65,6 +77,36 @@ const LS_KEY = "alexio_splash_widget_v2"; // bump to avoid old step-state collis
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(16).slice(2)}-${Date.now().toString(16)}`;
+}
+
+// Step 12: the opening lines follow what the shop quotes (foam, boxes or both).
+function greetingMsgs(types: QuoteTypeKey[]): Msg[] {
+  const foam = offersFoam(types);
+  const boxes = types.includes("boxes_only");
+  const bot = (text: string): Msg => ({ id: uid("m"), role: "bot", text });
+  if (boxes && !foam) {
+    return [
+      bot("Hi — I can quote your corrugated boxes right here."),
+      bot("Tell me what you need: inside size (L×W×D, inches), RSC or mailer, how many, and any printing."),
+    ];
+  }
+  if (boxes && foam) {
+    return [
+      bot("Hi — I can quote foam inserts, boxes, or both. Tell me what you’re packing and whatever you already know."),
+      bot("Are you after foam inserts (with or without a box), or just corrugated boxes?"),
+    ];
+  }
+  return [
+    bot(
+      "Hey — I can do this fast. Tell me what you’re making and whatever you already know. " +
+        "I’ll ask the *next best* question and then open the layout + pricing.",
+    ),
+    bot("Start with outside foam size if you have it (L×W×H, inches)."),
+  ];
+}
+
+function greetingReplies(types: QuoteTypeKey[]): string[] {
+  return offersFoam(types) && types.includes("boxes_only") ? ["Foam inserts", "Foam + box", "Just boxes"] : [];
 }
 
 function safeJsonParse<T>(raw: string | null): T | null {
@@ -117,10 +159,49 @@ function buildPrefillPayload(facts: WidgetFacts) {
     // sales attribution -- reaches StartQuoteModal's onLaunchEditor via
     // prefillData.salesRepSlug, same fallback the raw URL param already gets.
     salesRepSlug: facts.salesRepSlug ?? "",
+
+    // Step 12: boxes-only hand-off — Start Quote opens Boxes only on the review step.
+    quoteKind: facts.quoteKind ?? "",
+    box: {
+      l: facts.boxL ?? "",
+      w: facts.boxW ?? "",
+      d: facts.boxD ?? "",
+      style: facts.boxStyle ?? "",
+    },
+    print: {
+      colors: Array.isArray(facts.printColors) ? facts.printColors : [],
+      sides: facts.printSides === "2" ? 2 : 1,
+    },
   };
 }
 
+// Step 12: summary card lines for a boxes-only conversation.
+function summarizeBoxFacts(facts: WidgetFacts): string[] {
+  const size =
+    facts.boxL && facts.boxW && facts.boxD ? `${facts.boxL}×${facts.boxW}×${facts.boxD} in (inside)` : "(size not set)";
+  const style = facts.boxStyle === "mailer" ? "Mailer" : facts.boxStyle === "rsc" ? "RSC / shipper" : "(style not set)";
+  const colors = Array.isArray(facts.printColors) ? facts.printColors : [];
+  const printing =
+    facts.printed === false
+      ? "Plain (no print)"
+      : facts.printed && colors.length
+        ? `${colors.length} color${colors.length > 1 ? "s" : ""} (${colors.join(", ")}), ${facts.printSides === "2" ? "two sides" : "one side"}`
+        : facts.printed
+          ? "Printed (details not set)"
+          : "(printing not set)";
+  return [
+    `Box: ${size}`,
+    `Style: ${style}`,
+    `Quantity: ${facts.qty ? facts.qty : "(qty not set)"}`,
+    `Printing: ${printing}`,
+    facts.customerName ? `Name: ${facts.customerName}` : null,
+    facts.customerEmail ? `Email: ${facts.customerEmail}` : null,
+    facts.notes?.trim() ? `Notes: ${facts.notes.trim()}` : null,
+  ].filter(Boolean) as string[];
+}
+
 function summarizeFacts(facts: WidgetFacts) {
+  if (facts.quoteKind === "boxes") return summarizeBoxFacts(facts);
   const dims =
     facts.outsideL && facts.outsideW && facts.outsideH
       ? `${facts.outsideL}×${facts.outsideW}×${facts.outsideH} in`
@@ -206,6 +287,7 @@ export default function SplashChatWidget({
   salesRepSlug,
   brandName,
   accentColor,
+  tenantSlug,
 }: {
   startQuotePath: string;
   /** Strips the fixed bottom-5 right-5 self-positioning — used inside the
@@ -231,9 +313,15 @@ export default function SplashChatWidget({
   brandName?: string;
   /** White-label: color for the pill's status dot (must read on a light surface). */
   accentColor?: string;
+  /** Step 12: the shop's slug on the core host (/t/<slug>); a real subdomain needs none. */
+  tenantSlug?: string;
 }) {
   const router = useRouter();
   const brand = (brandName || "").trim();
+
+  // Step 12: what this shop quotes (foam, boxes or both) steers the chat.
+  const { types: offeredTypes, loaded: offeredTypesLoaded } = useQuoteTypes(tenantSlug ?? null);
+  const shopHasFoam = offersFoam(offeredTypes);
 
   const [open, setOpenState] = React.useState(false);
   const setOpen = React.useCallback(
@@ -299,6 +387,20 @@ export default function SplashChatWidget({
 
   const listRef = React.useRef<HTMLDivElement | null>(null);
 
+  // Step 12: once the shop's quote types are known, show the matching greeting
+  // (only while the buyer hasn't typed anything yet).
+  const greetedForRef = React.useRef<string>("");
+  React.useEffect(() => {
+    if (!offeredTypesLoaded) return;
+    const key = offeredTypes.join(",");
+    if (greetedForRef.current === key) return;
+    greetedForRef.current = key;
+    if (msgs.some((m) => m.role === "user")) return;
+    setMsgs(greetingMsgs(offeredTypes));
+    setQuickReplies(greetingReplies(offeredTypes));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offeredTypesLoaded, offeredTypes]);
+
   // Bug fix: use a ref to always hold the latest committed facts so openStartQuote
   // doesn't need to re-read localStorage (which can be one render behind after setFacts).
   const latestFactsRef = React.useRef<WidgetFacts>(facts);
@@ -353,17 +455,9 @@ export default function SplashChatWidget({
     // conversation content -- a fresh start shouldn't drop attribution.
     const freshFacts: WidgetFacts = { createdAtIso: new Date().toISOString(), salesRepSlug };
     setFacts(freshFacts);
-    setMsgs([
-      {
-        id: uid("m"),
-        role: "bot",
-        text:
-          "Alright — fresh start. Tell me what you’re making and what you know so far. " +
-          "If you’ve got outside size + qty, even better.",
-      },
-    ]);
+    setMsgs(greetingMsgs(offeredTypes));
     setDone(false);
-    setQuickReplies([]);
+    setQuickReplies(greetingReplies(offeredTypes));
     setInput("");
     try {
       localStorage.removeItem(LS_KEY);
@@ -392,6 +486,8 @@ export default function SplashChatWidget({
         })),
         userText: args.userText,
         facts: args.factsSnapshot,
+        // Step 12: the brain routes to the foam or boxes conversation by these.
+        quoteTypes: offeredTypes,
       }),
     });
 
@@ -526,7 +622,11 @@ export default function SplashChatWidget({
             <span className="leading-tight">
               <span className="block">{brand ? "Get a quote by chat" : "Talk to Alex-IO"}</span>
               <span className="block text-[11px] font-medium text-[var(--text-muted)]">
-                {brand ? "Dims + qty → layout & price" : "chat → layout → pricing"}
+                {brand
+                  ? shopHasFoam
+                    ? "Dims + qty → layout & price"
+                    : "Size + qty → box price"
+                  : "chat → layout → pricing"}
               </span>
             </span>
             <span className="ml-1 rounded-full border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
@@ -545,7 +645,9 @@ export default function SplashChatWidget({
                 </div>
                 <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
                   {brand
-                    ? "Describe your part — we’ll build the quote."
+                    ? shopHasFoam
+                      ? "Describe your part — we’ll build the quote."
+                      : "Tell us about your boxes — we’ll build the quote."
                     : "Talk to me like a human. I’ll keep it tight."}
                 </div>
               </div>
@@ -632,13 +734,13 @@ export default function SplashChatWidget({
                       onClick={openStartQuote}
                       className="w-full rounded-md bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)]"
                     >
-                      Open layout & pricing
+                      {facts.quoteKind === "boxes" ? "Review & get my box price" : "Open layout & pricing"}
                     </button>
                   </div>
 
                   <div className="mt-2 text-[11px] text-[var(--text-muted)]">
                     You can keep chatting if you want to add or correct anything — I’ll update the
-                    summary. Open the layout when you’re ready.
+                    summary. {facts.quoteKind === "boxes" ? "Open your quote" : "Open the layout"} when you’re ready.
                   </div>
 
                   {!onQuoteReady && !brand && (
@@ -677,7 +779,13 @@ export default function SplashChatWidget({
 }}
 
                   rows={1}
-                  placeholder={done ? "Add anything else… (or click Open layout & pricing)" : "Type here…"}
+                  placeholder={
+                    done
+                      ? facts.quoteKind === "boxes"
+                        ? "Add anything else… (or open your quote)"
+                        : "Add anything else… (or click Open layout & pricing)"
+                      : "Type here…"
+                  }
                   className="min-h-[42px] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--action-primary)]/40"
                 />
                 <button
