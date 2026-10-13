@@ -8,6 +8,7 @@
 //   quote_no, tenant_slug?, quote_source?, sales_rep_slug?,
 //   customer: { name, email, company?, phone? },
 //   notes?,
+//   run_method?: "plates" | "digital",         // Step 15, staff only; else auto
 //   boxes: [                                   // 1..10
 //     { qty,
 //       sku } |
@@ -32,7 +33,7 @@ import { resolveTenantFromHost } from "@/lib/tenant";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
-import { parsePrintSpec, type PrintSpec } from "@/lib/corrugated-price";
+import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { tenantOffersQuoteType } from "@/lib/quote-types-server";
 import {
@@ -129,6 +130,8 @@ export async function POST(req: NextRequest) {
 
     const quoteNo = str(b.quote_no, 40);
     if (!quoteNo) return bad("missing_quote_no", "quote_no is required.");
+    // Step 15: only staff choose plates vs digital (whole quote); buyers are always auto.
+    const runMethod = isStaff ? parseRunMethod(b.run_method) : null;
 
     // ---- Customer ----
     const c = (b.customer && typeof b.customer === "object" ? b.customer : {}) as Record<string, unknown>;
@@ -262,6 +265,7 @@ export async function POST(req: NextRequest) {
       print_mode: "per_box",
       qty: sizes[0].qty,
       printed: anyPrinted ? 1 : 0,
+      ...(runMethod ? { run_method: runMethod } : {}),
       ...(notes ? { customer_notes: notes } : {}),
     };
     delete nextFacts.print_spec;
@@ -277,6 +281,7 @@ export async function POST(req: NextRequest) {
         const resolved = await resolveCustomSelection(s.custom.L, s.custom.W, s.custom.D, s.custom.style, s.qty, tenantId, {
           gradeId: s.custom.gradeId,
           print: s.print,
+          method: runMethod,
         });
         const ins = customSelectionInsert({
           quoteId: quote.id,

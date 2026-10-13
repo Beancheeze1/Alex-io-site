@@ -12,6 +12,15 @@
 //   Minimum      = if box total + plates line < minimum, box total is raised
 //   Unit         = box total / qty, 4 decimals; extended = unit x qty, cents
 //
+// Step 15, short runs (run method "digital"): digitally printed and CAD cut,
+// no plates and no press. Per quantity:
+//   Converting = qty x CAD cut $/box
+//   Print run  = qty x blank sq ft (no waste) x digital $/sq ft x sides
+//   Setup      = CAD setup + (printed ? digital setup : 0)
+//   Plates     = 0
+// The method is "plates" or "digital"; with no choice (auto) a quantity under
+// the shop's short-run cutoff is digital, once the shop has a CAD cut rate.
+//
 // Imports only ./corrugated-blank so it runs anywhere (server, browser, tsx).
 
 import {
@@ -36,6 +45,26 @@ export type BoxSettings = CorrugatedRates & {
   edge_trim_in: number;
 };
 
+/** Step 15: production (plates, press, die/converting) or short run (digital + CAD cut). */
+export type RunMethod = "plates" | "digital";
+
+export function parseRunMethod(raw: unknown): RunMethod | null {
+  return raw === "plates" || raw === "digital" ? raw : null;
+}
+
+type ShortRunRates = { digital_under_qty: number; cad_cut_per_box_usd: number };
+
+/** Short runs are on when the shop has a cutoff and a CAD cut rate. */
+export function shortRunsOn(s: ShortRunRates): boolean {
+  return Number(s.digital_under_qty) > 0 && Number(s.cad_cut_per_box_usd) > 0;
+}
+
+/** The method used at a quantity: the staff choice, else auto by the shop's cutoff. */
+export function resolveRunMethod(choice: RunMethod | null | undefined, qty: number, s: ShortRunRates): RunMethod {
+  if (choice === "plates" || choice === "digital") return choice;
+  return shortRunsOn(s) && qty < Number(s.digital_under_qty) ? "digital" : "plates";
+}
+
 export type PriceRscInput = {
   dims: { L: number; W: number; D: number }; // inside, inches
   quantities: number[];
@@ -43,6 +72,7 @@ export type PriceRscInput = {
   grade: { name: string; cost_per_msf: number | null };
   flute: FluteSpec;
   settings: BoxSettings;
+  method?: RunMethod | null; // Step 15: null / missing = auto by quantity
 };
 
 export type QtyPrice = {
@@ -56,6 +86,8 @@ export type QtyPrice = {
   min_applied: boolean;
   unit_price_usd: number; // 4 decimals
   extended_usd: number; // unit x qty, cents
+  method: RunMethod; // Step 15
+  plates_line_usd: number; // Step 15: plates at this quantity (0 for digital)
 };
 
 export type BoxPriceOk = {
@@ -63,8 +95,8 @@ export type BoxPriceOk = {
   blank: BlankResult;
   colors: number;
   sides: 1 | 2;
-  plates_cost_usd: number; // before markup
-  plates_line_usd: number; // marked up, one time
+  plates_cost_usd: number; // before markup, when run with plates
+  plates_line_usd: number; // marked up, one time, when run with plates (see each quantity)
   quantities: QtyPrice[]; // ascending, de-duplicated
   warnings: string[]; // rates at $0 that probably shouldn't be
 };
@@ -141,17 +173,32 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
   const mk = 1 + s.markup_pct / 100;
   const platesLineRaw = platesCost * mk;
 
+  const printed = colors.length > 0;
   const quantities: QtyPrice[] = qtys.map((qty) => {
+    const method = resolveRunMethod(inp.method, qty, s);
     const board = ((blank.sqft_each_with_waste * qty) / 1000) * cost;
-    const converting = (qty / 1000) * s.converting_per_m;
-    const run = (qty / 1000) * runPerMPerSide * sides;
-    const setup = s.order_setup_usd + printSetup;
+    let converting: number;
+    let run: number;
+    let setup: number;
+    let platesLine: number;
+    if (method === "digital") {
+      // Step 15: short run, digitally printed and CAD cut. No plates, no press.
+      converting = qty * s.cad_cut_per_box_usd;
+      run = printed ? qty * blank.sqft_each * s.digital_per_sqft_usd * sides : 0;
+      setup = s.cad_setup_usd + (printed ? s.digital_setup_usd : 0);
+      platesLine = 0;
+    } else {
+      converting = (qty / 1000) * s.converting_per_m;
+      run = (qty / 1000) * runPerMPerSide * sides;
+      setup = s.order_setup_usd + printSetup;
+      platesLine = platesLineRaw;
+    }
     const costUsd = board + converting + run + setup;
 
     let boxTotal = costUsd * mk;
     let minApplied = false;
-    if (s.min_order_usd > 0 && boxTotal + platesLineRaw < s.min_order_usd) {
-      boxTotal = s.min_order_usd - platesLineRaw;
+    if (s.min_order_usd > 0 && boxTotal + platesLine < s.min_order_usd) {
+      boxTotal = s.min_order_usd - platesLine;
       minApplied = true;
     }
 
@@ -167,17 +214,27 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
       min_applied: minApplied,
       unit_price_usd: unit,
       extended_usd: r2(unit * qty),
+      method,
+      plates_line_usd: r2(platesLine),
     };
   });
 
+  const anyPlates = quantities.some((x) => x.method === "plates");
+  const anyDigital = quantities.some((x) => x.method === "digital");
   const warnings: string[] = [];
-  if (s.converting_per_m === 0) warnings.push("Converting cost is $0.");
   if (s.markup_pct === 0) warnings.push("Markup is 0%.");
-  if (colors.length > 0 && s.print_setup_per_color_usd === 0) warnings.push("Print setup is $0.");
-  if (spot > 0 && s.print_run_spot_per_m === 0) warnings.push("Spot print run rate is $0.");
-  if (flood > 0 && s.print_run_flood_per_m === 0) warnings.push("Flood print run rate is $0.");
-  if (spot > 0 && s.plate_spot_usd === 0) warnings.push("Spot plate cost is $0.");
-  if (flood > 0 && s.plate_flood_usd === 0) warnings.push("Flood plate cost is $0.");
+  if (anyPlates) {
+    if (s.converting_per_m === 0) warnings.push("Converting cost is $0.");
+    if (colors.length > 0 && s.print_setup_per_color_usd === 0) warnings.push("Print setup is $0.");
+    if (spot > 0 && s.print_run_spot_per_m === 0) warnings.push("Spot print run rate is $0.");
+    if (flood > 0 && s.print_run_flood_per_m === 0) warnings.push("Flood print run rate is $0.");
+    if (spot > 0 && s.plate_spot_usd === 0) warnings.push("Spot plate cost is $0.");
+    if (flood > 0 && s.plate_flood_usd === 0) warnings.push("Flood plate cost is $0.");
+  }
+  if (anyDigital) {
+    if (s.cad_cut_per_box_usd === 0) warnings.push("CAD cut rate is $0.");
+    if (printed && s.digital_per_sqft_usd === 0) warnings.push("Digital print rate is $0.");
+  }
 
   return {
     ok: true,
@@ -205,9 +262,13 @@ export function parsePrintSpec(raw: unknown): PrintSpec | null {
   return { colors, sides };
 }
 
-/** "2-color print (1 spot, 1 flood), two sides" — or "No print". */
-export function describePrintSpec(p: PrintSpec | null): string {
+/**
+ * "2-color print (1 spot, 1 flood), two sides" — or "No print". Step 15: with
+ * method "digital", "Digital print, two sides" (full color, no plates).
+ */
+export function describePrintSpec(p: PrintSpec | null, method?: RunMethod | null): string {
   if (!p || p.colors.length === 0) return "No print";
+  if (method === "digital") return `Digital print, ${p.sides === 2 ? "two sides" : "one side"}`;
   const spot = p.colors.filter((c) => c === "spot").length;
   const flood = p.colors.length - spot;
   const parts: string[] = [];
@@ -221,6 +282,7 @@ export type PrintAdderResult = {
   unit_adder_usd: number; // print_total / qty, 4 decimals
   plates_line_usd: number; // one-time plates x (1 + markup)
   warnings: string[];
+  method: RunMethod; // Step 15
 };
 
 /**
@@ -231,17 +293,44 @@ export type PrintAdderResult = {
  *   plates = sum(plate $ per color, spot or flood) x sides   (own line)
  * Run + setup are marked up and spread over the qty; order setup, board,
  * converting and the minimum order don't apply (the box keeps its own price).
+ *
+ * Step 15: method "digital" (staff choice, or auto under the short-run
+ * cutoff): run = qty x blank sq ft x digital $/sq ft x sides, setup = digital
+ * setup, no plates. opts.sqftEach is the box's blank area (no waste).
  */
-export function pricePrintAdder(quantity: number, print: PrintSpec, s: BoxSettings): PrintAdderResult {
+export function pricePrintAdder(
+  quantity: number,
+  print: PrintSpec,
+  s: BoxSettings,
+  opts: { method?: RunMethod | null; sqftEach?: number | null } = {},
+): PrintAdderResult {
   const colors = (print?.colors ?? []).filter((c) => c === "spot" || c === "flood").slice(0, MAX_COLORS);
-  if (colors.length === 0) {
-    return { print_total_usd: 0, unit_adder_usd: 0, plates_line_usd: 0, warnings: [] };
-  }
   const qty = Math.max(1, Math.round(quantity || 1));
+  const method = resolveRunMethod(opts.method, qty, s);
+  if (colors.length === 0) {
+    return { print_total_usd: 0, unit_adder_usd: 0, plates_line_usd: 0, warnings: [], method };
+  }
   const sides: 1 | 2 = print.sides === 2 ? 2 : 1;
+  const mk = 1 + s.markup_pct / 100;
+
+  if (method === "digital") {
+    const sqft = Math.max(0, Number(opts.sqftEach) || 0);
+    const dRun = qty * sqft * s.digital_per_sqft_usd * sides;
+    const dTotal = (dRun + s.digital_setup_usd) * mk;
+    const dWarnings: string[] = [];
+    if (s.digital_per_sqft_usd === 0) dWarnings.push("Digital print rate is $0.");
+    if (sqft === 0) dWarnings.push("No blank size for digital print.");
+    return {
+      print_total_usd: r2(dTotal),
+      unit_adder_usd: r4(dTotal / qty),
+      plates_line_usd: 0,
+      warnings: dWarnings,
+      method,
+    };
+  }
+
   const spot = colors.filter((c) => c === "spot").length;
   const flood = colors.length - spot;
-  const mk = 1 + s.markup_pct / 100;
 
   const run = (qty / 1000) * (spot * s.print_run_spot_per_m + flood * s.print_run_flood_per_m) * sides;
   const setup = s.print_setup_per_color_usd * colors.length * sides;
@@ -260,5 +349,6 @@ export function pricePrintAdder(quantity: number, print: PrintSpec, s: BoxSettin
     unit_adder_usd: r4(total / qty),
     plates_line_usd: r2(plates),
     warnings,
+    method,
   };
 }

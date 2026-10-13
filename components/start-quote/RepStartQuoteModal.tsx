@@ -346,6 +346,8 @@ export default function RepStartQuoteModal({
   // Per-color printing (Corrugated Step 3B); `printed` kept in sync.
   const [printColors, setPrintColors] = React.useState<("spot" | "flood")[]>([]);
   const [printSides, setPrintSides] = React.useState<1 | 2>(1);
+  // Step 15: plates vs digital for the whole quote ("auto" = the shop's short-run cutoff).
+  const [runMethod, setRunMethod] = React.useState<"auto" | "plates" | "digital">("auto");
   // Print artwork (Step 6): uploaded right after POST /api/quotes creates the quote.
   const [artworkFiles, setArtworkFiles] = React.useState<File[]>([]);
   const [artworkNote, setArtworkNote] = React.useState<string | null>(null);
@@ -635,6 +637,7 @@ export default function RepStartQuoteModal({
     setPrinted(false);
     setPrintColors([]);
     setPrintSides(1);
+    setRunMethod("auto");
     setFoamConfig("bottom_top");
     setBottomThk("");
     setTopThk(String(DEFAULT_TOP_PAD_IN));
@@ -724,6 +727,17 @@ export default function RepStartQuoteModal({
         if (up.failed.length) console.warn("[rep-start-quote] artwork upload issues", up.failed);
       }
 
+      // Step 15: foam + box quotes get their box in the editor, so save the run
+      // method on the quote now (boxes-only quotes send it with the boxes).
+      if (quoteType === "complete_pack" && runMethod !== "auto") {
+        const rm = await fetch("/api/admin/quotes/run-method", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quote_no, method: runMethod }),
+        }).catch(() => null);
+        if (!rm || !rm.ok) console.warn("[rep-start-quote] run method not saved; set it on the quote page");
+      }
+
       // Boxes only (Corrugated Step 4): price the boxes on the quote just
       // created, then open it on the admin quote page. No layout editor.
       if (quoteType === "boxes_only") {
@@ -752,6 +766,7 @@ export default function RepStartQuoteModal({
                   sales_rep_slug: salesRepSlug.trim() || null,
                   customer: repCustomer,
                   notes: customerNotes.trim() || null,
+                  run_method: runMethod === "auto" ? null : runMethod,
                   boxes: [
                     {
                       qty: toNumOrNull(qty),
@@ -773,6 +788,7 @@ export default function RepStartQuoteModal({
                   qty: toNumOrNull(qty),
                   box: size1Box,
                   print_spec: { colors: printColors, sides: printSides },
+                  run_method: runMethod === "auto" ? null : runMethod,
                   // Step 5: the rep's qty breaks become the quote's compare quantities
                   // (their price column is for foam and is ignored for boxes).
                   qty_breaks: cleanBreaks.map((b) => b.qty),
@@ -1440,6 +1456,35 @@ export default function RepStartQuoteModal({
                             </div>
                           ) : null}
 
+                          <div className="mt-4">
+                            <Field label="Run method">
+                              <select
+                                value={runMethod}
+                                onChange={(e) =>
+                                  setRunMethod(
+                                    e.target.value === "plates" ? "plates" : e.target.value === "digital" ? "digital" : "auto",
+                                  )
+                                }
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                                data-run-method
+                              >
+                                <option value="auto" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                  Auto (short runs digital + CAD cut)
+                                </option>
+                                <option value="plates" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                  Print plates (production run)
+                                </option>
+                                <option value="digital" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                  Digital print + CAD cut
+                                </option>
+                              </select>
+                            </Field>
+                            <div className="mt-1 text-xs text-[var(--text-muted)]">
+                              Applies to every box on this quote. Auto uses your shop&apos;s short-run cutoff (Admin
+                              → Corrugated): under it, boxes are digitally printed and CAD cut with no plates.
+                            </div>
+                          </div>
+
                           {quoteType === "boxes_only" ? (
                             <div className="mt-6">
                               <BoxSizesEditor
@@ -1832,6 +1877,16 @@ export default function RepStartQuoteModal({
                                 printColors.length
                                   ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
                                   : "No print"
+                              }
+                            />
+                            <ReviewRow
+                              label="Run method"
+                              value={
+                                runMethod === "plates"
+                                  ? "Print plates (production run)"
+                                  : runMethod === "digital"
+                                    ? "Digital print + CAD cut"
+                                    : "Auto (by quantity)"
                               }
                             />
                             {extraSizes.map((s, i) => (

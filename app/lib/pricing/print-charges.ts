@@ -9,6 +9,9 @@
 //     printingUpcharge = plates total, so existing totals still add up.
 //   legacy — no print_spec: flat art-setup fee + % of (foam + packaging) when
 //     facts.printed is set, exactly as before.
+//
+// Step 15: digitalOnly = the boxes are digitally printed (short run), so there
+// are no plates and no plates line (not "TBD").
 
 import { describePrintSpec, parsePrintSpec } from "@/lib/corrugated-price";
 
@@ -21,6 +24,7 @@ export type PrintCharges = {
   printingUpcharge: number;
   platesTotal: number;
   printSummary: string | null;
+  digitalOnly: boolean;
 };
 
 export function computePrintCharges(args: {
@@ -29,7 +33,10 @@ export function computePrintCharges(args: {
   foamSubtotal: number;
   packagingSubtotal: number;
   platesTotal: number;
+  runMethods?: (string | null | undefined)[]; // Step 15: pricing_detail.run_method per box row
 }): PrintCharges {
+  const digitalOnly =
+    (Number(args.platesTotal) || 0) === 0 && (args.runMethods ?? []).some((m) => m === "digital");
   // Step 9A: multi-size boxes-only quotes print per size (each box row has its
   // own print spec and plates); there is no quote-level print_spec.
   if (args.facts?.print_mode === "per_box") {
@@ -44,7 +51,8 @@ export function computePrintCharges(args: {
       printingUpchargeAmt: 0,
       printingUpcharge: plates,
       platesTotal: plates,
-      printSummary: printed ? "Printed per size (see each box)" : null,
+      printSummary: printed ? (digitalOnly ? "Digital print per size (see each box)" : "Printed per size (see each box)") : null,
+      digitalOnly,
     };
   }
 
@@ -59,7 +67,8 @@ export function computePrintCharges(args: {
       printingUpchargeAmt: 0,
       printingUpcharge: plates,
       platesTotal: plates,
-      printSummary: spec.colors.length > 0 ? describePrintSpec(spec) : null,
+      printSummary: spec.colors.length > 0 ? describePrintSpec(spec, digitalOnly ? "digital" : null) : null,
+      digitalOnly,
     };
   }
 
@@ -78,5 +87,6 @@ export function computePrintCharges(args: {
     printingUpcharge: artSetupFee + printingUpchargeAmt,
     platesTotal: 0,
     printSummary: null,
+    digitalOnly: false,
   };
 }

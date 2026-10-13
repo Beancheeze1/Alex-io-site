@@ -18,17 +18,30 @@
 // unit price; every other box (stock, mailer, fallback) gets a per-box print
 // adder from the same rates. Plates are stored per row (plates_usd) and shown
 // as one line. Quotes without print_spec keep the legacy art-setup fee + %.
+//
+// Short runs (Step 15): facts.run_method = "plates" | "digital" is a staff
+// choice for the whole quote; missing = auto (under the shop's short-run
+// cutoff = digital print + CAD cut, no plates). The method used is saved in
+// pricing_detail.run_method on each row.
 
 import { q, one } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
-import { loadCorrugated, priceCustomRsc, type CustomRscQuote } from "@/lib/corrugated";
+import {
+  loadCorrugated,
+  priceCustomRsc,
+  type CorrugatedConfig,
+  type CustomRscQuote,
+} from "@/lib/corrugated";
+import { computeRscBlank } from "@/lib/corrugated-blank";
 import {
   describePrintSpec,
   parsePrintSpec,
+  parseRunMethod,
   pricePrintAdder,
   type Coverage,
   type PrintAdderResult,
   type PrintSpec,
+  type RunMethod,
 } from "@/lib/corrugated-price";
 import { loadFacts } from "@/app/lib/memory";
 
@@ -109,16 +122,55 @@ export async function printSpecForQuote(quoteNo: string): Promise<PrintSpec | nu
   }
 }
 
-/** Print adder for a non-engine box, from the tenant's corrugated rates. */
+/** Step 15: the staff run-method choice for the whole quote, or null (auto). */
+export async function quoteRunMethod(quoteNo: string): Promise<RunMethod | null> {
+  try {
+    const f = ((await loadFacts(quoteNo)) || {}) as Record<string, unknown>;
+    return parseRunMethod(f.run_method);
+  } catch {
+    return null;
+  }
+}
+
+/** Run-method choice for a quote by id (repricing works from the quote id). */
+async function runMethodForQuoteId(quoteId: number): Promise<RunMethod | null> {
+  const row = await one<{ quote_no: string | null }>(`SELECT quote_no FROM public.quotes WHERE id = $1`, [quoteId]);
+  return row?.quote_no ? quoteRunMethod(String(row.quote_no)) : null;
+}
+
+/** RSC blank area (sq ft, no waste) for a box, on the shop's default grade's flute. */
+function blankSqftEach(cfg: CorrugatedConfig, L: number, W: number, H: number): number | null {
+  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return null;
+  const grade = cfg.grades.find((g) => g.active && g.is_default) ?? cfg.grades.find((g) => g.active);
+  const flute = cfg.flutes.find((f) => f.flute === grade?.flute) ?? cfg.flutes[0];
+  if (!flute) return null;
+  const s = cfg.settings;
+  return computeRscBlank({ L, W, D: H }, flute, {
+    joint_type: s.joint_type,
+    flap_pct: s.flap_pct,
+    round_to_in: s.round_to_in,
+    edge_trim_in: s.edge_trim_in,
+    waste_pct: s.waste_pct,
+  }).sqft_each;
+}
+
+/**
+ * Print adder for a non-engine box, from the tenant's corrugated rates.
+ * Step 15: method = the quote's run-method choice (null = auto); dims = the
+ * box's inside size, for the digital print area.
+ */
 async function printAdderFor(
   tenantId: number | null,
   qty: number,
   print: PrintSpec | null,
+  method: RunMethod | null = null,
+  dims: { L: number; W: number; H: number } | null = null,
 ): Promise<PrintAdderResult | null> {
   if (!print || print.colors.length === 0 || !tenantId) return null;
   try {
     const cfg = await loadCorrugated(tenantId);
-    return pricePrintAdder(qty, print, cfg.settings);
+    const sqftEach = dims ? blankSqftEach(cfg, dims.L, dims.W, dims.H) : null;
+    return pricePrintAdder(qty, print, cfg.settings, { method, sqftEach });
   } catch (e) {
     console.error("[packaging-selection] print adder failed", e);
     return null;
@@ -231,7 +283,7 @@ export async function resolveCustomSelection(
   customStyle: string,
   qty: number,
   tenantId: number | null = null,
-  opts: { gradeId?: number | null; print?: PrintSpec | null } = {},
+  opts: { gradeId?: number | null; print?: PrintSpec | null; method?: RunMethod | null } = {},
 ): Promise<CustomResolvedSelection> {
   const L = customLengthIn;
   const W = customWidthIn;
@@ -241,14 +293,15 @@ export async function resolveCustomSelection(
   const style = String(customStyle || "").toLowerCase();
   const print = opts.print ?? null;
   const printed = !!print && print.colors.length > 0;
-  const printDesc = printed ? ` · ${describePrintSpec(print)}` : "";
+  const method = opts.method ?? null; // Step 15: null = auto by quantity
+  const printDesc = (m: RunMethod | null | undefined) => (printed ? ` · ${describePrintSpec(print, m)}` : "");
 
   if (style !== "rsc" || !tenantId) {
     const p = await nearestStockPrice(L, W, H, qtyForPrice, tenantId);
-    const adder = printed ? await printAdderFor(tenantId, qtyForPrice, print) : null;
+    const adder = printed ? await printAdderFor(tenantId, qtyForPrice, print, method, { L, W, H }) : null;
     const priced = withAdder(p.unit, p.extended, qtyForPrice, adder);
     return {
-      description: `${baseDesc} (${customStyle})${printDesc}`,
+      description: `${baseDesc} (${customStyle})${printDesc(adder?.method)}`,
       unit_price_usd: priced.unit,
       extended_price_usd: priced.extended,
       ...printFields(print, adder, adder ? adder.plates_line_usd : null),
@@ -257,7 +310,7 @@ export async function resolveCustomSelection(
       pricing_source: p.unit != null ? "nearest_stock" : "none",
       needs_review: false,
       pricing_note: adder && adder.warnings.length ? `Check corrugated print rates: ${adder.warnings.join(" ")}` : null,
-      pricing_detail: null,
+      pricing_detail: adder ? { run_method: adder.method } : null,
     };
   }
 
@@ -266,6 +319,7 @@ export async function resolveCustomSelection(
     quantities: [qtyForPrice],
     colors: print ? print.colors : [],
     sides: (print ? print.sides : 1) as 1 | 2,
+    method,
   };
   let engine: CustomRscQuote | null = null;
   let engineError: string | null = null;
@@ -282,31 +336,31 @@ export async function resolveCustomSelection(
 
   const gradeId = engine?.grade?.id ?? null;
   const gradeName = engine?.grade?.name ?? null;
-  const description = (gradeName ? `${baseDesc} (rsc, ${gradeName})` : `${baseDesc} (rsc)`) + printDesc;
+  const rscDesc = gradeName ? `${baseDesc} (rsc, ${gradeName})` : `${baseDesc} (rsc)`;
 
   if (engine && engine.ok) {
     const qp = engine.quantities[0];
     return {
-      description,
+      description: rscDesc + printDesc(qp.method) + (qp.method === "digital" ? " · Short run (CAD cut)" : ""),
       unit_price_usd: qp.unit_price_usd,
       extended_price_usd: qp.extended_usd,
-      ...printFields(print, null, engine.plates_line_usd),
+      ...printFields(print, null, qp.plates_line_usd),
       board_grade_id: gradeId,
       board_grade_name: gradeName,
       pricing_source: "corrugated_engine",
       needs_review: false,
       pricing_note: engine.warnings.length ? `Check corrugated rates: ${engine.warnings.join(" ")}` : null,
-      pricing_detail: { blank: engine.blank, quantity: qp, warnings: engine.warnings, print },
+      pricing_detail: { blank: engine.blank, quantity: qp, warnings: engine.warnings, print, run_method: qp.method },
     };
   }
 
   // Fallback (approved): nearest stock price (+ print adder), flagged for review.
   const p = await nearestStockPrice(L, W, H, qtyForPrice, tenantId);
-  const adder = printed ? await printAdderFor(tenantId, qtyForPrice, print) : null;
+  const adder = printed ? await printAdderFor(tenantId, qtyForPrice, print, method, { L, W, H }) : null;
   const priced = withAdder(p.unit, p.extended, qtyForPrice, adder);
   const reason = engine && !engine.ok ? engine.message : engineError ?? "Corrugated pricing is unavailable.";
   return {
-    description,
+    description: rscDesc + printDesc(adder?.method),
     unit_price_usd: priced.unit,
     extended_price_usd: priced.extended,
     ...printFields(print, adder, adder ? adder.plates_line_usd : null),
@@ -315,7 +369,12 @@ export async function resolveCustomSelection(
     pricing_source: p.unit != null ? "nearest_stock" : "none",
     needs_review: true,
     pricing_note: (p.unit != null ? "Priced from the nearest stock box. " : "No price yet. ") + reason,
-    pricing_detail: engine && !engine.ok ? { error: engine.error } : null,
+    pricing_detail:
+      engine && !engine.ok
+        ? { error: engine.error, ...(adder ? { run_method: adder.method } : {}) }
+        : adder
+          ? { run_method: adder.method }
+          : null,
   };
 }
 
@@ -440,6 +499,8 @@ export async function repriceQuoteBoxes(
         AND ($2::bigint IS NULL OR qbs.id = $2::bigint)`,
     [quoteId, opts.onlyRowId ?? null],
   );
+  // Step 15: the quote's run-method choice (null = auto by quantity).
+  const method = rows.length > 0 ? await runMethodForQuoteId(quoteId) : null;
 
   for (const row of rows) {
     const qty = Math.max(1, Math.round(Number(row.qty) || 1));
@@ -454,7 +515,7 @@ export async function repriceQuoteBoxes(
         String(row.custom_style || ""),
         qty,
         tenantId,
-        { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print },
+        { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print, method },
       );
       const upd = customSelectionUpdate(row.id, resolved);
       await q(upd.text, upd.values);
@@ -475,13 +536,17 @@ export async function repriceQuoteBoxes(
       },
       qty,
     );
-    const adder = await printAdderFor(tenantId, qty, print);
+    const adder = await printAdderFor(tenantId, qty, print, method, {
+      L: Number(row.inside_length_in),
+      W: Number(row.inside_width_in),
+      H: Number(row.inside_height_in),
+    });
     const priced = withAdder(base.unit_price_usd, base.extended_price_usd, qty, adder);
     const pf = printFields(print, adder, adder ? adder.plates_line_usd : null);
     // Step 4B: stock rows say how they're printed, like custom rows do.
     const stockDescription =
       print && print.colors.length > 0
-        ? `${base.description} · ${describePrintSpec(print)}`
+        ? `${base.description} · ${describePrintSpec(print, adder?.method)}`
         : base.description;
     await q(
       `UPDATE public.quote_box_selections
@@ -492,7 +557,8 @@ export async function repriceQuoteBoxes(
               print_usd = $6,
               plates_usd = $7,
               pricing_note = $8,
-              description = $9
+              description = $9,
+              pricing_detail = $10::jsonb
         WHERE id = $1`,
       [
         row.id,
@@ -504,6 +570,7 @@ export async function repriceQuoteBoxes(
         pf.plates_usd,
         adder && adder.warnings.length ? `Check corrugated print rates: ${adder.warnings.join(" ")}` : null,
         stockDescription,
+        adder ? JSON.stringify({ run_method: adder.method }) : null,
       ],
     );
   }
@@ -563,6 +630,8 @@ export async function priceQuoteBoxesAtQtys(
       ORDER BY qbs.id`,
     [quoteId, opts.onlyRowId ?? null],
   );
+  // Step 15: the quote's run-method choice; auto re-decides at each quantity.
+  const method = rows.length > 0 ? await runMethodForQuoteId(quoteId) : null;
 
   const out: BoxBreakPrice[] = [];
   for (const rawQty of qtys) {
@@ -587,7 +656,7 @@ export async function priceQuoteBoxesAtQtys(
           String(row.custom_style || ""),
           qty,
           tenantId,
-          { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print },
+          { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print, method },
         );
         ext = r.extended_price_usd;
         u = r.unit_price_usd;
@@ -606,7 +675,11 @@ export async function priceQuoteBoxesAtQtys(
           },
           qty,
         );
-        const adder = await printAdderFor(tenantId, qty, print);
+        const adder = await printAdderFor(tenantId, qty, print, method, {
+          L: Number(row.inside_length_in),
+          W: Number(row.inside_width_in),
+          H: Number(row.inside_height_in),
+        });
         const p = withAdder(base.unit_price_usd, base.extended_price_usd, qty, adder);
         ext = p.extended;
         u = p.unit;

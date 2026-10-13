@@ -15,7 +15,7 @@ import {
   type FluteSpec,
   type JointType,
 } from "@/lib/corrugated-blank";
-import { priceRscBox, type BoxPriceResult, type Coverage } from "@/lib/corrugated-price";
+import { priceRscBox, type BoxPriceResult, type Coverage, type RunMethod } from "@/lib/corrugated-price";
 
 export type CorrugatedSettings = CorrugatedRates & {
   joint_type: JointType;
@@ -245,6 +245,7 @@ export type CustomRscRequest = {
   grade_id: number | null; // null = the shop's default grade
   colors: Coverage[];
   sides: 1 | 2;
+  method?: RunMethod | null; // Step 15: null / missing = auto by quantity
 };
 
 export type CustomRscQuote = BoxPriceResult & {
@@ -279,6 +280,7 @@ export async function priceCustomRsc(tenantId: number, req: CustomRscRequest): P
     grade: { name: grade.name, cost_per_msf: grade.cost_per_msf },
     flute,
     settings: cfg.settings,
+    method: req.method ?? null,
   });
   return { ...result, grade: { id: grade.id, name: grade.name, flute: grade.flute } };
 }
@@ -310,6 +312,8 @@ export function validateCorrugatedInput(
 
     const rates = {} as CorrugatedRates;
     for (const f of RATE_FIELDS) rates[f.key] = numIn(s[f.key], f.label, 0, f.max);
+    // Step 15: the short-run cutoff is a box count.
+    rates.digital_under_qty = Math.round(rates.digital_under_qty);
 
     const joint_type = String(s.joint_type ?? "") as JointType;
     if (!JOINT_TYPES.includes(joint_type)) {

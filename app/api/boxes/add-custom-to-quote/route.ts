@@ -35,6 +35,7 @@ import { boxEditGuard } from "@/lib/box-edit-guard";
 import {
   customSelectionInsert,
   printSpecForQuote,
+  quoteRunMethod,
   resolveCustomSelection,
 } from "@/app/lib/packaging-selection";
 
@@ -179,7 +180,8 @@ export async function POST(req: NextRequest) {
         : parseGradeId(body.grade_id);
 
     const print = await printSpecForQuote(quote.quote_no);
-    const resolved = await resolveCustomSelection(L, W, H, style, qty, quote.tenant_id, { gradeId, print });
+    const method = await quoteRunMethod(quote.quote_no);
+    const resolved = await resolveCustomSelection(L, W, H, style, qty, quote.tenant_id, { gradeId, print, method });
 
     const selection = await withTxn(async (tx) => {
       // A quote has at most one custom selection — replace, don't accumulate.

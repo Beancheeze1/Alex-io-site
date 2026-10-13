@@ -16,6 +16,7 @@ import {
   JOINT_TYPES,
   RATE_FIELDS,
   ROUND_TO_OPTIONS,
+  SHORT_RUN_KEYS,
   computeRscBlank,
   formatInches,
   parseInches,
@@ -163,6 +164,8 @@ type PriceCheckRow = {
   min_applied: boolean;
   unit_price_usd: number;
   extended_usd: number;
+  method?: "plates" | "digital"; // Step 15
+  plates_line_usd?: number;
 };
 
 type PriceCheckResponse = {
@@ -203,6 +206,7 @@ export default function CorrugatedSettingsPage() {
   const [pcQty, setPcQty] = React.useState("1000 5000");
   const [pcColors, setPcColors] = React.useState<("spot" | "flood")[]>([]);
   const [pcSides, setPcSides] = React.useState<1 | 2>(1);
+  const [pcMethod, setPcMethod] = React.useState<"auto" | "plates" | "digital">("auto");
   const [pcBusy, setPcBusy] = React.useState(false);
   const [pcResult, setPcResult] = React.useState<PriceCheckResponse | null>(null);
 
@@ -455,6 +459,7 @@ export default function CorrugatedSettingsPage() {
           grade_id: selected?.id ?? null,
           colors: pcColors,
           sides: pcSides,
+          method: pcMethod === "auto" ? null : pcMethod,
         }),
       });
       const body = (await res.json().catch(() => null)) as PriceCheckResponse | null;
@@ -704,7 +709,48 @@ export default function CorrugatedSettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {RATE_FIELDS.map((f) => (
+                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key)).map((f) => (
+                  <tr key={f.key} className="border-t border-[var(--border)]">
+                    <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
+                    <td className={`${TD} w-36`}>
+                      <input
+                        className={INPUT}
+                        inputMode="decimal"
+                        value={rates[f.key]}
+                        aria-label={f.label}
+                        onChange={(e) => setRate(f.key, e.target.value)}
+                      />
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>{f.unit}</td>
+                    <td className={`${TD} text-[var(--text-muted)]`}>{f.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Step 15: short runs — digital print + CAD cut */}
+        <section className={`${CARD} mb-6`} data-short-run-rates>
+          <div className={SECTION_LABEL}>Short runs (digital print + CAD cut)</div>
+          <p className="mb-3 mt-1 text-xs">
+            Small orders that are digitally printed and cut on the CAD table: no plates, no press setup, no
+            converting line. Buyer quotes under the cutoff use these rates automatically; staff can pick print
+            plates or digital on any quote. Short runs stay off until the cutoff and a CAD cut rate are both set.
+            Board, markup and the minimum order still apply.
+          </p>
+          <div className={TABLE_WRAP}>
+            <table className="min-w-full text-left text-xs">
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TH}>Setting</th>
+                  <th className={TH}>Value</th>
+                  <th className={TH}>Unit</th>
+                  <th className={TH}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {RATE_FIELDS.filter((f) => SHORT_RUN_KEYS.has(f.key)).map((f) => (
                   <tr key={f.key} className="border-t border-[var(--border)]">
                     <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
                     <td className={`${TD} w-36`}>
@@ -973,7 +1019,7 @@ export default function CorrugatedSettingsPage() {
             settings, the same way custom-size box quotes will be priced.
             {dirty ? " You have unsaved changes; save first to include them." : ""}
           </p>
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-5">
             <label className={FIELD_LABEL}>
               <span className="text-[var(--text-primary)]">Quantities (up to 4, e.g. 1000 5000)</span>
               <input className={INPUT} value={pcQty} onChange={(e) => setPcQty(e.target.value)} />
@@ -1005,6 +1051,20 @@ export default function CorrugatedSettingsPage() {
               >
                 <option value="1">One side</option>
                 <option value="2">Two sides</option>
+              </select>
+            </label>
+            <label className={FIELD_LABEL}>
+              <span className="text-[var(--text-primary)]">Run method</span>
+              <select
+                className={INPUT}
+                value={pcMethod}
+                onChange={(e) =>
+                  setPcMethod(e.target.value === "plates" ? "plates" : e.target.value === "digital" ? "digital" : "auto")
+                }
+              >
+                <option value="auto">Auto (by quantity)</option>
+                <option value="plates">Print plates</option>
+                <option value="digital">Digital + CAD cut</option>
               </select>
             </label>
             <div className="flex items-end">
@@ -1061,18 +1121,21 @@ export default function CorrugatedSettingsPage() {
                     <thead className={THEAD}>
                       <tr>
                         <th className={TH}>Quantity</th>
+                        <th className={TH}>Run</th>
                         <th className={`${TH} text-right`}>Board</th>
                         <th className={`${TH} text-right`}>Converting</th>
                         <th className={`${TH} text-right`}>Print run</th>
                         <th className={`${TH} text-right`}>Setup</th>
                         <th className={`${TH} text-right`}>Box total</th>
                         <th className={`${TH} text-right`}>Unit price</th>
+                        <th className={`${TH} text-right`}>Plates (one time)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(pcResult.quantities ?? []).map((qr) => (
                         <tr key={qr.quantity} className="border-t border-[var(--border)]">
                           <td className={TD}>{qr.quantity.toLocaleString("en-US")}</td>
+                          <td className={TD}>{qr.method === "digital" ? "Digital + CAD cut" : "Plates"}</td>
                           <td className={`${TD} text-right`}>{usd(qr.board_usd)}</td>
                           <td className={`${TD} text-right`}>{usd(qr.converting_usd)}</td>
                           <td className={`${TD} text-right`}>{usd(qr.print_run_usd)}</td>
@@ -1084,22 +1147,21 @@ export default function CorrugatedSettingsPage() {
                           <td className={`${TD} text-right font-medium text-[var(--text-primary)]`}>
                             ${qr.unit_price_usd.toFixed(4)}
                           </td>
+                          <td className={`${TD} text-right`}>
+                            {pcResult.colors && qr.method !== "digital" ? usd(qr.plates_line_usd ?? 0) : "—"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {pcResult.colors ? (
-                  <p className="mt-2 text-[11px]">
-                    Plates (one time, with markup): {usd(pcResult.plates_line_usd ?? 0)}
-                  </p>
-                ) : null}
                 {pcResult.warnings && pcResult.warnings.length ? (
                   <p className="mt-2 text-[11px] text-[var(--attention)]">Check: {pcResult.warnings.join(" ")}</p>
                 ) : null}
                 <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                   Board, converting, print run and setup are your costs before markup. Box total and unit price
-                  include markup and the minimum order.
+                  include markup and the minimum order; plates include markup. Short runs show CAD cut under
+                  Converting and digital print under Print run.
                 </p>
               </div>
             )

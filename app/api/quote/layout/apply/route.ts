@@ -50,6 +50,7 @@ import {
   customSelectionInsert,
   customSelectionUpdate,
   printSpecForQuote,
+  quoteRunMethod,
   repriceQuoteBoxes,
   resolveCustomSelection,
 } from "@/app/lib/packaging-selection";
@@ -1737,6 +1738,7 @@ export async function POST(req: NextRequest) {
             WHERE quote_id = $1 AND kind = 'custom'`,
           [quote.id],
         );
+        const runMethod = customRows.length > 0 ? await quoteRunMethod(String(quoteNo)) : null;
         for (const row of customRows) {
           const resolved = await resolveCustomSelection(
             Number(row.custom_length_in),
@@ -1745,7 +1747,7 @@ export async function POST(req: NextRequest) {
             row.custom_style,
             qtyMaybe,
             tenantId,
-            { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id) },
+            { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), method: runMethod },
           );
           const upd = customSelectionUpdate(row.id, resolved);
           await q(upd.text, upd.values);
@@ -2531,7 +2533,7 @@ export async function POST(req: NextRequest) {
                 boxesTouched = true;
                 const resolved = await resolveCustomSelection(
                   L, W, H, customStyle, qtyForCarton, tenantId,
-                  { gradeId: gradeIdForCarton },
+                  { gradeId: gradeIdForCarton, method: await quoteRunMethod(String(quoteNo)) },
                 );
 
                 await q(

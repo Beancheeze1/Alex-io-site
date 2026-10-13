@@ -152,6 +152,7 @@ type ApiOk = {
   isPrinted?: boolean;
   printModel?: "per_color" | "legacy";
   printSummary?: string | null;
+  digitalOnly?: boolean; // Step 15: digitally printed short run, no plates line
   customerBoxDims?: { L: number; W: number; H: number; style?: "mailer" | "rsc" } | null;
   packagingLines?: RequestedBox[];
   salesRepEmail?: string | null;
@@ -840,6 +841,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   // Printed flag and customer box dims from API
   const [isPrinted, setIsPrinted] = React.useState<boolean>(false);
   const [printModel, setPrintModel] = React.useState<"per_color" | "legacy">("legacy");
+  const [digitalOnly, setDigitalOnly] = React.useState<boolean>(false);
   const [printSummary, setPrintSummary] = React.useState<string | null>(null);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number; style?: "mailer" | "rsc" } | null>(null);
 
@@ -1095,6 +1097,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setPrintModel(asOk.printModel === "per_color" ? "per_color" : "legacy");
+        setDigitalOnly(asOk.digitalOnly === true);
         setPrintSummary(typeof asOk.printSummary === "string" ? asOk.printSummary : null);
         setCustomerBoxDims(asOk.customerBoxDims ?? null);
         setSalesRepEmail(typeof asOk.salesRepEmail === "string" ? asOk.salesRepEmail : null);
@@ -2656,7 +2659,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </div>
                       )}
 
-                      {(isPrinted || effectivePrintingUpcharge > 0) && (
+                      {((isPrinted && !digitalOnly) || effectivePrintingUpcharge > 0) && (
                         <div>
                           <div style={labelStyle}>{printModel === "per_color" ? "Printing plates (one time)" : "Printing upcharge"}</div>
                           <div style={{ fontSize: 13 }}>{effectivePrintingUpcharge > 0 ? formatUsd(effectivePrintingUpcharge) : "TBD"}</div>
@@ -3263,7 +3266,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       })}
 
                       {/* Printing upcharge — inside the Packaging section */}
-                      {(isPrinted || effectivePrintingUpcharge > 0) && (
+                      {((isPrinted && !digitalOnly) || effectivePrintingUpcharge > 0) && (
                         <tr>
                           <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                             <div

@@ -240,6 +240,7 @@ export async function POST(req: NextRequest) {
         `SELECT qbs.id, qbs.sku, qbs.qty,
                 qbs.unit_price_usd, qbs.extended_price_usd,
                 (to_jsonb(qbs) ->> 'plates_usd')::numeric as plates_usd,
+                (to_jsonb(qbs) -> 'pricing_detail' ->> 'run_method') as run_method,
                 b.vendor,
                 coalesce(b.style, qbs.custom_style) as style,
                 coalesce(qbs.description, b.description) as description,
@@ -276,7 +277,14 @@ export async function POST(req: NextRequest) {
     }
     // Same printing rules as /api/quote/print (app/lib/pricing/print-charges.ts).
     const platesTotal = packagingLines.reduce((s, l) => s + (Number((l as any).plates_usd) || 0), 0);
-    const pc = computePrintCharges({ facts, settings, foamSubtotal, packagingSubtotal, platesTotal });
+    const pc = computePrintCharges({
+      facts,
+      settings,
+      foamSubtotal,
+      packagingSubtotal,
+      platesTotal,
+      runMethods: packagingLines.map((l) => (l as { run_method?: string | null }).run_method),
+    });
     const { isPrinted, artSetupFee, printingUpchargePct, printingUpchargeAmt, printingUpcharge } = pc;
 
     // Die-cutting charge: same rule as /api/quote/print — flat fee once the

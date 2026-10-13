@@ -23,6 +23,7 @@ import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
+import RunMethodControl from "@/components/admin/RunMethodControl";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 
 
@@ -2503,6 +2504,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 {quoteNoValue ? (
                   <RepriceQuoteButton quoteNo={quoteNoValue} locked={!!quoteState?.locked} />
                 ) : null}
+                {quoteNoValue && (boxSelections?.length ?? 0) > 0 ? <RunMethodControl quoteNo={quoteNoValue} /> : null}
                 {items.length === 0 ? (
                   <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                     No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.

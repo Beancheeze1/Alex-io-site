@@ -14,6 +14,7 @@ import { isPlatformOwner } from "@/lib/admin-auth";
 import {
   customSelectionUpdate,
   printSpecForQuote,
+  quoteRunMethod,
   resolveCustomSelection,
 } from "@/app/lib/packaging-selection";
 
@@ -130,7 +131,7 @@ export async function POST(req: NextRequest) {
       row.custom_style,
       Number(row.qty) || 1,
       Number(quote.tenant_id),
-      { gradeId, print: await printSpecForQuote(quote.quote_no) },
+      { gradeId, print: await printSpecForQuote(quote.quote_no), method: await quoteRunMethod(quote.quote_no) },
     );
     const upd = customSelectionUpdate(row.id, resolved);
     const saved = await q(upd.text, upd.values);

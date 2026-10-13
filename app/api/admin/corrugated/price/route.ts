@@ -5,13 +5,14 @@
 // priceCustomRsc -> lib/corrugated-price.ts). Admin only. Read-only.
 //
 // POST { L, W, D, quantities: number[], grade_id?: number|null,
-//        colors?: ("spot"|"flood")[], sides?: 1|2 }
+//        colors?: ("spot"|"flood")[], sides?: 1|2,
+//        method?: "plates"|"digital"|null }   // Step 15: null = auto by quantity
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { priceCustomRsc } from "@/lib/corrugated";
-import type { Coverage } from "@/lib/corrugated-price";
+import { parseRunMethod, type Coverage } from "@/lib/corrugated-price";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
       grade_id,
       colors,
       sides,
+      method: parseRunMethod(b.method),
     });
     return json(result, result.ok ? 200 : 400);
   } catch (e: any) {

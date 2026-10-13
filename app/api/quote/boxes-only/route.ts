@@ -27,6 +27,7 @@
 //   box: { sku } | { L, W, D, style: "rsc"|"mailer", grade_id? },
 //   print_spec?: { colors: ("spot"|"flood")[], sides: 1|2 },
 //   qty_breaks?: number[],   // up to 3 more quantities to compare (Step 5)
+//   run_method?: "plates" | "digital",  // Step 15, staff only; else auto
 //   notes?
 // }
 // -> { ok, quote_no, url }
@@ -39,7 +40,7 @@ import { resolveTenantFromHost } from "@/lib/tenant";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
-import { parsePrintSpec, type PrintSpec } from "@/lib/corrugated-price";
+import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { tenantOffersQuoteType } from "@/lib/quote-types-server";
 import {
@@ -123,6 +124,8 @@ export async function POST(req: NextRequest) {
     }
 
     const print: PrintSpec = parsePrintSpec(b.print_spec) ?? { colors: [], sides: 1 };
+    // Step 15: only staff choose plates vs digital; buyers are always auto.
+    const runMethod = isStaff ? parseRunMethod(b.run_method) : null;
     const notes = str(b.notes, 2000);
 
     // Quantity breaks (Step 5): the ordered qty plus up to 3 more, ascending.
@@ -241,6 +244,7 @@ export async function POST(req: NextRequest) {
       qty,
       print_spec: print,
       printed: print.colors.length > 0 ? 1 : 0,
+      ...(runMethod ? { run_method: runMethod } : {}),
       ...(custom ? { customer_box_in: { L: custom.L, W: custom.W, H: custom.D, style: custom.style } } : {}),
       ...(notes ? { customer_notes: notes } : {}),
       ...(qtyBreaks.length > 1 ? { box_qty_breaks: qtyBreaks } : {}),
@@ -251,6 +255,7 @@ export async function POST(req: NextRequest) {
       const resolved = await resolveCustomSelection(custom.L, custom.W, custom.D, custom.style, qty, tenantId, {
         gradeId: custom.gradeId,
         print,
+        method: runMethod,
       });
       const ins = customSelectionInsert({
         quoteId: quote.id,

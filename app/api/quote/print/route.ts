@@ -685,6 +685,8 @@ export async function GET(req: NextRequest) {
         qbs.extended_price_usd,
         -- via to_jsonb so this keeps working before migration 027 adds the column
         (to_jsonb(qbs) ->> 'plates_usd')::numeric as plates_usd,
+        -- Step 15: "digital" (short run) or "plates"
+        (to_jsonb(qbs) -> 'pricing_detail' ->> 'run_method') as run_method,
         b.vendor,
         coalesce(b.style, qbs.custom_style) as style,
         coalesce(qbs.description, b.description) as description,
@@ -727,7 +729,14 @@ export async function GET(req: NextRequest) {
       (s, l) => s + (Number((l as any).plates_usd) || 0),
       0,
     );
-    const pc = computePrintCharges({ facts, settings, foamSubtotal, packagingSubtotal, platesTotal });
+    const pc = computePrintCharges({
+      facts,
+      settings,
+      foamSubtotal,
+      packagingSubtotal,
+      platesTotal,
+      runMethods: packagingLinesForDisplay.map((l) => (l as { run_method?: string | null }).run_method),
+    });
     const { isPrinted, artSetupFee, printingUpchargePct, printingUpchargeAmt, printingUpcharge } = pc;
 
     // Die-cutting charge: flat fee triggered once order qty reaches the
@@ -762,6 +771,7 @@ export async function GET(req: NextRequest) {
       printModel: pc.printModel,
       printSummary: pc.printSummary,
       platesTotal: pc.platesTotal,
+      digitalOnly: pc.digitalOnly,
       customerBoxDims: customerBox ?? null,
       facts,
       salesRepEmail,

@@ -70,7 +70,22 @@ export const RATE_FIELDS = [
   { key: "print_run_flood_per_m", label: "Print run — flood", unit: "$ per 1,000 per color", max: 1000000, note: "Ink + press time" },
   { key: "markup_pct", label: "Markup", unit: "%", max: 1000, note: "Applied to total cost, plates included" },
   { key: "min_order_usd", label: "Minimum order", unit: "$", max: 1000000, note: "Floor on boxes + plates" },
+  // Step 15: short runs, digitally printed and CAD cut (no plates, no press).
+  { key: "digital_under_qty", label: "Short-run cutoff", unit: "boxes", max: 1000000, note: "Quantities under this are digitally printed and CAD cut. 0 = off. Starts once a CAD cut rate is set." },
+  { key: "cad_setup_usd", label: "CAD table setup", unit: "$ per order", max: 1000000, note: "Short runs: replaces order setup" },
+  { key: "cad_cut_per_box_usd", label: "CAD cut", unit: "$ per box", max: 1000000, note: "Short runs: replaces converting" },
+  { key: "digital_setup_usd", label: "Digital print setup", unit: "$ per order", max: 1000000, note: "File prep; printed short runs only" },
+  { key: "digital_per_sqft_usd", label: "Digital print", unit: "$ per sq ft per side", max: 1000000, note: "Blank area, full color; no plates" },
 ] as const;
+
+/** Step 15: the rate fields shown under "Short runs" on the admin page. */
+export const SHORT_RUN_KEYS: ReadonlySet<string> = new Set([
+  "digital_under_qty",
+  "cad_setup_usd",
+  "cad_cut_per_box_usd",
+  "digital_setup_usd",
+  "digital_per_sqft_usd",
+]);
 
 export type RateKey = (typeof RATE_FIELDS)[number]["key"];
 export type CorrugatedRates = Record<RateKey, number>;

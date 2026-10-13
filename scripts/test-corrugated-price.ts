@@ -10,6 +10,7 @@ import {
   parsePrintSpec,
   pricePrintAdder,
   priceRscBox,
+  resolveRunMethod,
   type BoxSettings,
   type PriceRscInput,
 } from "../lib/corrugated-price";
@@ -27,6 +28,12 @@ const settings: BoxSettings = {
   print_run_flood_per_m: 40,
   markup_pct: 30,
   min_order_usd: 250,
+  // Step 15: short runs off here; tested below with their own settings.
+  digital_under_qty: 0,
+  cad_setup_usd: 0,
+  cad_cut_per_box_usd: 0,
+  digital_setup_usd: 0,
+  digital_per_sqft_usd: 0,
   joint_type: "glued",
   flap_pct: 50,
   round_to_in: 0.0625,
@@ -135,6 +142,57 @@ check(
   "describePrintSpec",
   describePrintSpec({ colors: ["spot", "flood"], sides: 2 }) === "2-color print (1 spot, 1 flood), two sides",
   describePrintSpec({ colors: ["spot", "flood"], sides: 2 }),
+);
+
+// 6. Step 15: short runs (digital print + CAD cut)
+const sr: BoxSettings = {
+  ...settings,
+  digital_under_qty: 50,
+  cad_setup_usd: 40,
+  cad_cut_per_box_usd: 2,
+  digital_setup_usd: 25,
+  digital_per_sqft_usd: 0.5,
+  min_order_usd: 0,
+};
+check("auto: 49 is digital", resolveRunMethod(null, 49, sr) === "digital");
+check("auto: 50 is plates", resolveRunMethod(null, 50, sr) === "plates");
+check("auto: off without a CAD cut rate", resolveRunMethod(null, 10, { ...sr, cad_cut_per_box_usd: 0 }) === "plates");
+check("auto: off with cutoff 0", resolveRunMethod(null, 10, { ...sr, digital_under_qty: 0 }) === "plates");
+check("choice wins", resolveRunMethod("plates", 10, sr) === "plates" && resolveRunMethod("digital", 5000, sr) === "digital");
+
+const d1 = priceRscBox({ ...base, settings: sr, quantities: [25, 1000], print: { colors: ["spot", "flood"], sides: 1 } });
+if (!d1.ok) {
+  check("short run prices", false, d1);
+} else {
+  const [q25, q1000] = d1.quantities;
+  const sq = d1.blank.sqft_each;
+  // 25 boxes: converting = 25 x $2; print = 25 x sq ft x $0.50; setup = $40 + $25
+  check("25 is digital", q25.method === "digital", q25);
+  check("25: no plates", q25.plates_line_usd === 0, q25);
+  check("25: CAD converting $50", q25.converting_usd === 50, q25);
+  check("25: digital print run", near(q25.print_run_usd, 25 * sq * 0.5), { got: q25.print_run_usd, want: 25 * sq * 0.5 });
+  check("25: setup $65", q25.setup_usd === 65, q25);
+  check("1000 is plates", q1000.method === "plates" && q1000.plates_line_usd === 455, q1000);
+}
+const d2 = priceRscBox({ ...base, settings: sr, quantities: [25], print: { colors: [], sides: 1 } });
+check(
+  "plain short run: CAD cut, no print",
+  d2.ok && d2.quantities[0].method === "digital" && d2.quantities[0].print_run_usd === 0 && d2.quantities[0].setup_usd === 40,
+  d2,
+);
+const d3 = priceRscBox({ ...base, settings: sr, quantities: [25], method: "plates" });
+check("staff choice: plates at 25", d3.ok && d3.quantities[0].method === "plates" && d3.quantities[0].plates_line_usd === 195, d3);
+const d4 = priceRscBox({ ...base, settings: { ...sr, cad_cut_per_box_usd: 0 }, quantities: [25], method: "digital" });
+check("forced digital with $0 CAD rate warns", d4.ok && d4.warnings.includes("CAD cut rate is $0."), d4);
+
+const da = pricePrintAdder(20, { colors: ["spot"], sides: 2 }, sr, { sqftEach: 4 });
+// run = 20 x 4 x 0.50 x 2 = 80; setup 25; x 1.3 = 136.50
+check("digital adder", da.method === "digital" && da.print_total_usd === 136.5 && da.plates_line_usd === 0, da);
+const dp = pricePrintAdder(20, { colors: ["spot"], sides: 1 }, sr, { method: "plates" });
+check("adder with plates choice", dp.method === "plates" && dp.plates_line_usd === 195, dp);
+check(
+  "describePrintSpec digital",
+  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }, "digital") === "Digital print, two sides",
 );
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
