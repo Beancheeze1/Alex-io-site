@@ -73,6 +73,52 @@ function json(body: any, status = 200) {
   return NextResponse.json(body, { status });
 }
 
+/**
+ * Step 16: a boxes-only quote has boxes but no foam layout, so there is no
+ * layout package / CAD to freeze. Boxes-only = facts.pack_type "boxes_only",
+ * or no foam lines and at least one box.
+ */
+async function boxesOnlyInfo(quoteId: number, quoteNo: string): Promise<{ boxesOnly: boolean; boxes: number }> {
+  const counts = await one<{ items: number; boxes: number }>(
+    `
+    select
+      (select count(*) from quote_items where quote_id = $1)::int as items,
+      (select count(*) from quote_box_selections where quote_id = $1)::int as boxes
+    `,
+    [quoteId],
+  );
+  const items = Number(counts?.items) || 0;
+  const boxes = Number(counts?.boxes) || 0;
+  let packType = "";
+  try {
+    const facts = ((await loadFacts(quoteNo)) || {}) as { pack_type?: unknown };
+    packType = String(facts.pack_type || "");
+  } catch {
+    // non-fatal
+  }
+  return { boxesOnly: packType === "boxes_only" || (items === 0 && boxes > 0), boxes };
+}
+
+/** Released revision mint (Path A): A, then B, C… on each release. Non-fatal. */
+async function mintReleasedRev(quoteNo: string): Promise<void> {
+  try {
+    const facts: any = await loadFacts(quoteNo);
+    const curReleased = facts?.released_rev || "";
+    const nextReleased = nextReleasedLetter(curReleased);
+    facts.released_rev = nextReleased;
+    facts.revision = nextReleased; // locked displays released
+    if (!facts.stage_rev) {
+      // Ensure staging exists for the chain, but do not advance it here.
+      const cur = facts?.revision || "";
+      facts.stage_rev = normalizeRevLabel(cur).endsWith("S") ? normalizeRevLabel(cur) : "AS";
+    }
+    facts.released_from_stage = facts.stage_rev || null;
+    await saveFacts(quoteNo, facts);
+  } catch {
+    // non-fatal
+  }
+}
+
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromRequest(req as any);
   const enforced = await enforceTenantMatch(req, user);
@@ -121,7 +167,9 @@ export async function POST(req: NextRequest) {
       [quote.id, user.tenant_id],
     );
 
-    return json({ ok: true, locked: false });
+    // Step 16: boxes-only quotes have no layout editor; the caller opens the quote page.
+    const info = await boxesOnlyInfo(quote.id, quote.quote_no);
+    return json({ ok: true, locked: false, boxes_only: info.boxesOnly });
   }
 
   // Load the latest package as the staging source we are about to freeze.
@@ -145,8 +193,35 @@ export async function POST(req: NextRequest) {
   );
 
   if (!pkg?.layout_json) {
+    // Step 16: boxes-only quotes have no foam layout or CAD. Release = lock the
+    // quote (prices and boxes freeze) and mint the released revision.
+    const info = await boxesOnlyInfo(quote.id, quote.quote_no);
+    if (info.boxesOnly && info.boxes > 0) {
+      if (!quote.locked) {
+        await q(
+          `
+          update quotes
+          set locked = true,
+              geometry_hash = null,
+              locked_at = now(),
+              updated_by_user_id = $2
+          where id = $1
+            and tenant_id = $3
+          `,
+          [quote.id, user.id, user.tenant_id],
+        );
+        await mintReleasedRev(quoteNo);
+      }
+      return json({ ok: true, locked: true, boxes_only: true, geometry_hash: null, release_pkg_id: null });
+    }
     return json(
-      { ok: false, error: "LAYOUT_NOT_FOUND", message: "No layout package found for this quote." },
+      {
+        ok: false,
+        error: "LAYOUT_NOT_FOUND",
+        message: info.boxesOnly
+          ? "This quote has no boxes yet. Add a box before releasing it."
+          : "No layout package found for this quote.",
+      },
       404,
     );
   }
@@ -277,22 +352,7 @@ export async function POST(req: NextRequest) {
   });
 
   // --- RELEASED REV MINT (Path A) ---
-  try {
-    const facts: any = await loadFacts(quoteNo);
-    const curReleased = facts?.released_rev || "";
-    const nextReleased = nextReleasedLetter(curReleased);
-    facts.released_rev = nextReleased;
-    facts.revision = nextReleased; // locked displays released
-    if (!facts.stage_rev) {
-      // Ensure staging exists for the chain, but do not advance it here.
-      const cur = facts?.revision || "";
-      facts.stage_rev = normalizeRevLabel(cur).endsWith("S") ? normalizeRevLabel(cur) : "AS";
-    }
-    facts.released_from_stage = facts.stage_rev || null;
-    await saveFacts(quoteNo, facts);
-  } catch {
-    // non-fatal
-  }
+  await mintReleasedRev(quoteNo);
   // --- END RELEASED REV MINT ---
 
   return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id });

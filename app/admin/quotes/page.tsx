@@ -268,8 +268,10 @@ export default function AdminQuotesPage() {
       } else {
         router.refresh();
       }
+      return data;
     } catch (e: any) {
       alert(e?.message || "Lock action failed");
+      return null;
     } finally {
       setRowBusy((m) => ({ ...m, [quoteNo]: false }));
     }
@@ -279,7 +281,12 @@ export default function AdminQuotesPage() {
     // If Released for Mfg, Revise should unlock + open editor. Every Apply now
     // bumps its own staging revision unconditionally, so there's nothing to arm.
     if (isLocked) {
-      await setQuoteLock(quoteNo, false);
+      const data = await setQuoteLock(quoteNo, false);
+      // Step 16: boxes-only quotes have no layout editor; open the quote page.
+      if (data?.boxes_only) {
+        router.push(`/admin/quotes/${encodeURIComponent(quoteNo)}`);
+        return;
+      }
     }
 
     // Go straight to editor
