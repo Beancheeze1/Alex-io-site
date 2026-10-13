@@ -978,7 +978,7 @@ export default function StartQuoteModal({
     steps.push(
       mk(
         "type",
-        "Quote Type",
+        offeredTypes.length > 1 ? "Quote Type" : "Quantity",
         activeStep === "type" ? "active" : qtyOk ? "done" : "upcoming",
       ),
     );

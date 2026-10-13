@@ -265,7 +265,8 @@ async function callOpenAIBoxes(args: {
     "- Never invent facts. If unsure, ask.\n" +
     "- When the user gives several facts at once, acknowledge them and move on.\n" +
     "- Never quote a price; the quote form calculates it.\n" +
-    "- Up to 6 short quick replies when useful.\n\n" +
+    "- Up to 6 short quick replies when useful.\n" +
+    "- When asking for the name or email, leave quickReplies empty. Never suggest example names or emails.\n\n" +
     "FIELDS:\n" +
     "- boxL, boxW, boxD: the box INSIDE dimensions in inches, length x width x depth. '12x10x8' -> boxL='12', boxW='10', boxD='8'.\n" +
     "- boxStyle: 'rsc' (regular slotted container / shipper, tape-sealed) or 'mailer' (tuck-top lid, no tape).\n" +
@@ -398,7 +399,10 @@ export async function handleBoxesTurn(args: {
 
   const done = ai.done && isBoxesReady(merged);
   const next = nextBoxQuestion(merged);
-  const quickReplies = done ? [] : ai.quickReplies.length >= 2 ? ai.quickReplies.slice(0, 6) : next.quickReplies;
+  // Name / email questions never get quick replies (the AI sometimes invents an example email).
+  const asksContact = /full name|email/i.test(next.assistantMessage);
+  const quickReplies =
+    done || asksContact ? [] : ai.quickReplies.length >= 2 ? ai.quickReplies.slice(0, 6) : next.quickReplies;
 
   return { assistantMessage: ai.assistantMessage, facts: merged, done, quickReplies };
 }

@@ -309,7 +309,8 @@ export default function TenantsPage() {
   function updateEdit(id: number, patch: Partial<EditState>) {
     setEdit((prev) => ({
       ...prev,
-      [id]: { ...(prev[id] as EditState), ...patch, ok: false, error: null },
+      // Defaults first so a patch's own ok / error (save result, validation) is kept.
+      [id]: { ...(prev[id] as EditState), ok: false, error: null, ...patch },
     }));
   }
 
