@@ -45,6 +45,7 @@ type QuoteRow = {
   updated_at: string | null;
   locked?: boolean | null;
   locked_at?: string | null;
+  boxes_only?: boolean; // Step 17
 };
 
 type QuotesResponse = {
@@ -277,16 +278,19 @@ export default function AdminQuotesPage() {
     }
   }
 
-  async function handleReviseQuote(quoteNo: string, isLocked: boolean) {
+  async function handleReviseQuote(quoteNo: string, isLocked: boolean, boxesOnly = false) {
     // If Released for Mfg, Revise should unlock + open editor. Every Apply now
     // bumps its own staging revision unconditionally, so there's nothing to arm.
+    let unlockedBoxesOnly = false;
     if (isLocked) {
       const data = await setQuoteLock(quoteNo, false);
-      // Step 16: boxes-only quotes have no layout editor; open the quote page.
-      if (data?.boxes_only) {
-        router.push(`/admin/quotes/${encodeURIComponent(quoteNo)}`);
-        return;
-      }
+      unlockedBoxesOnly = !!data?.boxes_only;
+    }
+    // Steps 16-17: boxes-only quotes have no layout editor; open the quote
+    // page, released or not.
+    if (boxesOnly || unlockedBoxesOnly) {
+      router.push(`/admin/quotes/${encodeURIComponent(quoteNo)}`);
+      return;
     }
 
     // Go straight to editor
@@ -876,7 +880,7 @@ export default function AdminQuotesPage() {
                               {rowBusy[q.quote_no] ? "" : q.locked ? "Locked" : "RFM"}
                             </button>
                             <button
-                              onClick={() => handleReviseQuote(q.quote_no, !!q.locked)}
+                              onClick={() => handleReviseQuote(q.quote_no, !!q.locked, !!q.boxes_only)}
                               style={{
                                 marginLeft: 8,
                                 padding: "4px 8px",

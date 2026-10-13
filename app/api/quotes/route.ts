@@ -79,7 +79,9 @@ export async function GET(req: NextRequest) {
           // facts.revision raw here (as this used to) could show an
           // "S"-suffixed label for an already-released quote.
           const revision = displayRevisionLabel(facts as any, !!r.locked);
-          return { ...r, revision };
+          // Step 17: boxes-only quotes have no layout editor (Revise opens the quote page).
+          const boxes_only = (facts as { pack_type?: unknown } | null)?.pack_type === "boxes_only";
+          return { ...r, revision, boxes_only };
         }),
       );
 
@@ -121,7 +123,9 @@ export async function GET(req: NextRequest) {
         // facts.revision raw here (as this used to) could show an
         // "S"-suffixed label for an already-released quote.
         const revision = displayRevisionLabel(facts as any, !!r.locked);
-        return { ...r, revision };
+        // Step 17: boxes-only quotes have no layout editor (Revise opens the quote page).
+        const boxes_only = (facts as { pack_type?: unknown } | null)?.pack_type === "boxes_only";
+        return { ...r, revision, boxes_only };
       }),
     );
 
