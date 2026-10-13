@@ -545,7 +545,11 @@ export async function GET(req: NextRequest) {
     }
 
     // Step 10B: the saved lock is internal; strip it from the response.
-    items = items.map(({ calc_snapshot: _lock, ...rest }) => rest);
+    items = items.map((it) => {
+      const out = { ...it };
+      delete out.calc_snapshot;
+      return out;
+    });
 
     /* ---------------- Layout package ---------------- */
 

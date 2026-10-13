@@ -472,6 +472,15 @@ export default function StartQuoteModal({
         setBoEmail(prefillData.customerEmail.trim());
       }
       prefillStepRef.current = { type: "boxes_only", step: "rev", done: ["type", "box"] };
+      if (quoteType === "boxes_only") {
+        // Step 14: already Boxes only (e.g. ?quote_type=boxes_only), so the type
+        // won't change — open the review step directly.
+        setActiveStep("rev");
+        setCompletedSteps(new Set(["type", "box"]));
+        setTimeout(() => {
+          prefillStepRef.current = null;
+        }, 0);
+      }
       setQuoteType("boxes_only");
       return;
     }
@@ -518,6 +527,14 @@ export default function StartQuoteModal({
         }
       }
 
+      // Step 14: the quote-type reset would send the form back to step 1; make it
+      // honor Box Setup once (the box and foam details are already filled in).
+      prefillStepRef.current = { type: "complete_pack", step: "box", done: ["type"] };
+      if (quoteType === "complete_pack") {
+        setTimeout(() => {
+          prefillStepRef.current = null;
+        }, 0);
+      }
       setQuoteType("complete_pack");
       setActiveStep("box");
       setCompletedSteps(new Set(["type"]));
@@ -541,6 +558,7 @@ export default function StartQuoteModal({
       if (prefillData.outside?.w) setInsertW(String(prefillData.outside.w));
       if (prefillData.outside?.h) setInsertD(String(prefillData.outside.h));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per prefill; reads quoteType at that moment
   }, [prefillData]);
 
 // Seed insert dims from URL params (non-prefill path)

@@ -31,6 +31,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, withTxn } from "@/lib/db";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { boxEditGuard } from "@/lib/box-edit-guard";
 import {
   customSelectionInsert,
   printSpecForQuote,
@@ -56,6 +57,7 @@ type QuoteRow = {
   id: number;
   quote_no: string;
   tenant_id: number | null;
+  locked: boolean | null;
 };
 
 function ok(body: any, status = 200) {
@@ -122,7 +124,7 @@ export async function POST(req: NextRequest) {
 
     const quote = (await one<QuoteRow>(
       `
-      SELECT id, quote_no, tenant_id
+      SELECT id, quote_no, tenant_id, locked
       FROM public.quotes
       WHERE quote_no = $1
       `,
@@ -132,6 +134,11 @@ export async function POST(req: NextRequest) {
     if (!quote) {
       return bad({ ok: false, error: "QUOTE_NOT_FOUND" }, 404);
     }
+
+    // Step 14: buyers may change boxes until the quote is released (rate-limited);
+    // shop staff always may.
+    const guard = await boxEditGuard(req, quote);
+    if (guard) return guard;
 
     // Step 10A: price lock. The editor re-posts its Start Quote box on every
     // load. Once the quote has a box, that automatic post must not replace or
@@ -226,7 +233,7 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: "INTERNAL_ERROR",
-        message: String(err?.message || err),
+        message: "We couldn't update the box. Please try again.",
       },
       500,
     );

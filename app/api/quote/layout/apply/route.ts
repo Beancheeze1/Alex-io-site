@@ -2318,8 +2318,25 @@ export async function POST(req: NextRequest) {
     if (sc && typeof sc.sku === "string" && sc.sku.trim()) {
       try {
         const sku = sc.sku.trim();
+        // Step 14: with no qty in the body, keep the stored box quantity instead
+        // of falling back to 1 (an unchanged re-Apply must not change the box).
+        const storedCartonQty =
+          qtyMaybe != null
+            ? null
+            : Number(
+                (
+                  await one<{ qty: string | number }>(
+                    `SELECT qty FROM public.quote_box_selections WHERE quote_id = $1 ORDER BY id LIMIT 1`,
+                    [quote.id],
+                  )
+                )?.qty ?? 0,
+              );
         const qtyForCarton =
-          qtyMaybe != null && qtyMaybe > 0 ? qtyMaybe : 1;
+          qtyMaybe != null && qtyMaybe > 0
+            ? qtyMaybe
+            : storedCartonQty && storedCartonQty > 0
+              ? storedCartonQty
+              : 1;
 
         // Look up box by SKU in the boxes catalogue. Scoped to the shared
         // catalog plus this quote's own tenant, so a tenant-specific custom

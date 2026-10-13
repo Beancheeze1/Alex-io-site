@@ -112,6 +112,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Step 14: one file per upload, up to 8 MB — refuse anything bigger before reading it into memory.
+    const declared = Number(req.headers.get("content-length") || 0);
+    if (declared > 9 * 1024 * 1024) return bad("invalid_file", "That file is too large. Files can be up to 8 MB.");
+
     let form: FormData;
     try {
       form = await req.formData();

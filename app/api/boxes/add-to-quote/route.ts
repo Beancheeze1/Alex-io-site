@@ -31,6 +31,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { boxEditGuard } from "@/lib/box-edit-guard";
 import {
   printSpecForQuote,
   repriceQuoteBoxes,
@@ -53,6 +54,7 @@ type QuoteRow = {
   id: number;
   quote_no: string;
   tenant_id: number | null;
+  locked: boolean | null;
 };
 
 type BoxRow = {
@@ -138,7 +140,7 @@ export async function POST(req: NextRequest) {
     // 1) Quote
     const quote = (await one<QuoteRow>(
       `
-      SELECT id, quote_no, tenant_id
+      SELECT id, quote_no, tenant_id, locked
       FROM public.quotes
       WHERE quote_no = $1
       `,
@@ -148,6 +150,11 @@ export async function POST(req: NextRequest) {
     if (!quote) {
       return bad({ ok: false, error: "QUOTE_NOT_FOUND" }, 404);
     }
+
+    // Step 14: buyers may change boxes until the quote is released (rate-limited);
+    // shop staff always may.
+    const guard = await boxEditGuard(req, quote);
+    if (guard) return guard;
 
     // Step 10A: price lock. The editor re-sends its Start Quote box every time
     // it opens. Once the quote has a box, that automatic add must not re-add or
@@ -370,7 +377,8 @@ export async function POST(req: NextRequest) {
     // every box on it so this box gets its print adder (and plates).
     try {
       const spec = await printSpecForQuote(quote.quote_no);
-      if (spec) await repriceQuoteBoxes(quote.id, quote.tenant_id, spec);
+      // Step 14: only the box just picked — the quote's other boxes keep their saved prices.
+      if (spec) await repriceQuoteBoxes(quote.id, quote.tenant_id, spec, { onlyRowId: Number(pricedSelection.id) });
     } catch (e) {
       console.error("[boxes/add-to-quote] per-color print reprice failed", e);
     }
@@ -477,7 +485,7 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: "INTERNAL_ERROR",
-        message: String(err?.message || err),
+        message: "We couldn't update the box. Please try again.",
       },
       500,
     );

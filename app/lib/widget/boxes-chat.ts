@@ -53,6 +53,9 @@ export function detectQuoteKind(text: string): "foam" | "boxes" | null {
   if (/\b(no foam|without foam|just (the )?(boxes|cartons)|boxes only|only (the )?(boxes|cartons))\b/i.test(t)) {
     return "boxes";
   }
+  // Chuck: corrugated pads / trays / dividers / partitions / inserts — neither flow
+  // quotes those as such, so ask "foam inserts or just boxes?" instead of guessing.
+  if (/\bcorrugated\b/i.test(t) && /\b(pads?|trays?|dividers?|partitions?|inserts?)\b/i.test(t)) return null;
   if (FOAM_WORDS.test(t)) return "foam";
   if (BOX_WORDS.test(t)) return "boxes";
   return null;
@@ -100,7 +103,7 @@ export function nextBoxQuestion(f: BoxChatFacts): { assistantMessage: string; qu
   if (!hasDims(f)) {
     return {
       assistantMessage: "What inside size do you need? Length × width × depth, in inches.",
-      quickReplies: ["12x10x8", "16x12x6", "Not sure yet"],
+      quickReplies: ["12x10x8", "16x12x6"],
       done: false,
     };
   }

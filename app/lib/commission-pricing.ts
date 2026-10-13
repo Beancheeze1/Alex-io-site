@@ -126,8 +126,9 @@ export async function getCommissionableTotal(
   const items = await q<{
     length_in: string; width_in: string; height_in: string;
     qty: number; material_id: number; price_total_usd: string | null; notes: string | null;
+    calc_snapshot: unknown;
   }>(
-    `SELECT length_in, width_in, height_in, qty, material_id, price_total_usd, notes
+    `SELECT length_in, width_in, height_in, qty, material_id, price_total_usd, notes, calc_snapshot
      FROM public.quote_items WHERE quote_id = $1`,
     [quoteId],
   );
@@ -170,11 +171,22 @@ export async function getCommissionableTotal(
       items
         .filter((it) => !isExcluded(it.notes))
         .map(async (it) => {
-          if (it.price_total_usd !== null && safeNum(it.price_total_usd) > 0) {
-            return safeNum(it.price_total_usd);
-          }
           const L = Number(it.length_in), W = Number(it.width_in), H = Number(it.height_in);
           const qty = Number(it.qty), materialId = Number(it.material_id);
+          // Step 14: a saved foam price counts only while its lock (Step 10B,
+          // size|qty|material) still matches the foam. After a foam change it
+          // is stale until the quote is viewed again, so price it live instead.
+          if (it.price_total_usd !== null && safeNum(it.price_total_usd) > 0) {
+            let snap: unknown = it.calc_snapshot;
+            if (typeof snap === "string") {
+              try { snap = JSON.parse(snap); } catch { snap = null; }
+            }
+            const rawKey = snap && typeof snap === "object" ? (snap as { lock_key?: unknown }).lock_key : null;
+            const lockKey = typeof rawKey === "string" ? rawKey : "";
+            if (lockKey.split("|").slice(0, 5).join("|") === [L, W, H, qty, materialId].map(String).join("|")) {
+              return safeNum(it.price_total_usd);
+            }
+          }
           if (
             ![L, W, H].every((n) => Number.isFinite(n) && n > 0) ||
             !(qty > 0) || !(materialId > 0)

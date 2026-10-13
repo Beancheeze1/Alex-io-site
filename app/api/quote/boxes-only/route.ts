@@ -73,6 +73,9 @@ function str(v: unknown, max = 200): string | null {
 type QuoteRow = { id: number; quote_no: string; tenant_id: number };
 
 export async function POST(req: NextRequest) {
+  // Step 14: on a failure part-way through, remove what this request wrote.
+  let cleanupQuoteId: number | null = null;
+  let createdQuoteHere = false;
   try {
     const user = await getCurrentUserFromRequest(req);
     const isStaff = !!user && isRoleAllowed(user, ["admin", "cs", "sales"]);
@@ -207,7 +210,9 @@ export async function POST(req: NextRequest) {
         [tenantId, quoteNo, name, email, phone, company, quoteSource, user?.id ?? null, customer?.id ?? null],
       );
       if (!quote) return bad("quote_exists", "That quote number is already in use. Please start again.", 409);
+      createdQuoteHere = true;
     }
+    cleanupQuoteId = quote.id;
 
     // ---- Sales rep credit (same rule as layout/apply: only if unset) ----
     const repSlug = str(b.sales_rep_slug, 60);
@@ -286,6 +291,21 @@ export async function POST(req: NextRequest) {
     return json({ ok: true, quote_no: quote.quote_no, url: `/quote?quote_no=${encodeURIComponent(quote.quote_no)}` });
   } catch (e: any) {
     console.error("[quote/boxes-only] failed:", e);
+    if (cleanupQuoteId != null) {
+      try {
+        await q(`DELETE FROM public.quote_box_selections WHERE quote_id = $1`, [cleanupQuoteId]);
+        if (createdQuoteHere) {
+          await q(
+            `DELETE FROM public.quotes q0
+              WHERE q0.id = $1
+                AND NOT EXISTS (SELECT 1 FROM public.quote_items qi WHERE qi.quote_id = q0.id)`,
+            [cleanupQuoteId],
+          );
+        }
+      } catch (ce) {
+        console.error("[quote/boxes-only] cleanup after failure failed:", ce);
+      }
+    }
     return bad("server_error", "We couldn't create the quote. Please try again.", 500);
   }
 }

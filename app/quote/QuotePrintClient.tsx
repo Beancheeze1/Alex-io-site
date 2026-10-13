@@ -3575,7 +3575,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   <p style={{ color: "var(--attention)", fontSize: 13, marginTop: 0 }}>{boxBreakError}</p>
                 ) : null}
                 <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 0 }}>
-                  Each size is priced on its own. Plates are a one-time charge per printed size. Switching updates the line items above.
+                  Each size is priced on its own. The quantity on this quote shows its saved price; other quantities are at
+                  today&apos;s rates. Plates are a one-time charge per printed size. Switching updates the line items above.
                 </p>
               </div>
             )}
@@ -3653,7 +3654,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <p style={{ color: "var(--attention)", fontSize: 13, marginTop: 8 }}>{boxBreakError}</p>
                   ) : null}
                   <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 8 }}>
-                    Plates are a one-time charge, so they stay the same at every quantity. Switching updates the line items above.
+                    The quantity on this quote shows its saved price; other quantities are at today&apos;s rates. Plates are a
+                    one-time charge, so they stay the same at every quantity. Switching updates the line items above.
                   </p>
                 </div>
               </div>

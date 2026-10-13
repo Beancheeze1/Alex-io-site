@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { boxEditGuard } from "@/lib/box-edit-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,9 +78,11 @@ export async function POST(req: NextRequest) {
     const quote = await one<{
       id: number;
       quote_no: string;
+      tenant_id: number | null;
+      locked: boolean | null;
     }>(
       `
-      SELECT id, quote_no
+      SELECT id, quote_no, tenant_id, locked
       FROM public."quotes"
       WHERE quote_no = $1
       LIMIT 1
@@ -97,6 +100,11 @@ export async function POST(req: NextRequest) {
         { status: 404 },
       );
     }
+
+    // Step 14: buyers may change boxes until the quote is released (rate-limited);
+    // shop staff always may.
+    const guard = await boxEditGuard(req, quote);
+    if (guard) return guard;
 
     const quoteId = quote.id;
     const selIdNum = Number(selectionId);

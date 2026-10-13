@@ -27,8 +27,13 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUserFromRequest(req);
     if (!user || !isPlatformOwner(user)) return json({ ok: false, error: "forbidden" }, 403);
 
-    const quotes = await q<{ quote_no: string }>(
-      `SELECT quote_no FROM public.quotes WHERE quote_no IS NOT NULL ORDER BY id ASC`,
+    // Step 14: paged (?after_id=, ?limit=, default 200) so a large table can't time out.
+    // Run again with after_id = next_after_id until next_after_id is null.
+    const afterId = Math.max(0, Number(req.nextUrl.searchParams.get("after_id")) || 0);
+    const limit = Math.min(1000, Math.max(1, Number(req.nextUrl.searchParams.get("limit")) || 200));
+    const quotes = await q<{ id: number; quote_no: string }>(
+      `SELECT id, quote_no FROM public.quotes WHERE quote_no IS NOT NULL AND id > $1 ORDER BY id ASC LIMIT $2`,
+      [afterId, limit],
     );
 
     let copied = 0;
@@ -65,7 +70,8 @@ export async function POST(req: NextRequest) {
       copied += 1;
     }
 
-    return json({ ok: true, quotes: quotes.length, copied, already, empty, demo });
+    const nextAfterId = quotes.length === limit ? Number(quotes[quotes.length - 1].id) : null;
+    return json({ ok: true, quotes: quotes.length, copied, already, empty, demo, next_after_id: nextAfterId });
   } catch (e) {
     console.error("[admin/facts-backfill] failed:", e);
     return json({ ok: false, error: "server_error", message: e instanceof Error ? e.message : String(e) }, 500);

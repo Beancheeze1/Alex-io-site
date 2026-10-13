@@ -25,7 +25,7 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
-import { priceQuoteBoxesAtQtys, repriceQuoteBoxes } from "@/app/lib/packaging-selection";
+import { priceQuoteBoxesAtQtys, repriceQuoteBoxes, type BoxBreakPrice } from "@/app/lib/packaging-selection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,6 +58,35 @@ function cleanBreaks(raw: unknown): number[] {
 }
 
 type QuoteRow = { id: number; tenant_id: number; locked: boolean | null };
+
+/**
+ * Step 14: the "On this quote" row shows the saved (price-locked) numbers, not
+ * today's rates. Swaps the break equal to the current qty for the stored box
+ * line(s); the other breaks stay at today's rates.
+ */
+async function withStoredCurrent(
+  quoteId: number,
+  prices: BoxBreakPrice[],
+  currentQty: number | null,
+  onlyRowId: number | null,
+): Promise<(BoxBreakPrice & { stored?: boolean })[]> {
+  if (!currentQty) return prices;
+  const rows = await q<{ unit: string | null; ext: string | null; plates: string | null }>(
+    `SELECT unit_price_usd AS unit, extended_price_usd AS ext, (to_jsonb(qbs) ->> 'plates_usd') AS plates
+       FROM public.quote_box_selections qbs
+      WHERE quote_id = $1 AND ($2::bigint IS NULL OR id = $2::bigint)`,
+    [quoteId, onlyRowId],
+  );
+  if (!rows.length || rows.some((r) => r.ext == null)) return prices;
+  const boxes = Math.round(rows.reduce((s, r) => s + Number(r.ext || 0), 0) * 100) / 100;
+  const plates = Math.round(rows.reduce((s, r) => s + Number(r.plates || 0), 0) * 100) / 100;
+  const unit = rows.length === 1 && rows[0].unit != null ? Number(rows[0].unit) : null;
+  return prices.map((p) =>
+    p.qty === currentQty
+      ? { qty: p.qty, boxes_usd: boxes, plates_usd: plates, total_usd: Math.round((boxes + plates) * 100) / 100, unit_usd: unit, stored: true }
+      : p,
+  );
+}
 
 type BoxRow = {
   id: number;
@@ -112,11 +141,12 @@ export async function GET(req: NextRequest) {
           onlyRowId: Number(r.id),
         });
         const cur = Number(r.qty);
+        const curQty = Number.isInteger(cur) && cur > 0 ? cur : null;
         boxes.push({
           id: Number(r.id),
           description: r.description,
-          current_qty: Number.isInteger(cur) && cur > 0 ? cur : null,
-          breaks: prices,
+          current_qty: curQty,
+          breaks: await withStoredCurrent(quote.id, prices, curQty, Number(r.id)),
         });
       }
       return json({ ...empty, boxes });
@@ -129,11 +159,12 @@ export async function GET(req: NextRequest) {
     const print = parsePrintSpec(facts.print_spec);
     const prices = await priceQuoteBoxesAtQtys(quote.id, Number(quote.tenant_id), print, breaks);
     const current = Number(facts.qty);
+    const currentQty = Number.isInteger(current) && current > 0 ? current : null;
 
     return json({
       ...empty,
-      current_qty: Number.isInteger(current) && current > 0 ? current : null,
-      breaks: prices,
+      current_qty: currentQty,
+      breaks: await withStoredCurrent(quote.id, prices, currentQty, null),
     });
   } catch (e) {
     console.error("[quote/box-breaks] GET failed:", e);
@@ -186,8 +217,18 @@ export async function POST(req: NextRequest) {
         return bad("not_a_break", "Pick one of the quantities for that box size.");
       }
 
+      // Step 14: the quantity already on the quote — nothing to change or reprice.
+      if (Number(row.qty) === qty) return json({ ok: true, qty, box_id: Number(row.id), unchanged: true });
+
       await q(`UPDATE public.quote_box_selections SET qty = $2 WHERE id = $1`, [row.id, qty]);
       await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), "per_box", { onlyRowId: Number(row.id) });
+
+      // Step 14: facts.qty mirrors size 1 (the first box row).
+      const first = await one<{ id: number }>(
+        `SELECT id FROM public.quote_box_selections WHERE quote_id = $1 ORDER BY id LIMIT 1`,
+        [quote.id],
+      );
+      if (first && Number(first.id) === Number(row.id)) await saveFacts(quoteNo, { ...facts, qty });
 
       await addAdminAlert({
         req,
@@ -204,6 +245,13 @@ export async function POST(req: NextRequest) {
     // ---- Single size (Step 5) ----
     const breaks = cleanBreaks(facts.box_qty_breaks);
     if (!breaks.includes(qty)) return bad("not_a_break", "Pick one of the quantities on your quote.");
+
+    // Step 14: the quantity already on the quote — nothing to change or reprice.
+    const onQuote = await one<{ qty: string | number }>(
+      `SELECT qty FROM public.quote_box_selections WHERE quote_id = $1 ORDER BY id LIMIT 1`,
+      [quote.id],
+    );
+    if (onQuote && Number(onQuote.qty) === qty) return json({ ok: true, qty, unchanged: true });
 
     await q(`UPDATE public.quote_box_selections SET qty = $2 WHERE quote_id = $1`, [quote.id, qty]);
     await saveFacts(quoteNo, { ...facts, qty });
