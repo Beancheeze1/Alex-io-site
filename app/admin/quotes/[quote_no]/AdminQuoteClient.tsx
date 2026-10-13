@@ -24,6 +24,7 @@ import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
 import RunMethodControl from "@/components/admin/RunMethodControl";
+import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 
 
@@ -2739,6 +2740,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </div>
               </div>
             )}
+
+            {/* Step 18: edit the boxes on a boxes-only quote (no layout editor for these) */}
+            {quoteNoValue ? <BoxEditPanel quoteNo={quoteNoValue} /> : null}
 
             {/* Customer requested cartons */}
             <div style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 20 }}>
