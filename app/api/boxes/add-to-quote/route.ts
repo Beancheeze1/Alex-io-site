@@ -45,6 +45,8 @@ type BodyIn = {
   box_id?: number | string | null;
   sku?: string | null;
   qty?: number | string | null;
+  // Step 10A: true when the editor adds the box by itself on load (not a click).
+  auto?: boolean;
 };
 
 type QuoteRow = {
@@ -145,6 +147,19 @@ export async function POST(req: NextRequest) {
 
     if (!quote) {
       return bad({ ok: false, error: "QUOTE_NOT_FOUND" }, 404);
+    }
+
+    // Step 10A: price lock. The editor re-sends its Start Quote box every time
+    // it opens. Once the quote has a box, that automatic add must not re-add or
+    // reprice it at today's rates. A real pick (auto not set) still goes through.
+    if (body.auto === true) {
+      const hasBox = await one<{ id: number }>(
+        `SELECT id FROM public.quote_box_selections WHERE quote_id = $1 LIMIT 1`,
+        [quote.id],
+      );
+      if (hasBox) {
+        return NextResponse.json({ ok: true, skipped: "quote_has_box" }, { status: 200 });
+      }
     }
 
     // 2) Box lookup

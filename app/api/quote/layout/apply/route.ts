@@ -1654,6 +1654,17 @@ export async function POST(req: NextRequest) {
     // ✅ Server-enforced chamfer (fixes broken client checkbox)
     const svgFixed = enforceChamferedBlockInSvg(svgCanonical, layoutForSave);
 
+    // Step 10A: price lock. Saved boxes only reprice when something about
+    // them changes in this Apply (quantity, carton or print). Reopening a
+    // quote and applying it unchanged keeps the stored box prices.
+    let boxesTouched = false;
+    const boxQtyRows = await q<{ qty: string | number }>(
+      `SELECT qty FROM public.quote_box_selections WHERE quote_id = $1`,
+      [quote.id],
+    );
+    const boxQtyChanged =
+      qtyMaybe != null && boxQtyRows.some((r) => Number(r.qty) !== Number(qtyMaybe));
+
     // NEW: If Apply provided a qty, keep cartons in sync with the quote qty.
     // Also recompute carton pricing (unit + extended) so totals update immediately.
     if (qtyMaybe != null) {
@@ -1667,6 +1678,9 @@ export async function POST(req: NextRequest) {
         [qtyMaybe, quote.id],
       );
 
+      // Step 10A: only reprice when the quantity actually changed.
+      if (boxQtyChanged) {
+      boxesTouched = true;
       // 2) Recompute unit_price_usd + extended_price_usd using the tier table
       // (same tier rules as /api/boxes/add-to-quote)
       await q(
@@ -1715,6 +1729,7 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.error("[layout/apply] custom carton reprice failed", { quoteNo, err: String(e) });
       }
+      } // end Step 10A boxQtyChanged
 
       // 3) Sync the visible carton line(s) in the Interactive Quote (quote_items)
       await q(
@@ -2348,17 +2363,21 @@ export async function POST(req: NextRequest) {
             );
           }
 
-          // Reprice quote_box_selections using box_price_tiers
-          await q(
-            `UPDATE public.quote_box_selections qbs
-             SET
-               unit_price_usd = ${BOX_TIER_UNIT_PRICE_SQL},
-               extended_price_usd = ROUND((${BOX_TIER_UNIT_PRICE_SQL}) * qbs.qty, 2)
-             FROM public.box_price_tiers bpt
-             WHERE qbs.quote_id = $1
-               AND bpt.box_id = qbs.box_id`,
-            [quote.id],
-          );
+          // Reprice quote_box_selections using box_price_tiers.
+          // Step 10A: only for a newly added carton or a changed quantity.
+          if (!existingSel || boxQtyChanged) {
+            boxesTouched = true;
+            await q(
+              `UPDATE public.quote_box_selections qbs
+               SET
+                 unit_price_usd = ${BOX_TIER_UNIT_PRICE_SQL},
+                 extended_price_usd = ROUND((${BOX_TIER_UNIT_PRICE_SQL}) * qbs.qty, 2)
+               FROM public.box_price_tiers bpt
+               WHERE qbs.quote_id = $1
+                 AND bpt.box_id = qbs.box_id`,
+              [quote.id],
+            );
+          }
 
           console.log(
             "[layout/apply] selectedCarton upserted",
@@ -2441,8 +2460,9 @@ export async function POST(req: NextRequest) {
                 custom_height_in: string | number;
                 custom_style: string | null;
                 board_grade_id: string | number | null;
+                qty: string | number | null;
               }>(
-                `SELECT custom_length_in, custom_width_in, custom_height_in, custom_style, board_grade_id
+                `SELECT custom_length_in, custom_width_in, custom_height_in, custom_style, board_grade_id, qty
                    FROM public.quote_box_selections
                   WHERE quote_id = $1 AND kind = 'custom'
                   LIMIT 1`,
@@ -2462,26 +2482,33 @@ export async function POST(req: NextRequest) {
                     ? scGrade
                     : null;
 
-              const resolved = await resolveCustomSelection(
-                L, W, H, customStyle, qtyForCarton, tenantId,
-                { gradeId: gradeIdForCarton },
-              );
+              // Step 10A: the same box at the same quantity keeps its stored
+              // row and price. Only a different box or quantity is re-resolved.
+              if (prevSameBox && Number(prevCustom?.qty) === qtyForCarton) {
+                console.log("[layout/apply] custom carton unchanged — kept stored price", { quoteNo });
+              } else {
+                boxesTouched = true;
+                const resolved = await resolveCustomSelection(
+                  L, W, H, customStyle, qtyForCarton, tenantId,
+                  { gradeId: gradeIdForCarton },
+                );
 
-              await q(
-                `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,
-                [quote.id],
-              );
-              const ins = customSelectionInsert({
-                quoteId: quote.id,
-                quoteNo: String(quoteNo),
-                L,
-                W,
-                H,
-                style: customStyle,
-                qty: qtyForCarton,
-                resolved,
-              });
-              await q(ins.text, ins.values);
+                await q(
+                  `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,
+                  [quote.id],
+                );
+                const ins = customSelectionInsert({
+                  quoteId: quote.id,
+                  quoteNo: String(quoteNo),
+                  L,
+                  W,
+                  H,
+                  style: customStyle,
+                  qty: qtyForCarton,
+                  resolved,
+                });
+                await q(ins.text, ins.values);
+              }
 
               console.log(
                 "[layout/apply] custom carton inserted (no boxes row)",
@@ -2515,8 +2542,12 @@ export async function POST(req: NextRequest) {
     try {
       const bodySpec = parsePrintSpec((body as any)?.printSpec);
       let spec = bodySpec;
+      // Step 10A: a print spec that differs from the saved one counts as a change.
+      let specChanged = false;
       if (bodySpec) {
         const f = (await loadFacts(String(quoteNo))) || {};
+        specChanged =
+          JSON.stringify(parsePrintSpec((f as any).print_spec)) !== JSON.stringify(bodySpec);
         await saveFacts(String(quoteNo), {
           ...(f as any),
           print_spec: bodySpec,
@@ -2525,7 +2556,7 @@ export async function POST(req: NextRequest) {
       } else {
         spec = await printSpecForQuote(String(quoteNo));
       }
-      if (spec) await repriceQuoteBoxes(quote.id, tenantId, spec);
+      if (spec && (boxesTouched || specChanged)) await repriceQuoteBoxes(quote.id, tenantId, spec);
     } catch (e) {
       console.error("[layout/apply] per-color print reprice failed", { quoteNo, err: String(e) });
     }

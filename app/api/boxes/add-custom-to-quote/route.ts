@@ -48,6 +48,8 @@ type BodyIn = {
   style?: string | null;
   qty?: number | string | null;
   grade_id?: number | string | null;
+  // Step 10A: true when the editor adds the box by itself on load (not a click).
+  auto?: boolean;
 };
 
 type QuoteRow = {
@@ -129,6 +131,19 @@ export async function POST(req: NextRequest) {
 
     if (!quote) {
       return bad({ ok: false, error: "QUOTE_NOT_FOUND" }, 404);
+    }
+
+    // Step 10A: price lock. The editor re-posts its Start Quote box on every
+    // load. Once the quote has a box, that automatic post must not replace or
+    // reprice it (or raise another "Custom box added" alert).
+    if (body.auto === true) {
+      const hasBox = await one<{ id: number }>(
+        `SELECT id FROM public.quote_box_selections WHERE quote_id = $1 LIMIT 1`,
+        [quote.id],
+      );
+      if (hasBox) {
+        return ok({ ok: true, skipped: "quote_has_box" });
+      }
     }
 
     // Same box already on the quote with a stored grade → keep that grade.

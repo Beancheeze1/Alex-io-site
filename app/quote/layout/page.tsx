@@ -2742,7 +2742,7 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
     React.useState<"RSC" | "MAILER" | null>(null);
 
   const handlePickCarton = React.useCallback(
-    async (kind: "RSC" | "MAILER", opts?: { skipDimResize?: boolean; overrideSku?: string }) => {
+    async (kind: "RSC" | "MAILER", opts?: { skipDimResize?: boolean; overrideSku?: string; auto?: boolean }) => {
       // Update the visual selection immediately
       setSelectedCartonKind(kind);
 
@@ -2826,6 +2826,8 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
         quote_no: quoteNo,
         sku,
         qty: numericQty,
+        // Step 10A: the server skips an automatic add when the quote already has a box.
+        auto: opts?.auto === true,
       };
 
       console.log("[layout] handlePickCarton → /api/boxes/add-to-quote", payload);
@@ -4375,6 +4377,7 @@ const handleGoToFoamAdvisor = () => {
       cartonPickPromiseRef.current = handlePickCarton(kind, {
         skipDimResize: !hasStockSku,
         overrideSku: urlSku,
+        auto: true,
       });
     } catch {
       // ignore URL parse errors
@@ -4433,6 +4436,8 @@ const handleGoToFoamAdvisor = () => {
             const g = Number(url.searchParams.get("box_grade"));
             return Number.isInteger(g) && g > 0 ? g : null;
           })(),
+          // Step 10A: skipped by the server when the quote already has a box.
+          auto: true,
         }),
       }).catch((err) => {
         console.error("[layout] Error committing custom box choice", err);
