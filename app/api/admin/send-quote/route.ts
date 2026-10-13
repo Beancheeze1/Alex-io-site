@@ -15,6 +15,7 @@ import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
 import { computePricing } from "@/app/lib/pricing/compute";
+import { lockedChargeSettings, lockedFoamPrice } from "@/app/lib/pricing/foam-lock";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,6 +53,10 @@ type ItemRow = {
   material_family: string | null;
   density_lb_ft3: number | null;
   notes: string | null;
+  // Step 10B: saved price lock
+  stored_unit_usd?: string | number | null;
+  stored_total_usd?: string | number | null;
+  calc_snapshot?: unknown;
 };
 
 type PkgRow = {
@@ -143,7 +148,10 @@ export async function POST(req: NextRequest) {
                 m.name as material_name,
                 m.material_family,
                 m.density_lb_ft3,
-                qi.notes
+                qi.notes,
+                qi.price_unit_usd AS stored_unit_usd,
+                qi.price_total_usd AS stored_total_usd,
+                qi.calc_snapshot
          FROM quote_items qi
          LEFT JOIN materials m ON m.id = qi.material_id
          WHERE qi.quote_id = $1
@@ -185,15 +193,28 @@ export async function POST(req: NextRequest) {
       const forceSkive = !skiveConsumed && hasLayerRows && layeredSkiveRequired;
       let priced: { unit: number; total: number; raw: any };
       try {
-        const result = await computePricing({
-          L, W, H, qty, material_id: mid,
-          force_skived: forceSkive,
-          tenant_id: user.tenant_id,
-        });
+        // Step 10B: price lock — same saved price as the quote page.
+        const lockedPrice = await lockedFoamPrice(
+          {
+            id: it.id,
+            price_unit_usd: it.stored_unit_usd,
+            price_total_usd: it.stored_total_usd,
+            calc_snapshot: it.calc_snapshot,
+          },
+          { L, W, H, qty, material_id: mid, force_skived: forceSkive },
+          async () => {
+            const result = await computePricing({
+              L, W, H, qty, material_id: mid,
+              force_skived: forceSkive,
+              tenant_id: user.tenant_id,
+            });
+            return { unit: result.total / qty, total: result.total, detail: result };
+          },
+        );
         priced = {
-          unit: result.total / qty,
-          total: result.total,
-          raw: result,
+          unit: lockedPrice.unit,
+          total: lockedPrice.total,
+          raw: lockedPrice.detail ?? {},
         };
       } catch (e: any) {
         console.error(`[send-quote] computePricing failed for item ${it.id}: ${e?.message}`);
@@ -248,7 +269,8 @@ export async function POST(req: NextRequest) {
 
     let settings: any;
     try {
-      settings = await getPricingSettings(user.tenant_id);
+      // Step 10B: the printing / die-cut settings saved with the quote.
+      settings = await lockedChargeSettings(quoteNo, await getPricingSettings(user.tenant_id), true);
     } catch (e: any) {
       return json({ ok: false, error: "settings_failed", detail: String(e?.message || e) }, 500);
     }

@@ -32,6 +32,7 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { lockedChargeSettings, lockedFoamPrice } from "@/app/lib/pricing/foam-lock";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +80,7 @@ type ItemRow = {
   notes?: string | null;
   price_unit_usd?: number | null;
   price_total_usd?: number | null;
+  calc_snapshot?: unknown; // Step 10B: saved price lock (never sent to the browser)
 };
 
 type LayoutPkgRow = {
@@ -394,7 +396,10 @@ export async function GET(req: NextRequest) {
         m.name as material_name,
         m.material_family,
         m.density_lb_ft3,
-        qi.notes
+        qi.notes,
+        qi.price_unit_usd,
+        qi.price_total_usd,
+        qi.calc_snapshot
       from quote_items qi
       left join materials m on m.id = qi.material_id
       where qi.quote_id = $1
@@ -505,15 +510,24 @@ export async function GET(req: NextRequest) {
             hasLayoutLayerRows &&
             layeredSkiveRequired;
 
-          const priced = await priceViaCalcRoute({
-            L,
-            W,
-            H,
-            qty,
-            material_id: materialId,
-            force_skived: forceLayeredSkive,
-            tenant_id: tenantId,
-          });
+          // Step 10B: price lock — the saved price is used until the foam
+          // (size, qty, material, skive) changes or staff reprice the quote.
+          const priced = await lockedFoamPrice(
+            it,
+            { L, W, H, qty, material_id: materialId, force_skived: forceLayeredSkive },
+            async () => {
+              const p = await priceViaCalcRoute({
+                L,
+                W,
+                H,
+                qty,
+                material_id: materialId,
+                force_skived: forceLayeredSkive,
+                tenant_id: tenantId,
+              });
+              return { unit: p.unit, total: p.total, detail: p.raw?.result ?? null };
+            },
+          );
 
           if (forceLayeredSkive) {
             forcedLayeredSkiveConsumed = true;
@@ -529,6 +543,9 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+
+    // Step 10B: the saved lock is internal; strip it from the response.
+    items = items.map(({ calc_snapshot: _lock, ...rest }) => rest);
 
     /* ---------------- Layout package ---------------- */
 
@@ -691,7 +708,13 @@ export async function GET(req: NextRequest) {
       0,
     );
 
-    const settings = await getPricingSettings(tenantId);
+    // Step 10B: the printing / die-cut settings saved when the quote was first
+    // priced (quotes.price_lock) stay with it until staff reprice it.
+    const settings = await lockedChargeSettings(
+      String(quoteNo),
+      await getPricingSettings(tenantId),
+      itemsRaw.length > 0 || packagingLines.length > 0,
+    );
 
     // Printing (app/lib/pricing/print-charges.ts): per-color quotes (Corrugated
     // Step 3B, facts.print_spec) have print inside each box price and only a
