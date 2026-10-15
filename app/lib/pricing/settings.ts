@@ -9,6 +9,7 @@
 // Settings are keyed by the numeric shop id (the admin page saves under it).
 
 import { makeKv } from "@/app/lib/kv";
+import { FREIGHT_DEFAULTS, type FreightSettings } from "@/app/lib/freight-core";
 
 export type PricingSettings = {
   ratePerCI_default: number;
@@ -73,6 +74,10 @@ export type PricingSettings = {
   staff_digest_to: string; // "" = every admin user of the shop
   shop_timezone: string; // IANA name, e.g. "America/New_York"
 
+  // Step 30: ship-from ZIP, freight terms and the weight / zone freight
+  // table (app/lib/freight-core.ts; cleaned with cleanFreightSettings()).
+  freight: FreightSettings;
+
   cushion_family_order: string[];
 };
 
@@ -127,6 +132,8 @@ const DEFAULTS: PricingSettings = {
   staff_digest_hour: 7,
   staff_digest_to: "",
   shop_timezone: "America/New_York",
+
+  freight: FREIGHT_DEFAULTS,
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };

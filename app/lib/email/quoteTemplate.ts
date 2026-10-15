@@ -108,6 +108,7 @@ export type TemplateInput = {
   // Step 28: quote terms
   validUntil?: string | null; // e.g. "Nov 14, 2026"
   leadTime?: string | null;
+  freightNote?: string | null; // Step 30: e.g. "Customer pickup (no freight)"
 };
 
 function fmtInchesTriple(L: number, W: number, H: number): string {
@@ -711,6 +712,8 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const termsParts: string[] = [];
   if (input.validUntil) termsParts.push(`Price valid until ${escText(input.validUntil)}`);
   if (input.leadTime) termsParts.push(`Lead time: ${escText(input.leadTime)}`);
+  // Step 30: freight terms when the freight isn't a priced line.
+  if (input.freightNote) termsParts.push(escText(input.freightNote));
   const displayTotal = hasShipping && baseTotal != null ? baseTotal + shippingEstimateAmt : baseTotal;
   void showHowBuilt; // retained for potential future use
 
@@ -822,7 +825,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>` : ""}
                         ${processLinesVal.length > 0 ? processLinesVal.map((l) => `<tr>
                           <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${l.key === "box_die" ? "Packaging" : "Machining"} &ndash; ${escText(l.label)}</div>
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${l.key === "box_die" ? "Packaging" : l.key === "freight" ? "Shipping" : "Machining"} &ndash; ${escText(l.label)}</div>
                             ${l.note ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">${escText(l.note)}</div>` : ""}
                           </td>
                           <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">

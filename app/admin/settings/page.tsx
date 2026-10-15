@@ -19,6 +19,8 @@
 
 import * as React from "react";
 import Link from "next/link";
+import FreightSettingsEditor from "@/components/admin/FreightSettingsEditor";
+import { FREIGHT_DEFAULTS, cleanFreightSettings, type FreightSettings } from "@/app/lib/freight-core";
 
 // Step 23: foam cutting (CNC short run / steel-rule die + press) and
 // lamination rates. All are the shop's COST; the markup is applied on top.
@@ -86,6 +88,9 @@ type PricingSettings = {
   staff_digest_hour: number;
   staff_digest_to: string;
   shop_timezone: string;
+
+  // Step 30: freight table
+  freight: FreightSettings;
 } & Record<FoamKey, number> &
   Record<ReviewKey, number>;
 
@@ -174,6 +179,8 @@ export default function AdminSettingsPage() {
     staff_digest_hour: 7,
     staff_digest_to: "",
     shop_timezone: "America/New_York",
+
+    freight: FREIGHT_DEFAULTS,
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -276,6 +283,7 @@ export default function AdminSettingsPage() {
               ? String((s as Record<string, unknown>).reply_to_email)
               : prev.reply_to_email,
           ...reminderSettingsFrom(s as Record<string, unknown>, prev),
+          freight: cleanFreightSettings((s as Record<string, unknown>).freight),
         }));
       } catch (e: any) {
         console.error("Admin settings load error:", e);
@@ -883,6 +891,9 @@ export default function AdminSettingsPage() {
                   with nothing to report. Every buyer reminder is listed on the quote page.
                 </p>
               </div>
+
+              {/* Step 30: freight */}
+              <FreightSettingsEditor value={settings.freight} onChange={(f) => setSettings((s) => ({ ...s, freight: f }))} />
 
               {/* Cushion family order */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">

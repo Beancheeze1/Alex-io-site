@@ -11,6 +11,7 @@ import { FOAM_PROCESS_KEYS } from "@/app/lib/pricing/foam-process";
 import { REVIEW_SETTING_KEYS } from "@/app/lib/pricing/foam-review";
 import { isEmail } from "@/app/lib/quote-mail-core";
 import { isTimeZone } from "@/app/lib/reminders-core";
+import { cleanFreightSettings } from "@/app/lib/freight-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,6 +112,8 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       "staff_digest_hour",
       "staff_digest_to",
       "shop_timezone",
+      // Step 30: freight table
+      "freight",
     ];
 
     const filtered: Partial<PricingSettings> = {};
@@ -154,6 +157,14 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
             ? null
             : { field: k, message: "Digest address must be one email address (or blank)." };
         if (!error) (filtered as Record<string, unknown>)[k] = String(value).trim();
+      } else if (k === "freight") {
+        // Step 30: the whole freight table, checked and filled from the defaults.
+        try {
+          (filtered as Record<string, unknown>)[k] = cleanFreightSettings(value, true);
+          error = null;
+        } catch (e) {
+          error = { field: k, message: e instanceof Error ? e.message : "Freight settings are not valid." };
+        }
       } else if (k === "shop_timezone") {
         error = isTimeZone(value) ? null : { field: k, message: "Time zone must be a name like America/New_York." };
       } else if (k === "buyer_email_accepted" || k === "buyer_email_confirmed" || k === "buyer_email_released") {

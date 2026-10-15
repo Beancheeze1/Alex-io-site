@@ -11,6 +11,8 @@
 //   any earlier shop confirmation (it was for another price). The shop gets
 //   an "Accepted" alert.
 // - Step 29A: the buyer gets an "approval received" email (shop setting).
+// - Step 30: when the shop has freight set up, a ship-to ZIP is needed first
+//   (unless it's customer pickup), so the accepted total includes freight.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -18,6 +20,8 @@ import { buyerEditGuard } from "@/lib/quote-edit";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { approvalForQuote } from "@/app/lib/quote-approval";
 import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
+import { effectiveTerms, loadShipTo, shopFreightSettings } from "@/app/lib/freight";
+import { cleanZip } from "@/app/lib/freight-core";
 import { MAX_NAME_LEN, MAX_PO_LEN, buyerCanAccept, cleanText } from "@/app/lib/quote-approval-core";
 
 export const runtime = "nodejs";
@@ -52,6 +56,14 @@ export async function POST(req: NextRequest) {
       lockedMessage: "This quote has been released. Contact the shop with any changes.",
     });
     if (guard) return guard;
+
+    const freightSettings = await shopFreightSettings(Number(quote.tenant_id));
+    if (freightSettings.ship_from_zip) {
+      const shipTo = await loadShipTo(quote.id);
+      if (effectiveTerms(shipTo, freightSettings) !== "pickup" && !cleanZip(shipTo.zip)) {
+        return bad("ship_to_needed", "Add your ship-to ZIP (or choose pickup) before accepting, so freight is included.", 409);
+      }
+    }
 
     const approval = await approvalForQuote({ id: quote.id, quote_no: quote.quote_no, tenant_id: Number(quote.tenant_id) });
     if (!approval) return bad("no_total", "We couldn't work out this quote's total. Please try again.", 503);

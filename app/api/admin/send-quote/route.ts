@@ -27,6 +27,7 @@ import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { computeApproval } from "@/app/lib/quote-approval-core";
 import { logQuoteEmail, shopSender } from "@/app/lib/quote-mail";
+import { freightForQuote } from "@/app/lib/freight";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -330,7 +331,7 @@ export async function POST(req: NextRequest) {
     // Step 27: one-time cutting dies for die-cut boxes (same as /api/quote/print).
     const boxToolingTotal =
       Math.round(packagingLines.reduce((s, l) => s + (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0), 0) * 100) / 100;
-    const processLines = [
+    const processLines: { key: string; label: string; amount: number; note: string | null }[] = [
       ...proc.lines,
       ...(boxToolingTotal > 0
         ? [{ key: "box_die", label: "Box cutting die (one time)", amount: boxToolingTotal, note: null }]
@@ -338,7 +339,35 @@ export async function POST(req: NextRequest) {
     ];
     const dieCuttingCharge = proc.total + boxToolingTotal;
 
-    const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
+    // Step 30: freight, the same as /api/quote/print (in the total when
+    // prepaid & add).
+    const preFreightTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
+    const fr = await freightForQuote({
+      quoteId: quote.id,
+      tenantId: Number(user.tenant_id),
+      subtotal: preFreightTotal,
+      facts,
+    }).catch(() => null);
+    const freight = fr?.freight ?? null;
+    const freightActive = !!freight && freight.status !== "not_set_up";
+    const grandTotal = Math.round((preFreightTotal + (freight && freight.in_total ? freight.cost : 0)) * 100) / 100;
+    if (freight && freight.in_total && (freight.status === "estimated" || freight.status === "override" || freight.status === "free")) {
+      processLines.push({
+        key: "freight",
+        label: freight.status === "free" ? "Free freight" : "Freight (prepaid & add)",
+        amount: freight.cost,
+        note: freight.note || null,
+      });
+    }
+    const freightNote = !freight
+      ? null
+      : freight.status === "pickup"
+        ? "Customer pickup (no freight)"
+        : freight.terms === "fob_origin"
+          ? `Freight: FOB origin / collect (you pay the carrier)${freight.estimate != null ? `, est. $${freight.estimate.toFixed(2)}` : ""}`
+          : freight.status === "needs_zip"
+            ? "Freight: add your ship-to ZIP on the quote page"
+            : null;
 
     // Step 28: price valid until / lead time, the same as the quote page.
     let validUntil: string | null = null;
@@ -359,7 +388,7 @@ export async function POST(req: NextRequest) {
     const roughShipPct = shipSettings ? shipSettings.rough_ship_pct : 2.0;
     const shippingCapUsd = shipSettings ? shipSettings.shipping_cap_usd : 200.0;
     const rawShippingEstimate =
-      Number.isFinite(roughShipPct) && grandTotal > 0
+      !freightActive && Number.isFinite(roughShipPct) && grandTotal > 0
         ? Math.round(grandTotal * (roughShipPct / 100) * 100) / 100
         : 0;
     const shippingIsCapped = Number.isFinite(shippingCapUsd) && rawShippingEstimate > shippingCapUsd;
@@ -512,6 +541,7 @@ export async function POST(req: NextRequest) {
       processLines: processLines.length > 0 ? processLines : null,
       validUntil,
       leadTime,
+      freightNote,
       grandTotal,
       shippingEstimate: shippingEstimate > 0 ? shippingEstimate : null,
       shippingIsCapped,

@@ -41,6 +41,7 @@ import { addAdminAlert } from "@/lib/admin-alerts";
 import { buyerMayEdit } from "@/lib/quote-edit";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { buyerCanAccept, computeApproval } from "@/app/lib/quote-approval-core";
+import { freightForQuote } from "@/app/lib/freight";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -830,8 +831,22 @@ export async function GET(req: NextRequest) {
       "material_name",
       "material_family",
     ];
+    // Step 30: freight from the ship-to and the shop's freight table; with
+    // prepaid & add it's part of the quote total.
+    const preFreightTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
+    const fr = await freightForQuote({
+      quoteId: quote.id,
+      tenantId,
+      subtotal: preFreightTotal,
+      facts: facts as Record<string, unknown>,
+    }).catch((e) => {
+      console.error("[quote/print] freight unavailable", { quoteNo, err: String(e) });
+      return null;
+    });
+    const freightCost = fr && fr.freight.in_total ? fr.freight.cost : 0;
+
     // Step 28: estimate -> accepted -> confirmed, expiry and lead time.
-    const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
+    const grandTotal = Math.round((preFreightTotal + freightCost) * 100) / 100;
     const approval = computeApproval(await loadApprovalRow(quote.id), grandTotal, await quoteTerms(tenantId));
     const buyerCanEdit = isStaffCaller || buyerMayEdit(req, String(quoteNo));
     const canAccept = buyerCanEdit && buyerCanAccept(approval, !!(quote as { locked?: boolean | null }).locked);
@@ -865,6 +880,22 @@ export async function GET(req: NextRequest) {
       // Staff only: how the cutting charges were worked out.
       ...(isStaffCaller ? { foamProcessDetail: proc.detail, priceModel: proc.model } : {}),
       grandTotal,
+      // Step 30: freight (in grandTotal when prepaid & add), the shop's
+      // options, and the ship-to address (buyer with the edit link / staff).
+      freight: fr ? fr.freight : null,
+      freightOptions: fr
+        ? {
+            set_up: !!fr.settings.ship_from_zip,
+            allowed: fr.settings.terms_allowed,
+            default_terms: fr.settings.default_terms,
+            free_over_usd: fr.settings.free_over_usd,
+          }
+        : null,
+      shipTo: fr && buyerCanEdit
+        ? isStaffCaller
+          ? fr.shipTo
+          : { ...fr.shipTo, override_usd: null }
+        : null,
       approval: {
         ...approval,
         // Who accepted / confirmed is for the buyer and staff; the PO too.

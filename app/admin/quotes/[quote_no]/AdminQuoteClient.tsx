@@ -27,6 +27,7 @@ import RunMethodControl from "@/components/admin/RunMethodControl";
 import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
+import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
@@ -119,6 +120,10 @@ type ApiOk = {
   // Step 25: review flags
   reviewFlags?: { code: string; message: string }[];
   grandTotal?: number;
+  // Step 30: freight (in grandTotal when prepaid & add), options, ship-to
+  freight?: FreightView | null;
+  freightOptions?: FreightOptionsView | null;
+  shipTo?: ShipToView | null;
   customerBoxDims?: { L: number; W: number; H: number } | null;
   customerBoxMatch?: {
     sku: string;
@@ -1196,6 +1201,12 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
   const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
+  // Step 30: shipping card data
+  const [shipData, setShipData] = React.useState<{
+    freight: FreightView | null;
+    options: FreightOptionsView | null;
+    shipTo: ShipToView | null;
+  } | null>(null);
   const [loadingPreviousLayout, setLoadingPreviousLayout] = React.useState(false);
 
   // Internal notes (staff-only; migration 012). Loaded from a dedicated
@@ -1419,6 +1430,11 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 ? Number((json as ApiOk).grandTotal)
                 : 0,
             );
+            setShipData({
+              freight: (json as ApiOk).freight ?? null,
+              options: (json as ApiOk).freightOptions ?? null,
+              shipTo: (json as ApiOk).shipTo ?? null,
+            });
             setCustomerBoxDims((json as ApiOk)?.customerBoxDims ?? null);
             setCustomerBoxMatch((json as ApiOk)?.customerBoxMatch ?? null);
 
@@ -2520,6 +2536,19 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 <div style={cardTitleStyle}>Pricing snapshot</div>
                 {/* Step 28: estimate -> accepted -> confirmed, expiry, lead time */}
                 {quoteNoValue ? <QuoteApprovalPanel quoteNo={quoteNoValue} /> : null}
+                {/* Step 30: ship-to, freight terms and freight (staff can override) */}
+                {quoteNoValue && shipData ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <ShipToCard
+                      quoteNo={quoteNoValue}
+                      freight={shipData.freight}
+                      options={shipData.options}
+                      shipTo={shipData.shipTo}
+                      canEdit
+                      staff
+                    />
+                  </div>
+                ) : null}
                 {quoteNoValue ? (
                   <RepriceQuoteButton quoteNo={quoteNoValue} locked={!!quoteState?.locked} />
                 ) : null}

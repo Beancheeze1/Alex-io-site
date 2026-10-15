@@ -12,6 +12,7 @@
   "test:corrugated": "npx --yes tsx scripts/test-corrugated-price.ts",
   "test:foam": "npx --yes tsx scripts/test-foam-price.ts",
   "test:mail": "npx --yes tsx scripts/test-quote-mail.ts",
+  "test:freight": "npx --yes tsx scripts/test-freight.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },

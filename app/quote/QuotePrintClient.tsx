@@ -31,6 +31,7 @@ import { buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download"
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, uploadArtwork } from "@/lib/artwork";
 import QuoteApprovalCard, { type QuoteApprovalView } from "@/components/quote/QuoteApprovalCard";
+import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
 
 type QuoteRow = {
   id: number;
@@ -141,6 +142,10 @@ type ApiOk = {
   grandTotal: number;
   // Step 28: estimate -> accepted -> confirmed, expiry, lead time
   approval?: QuoteApprovalView | null;
+  // Step 30: freight (in grandTotal when prepaid & add), options, ship-to
+  freight?: FreightView | null;
+  freightOptions?: FreightOptionsView | null;
+  shipTo?: ShipToView | null;
   isPrinted?: boolean;
   printModel?: "per_color" | "legacy";
   printSummary?: string | null;
@@ -848,6 +853,10 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [processLines, setProcessLines] = React.useState<ProcessLine[]>([]);
   const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
   const [approval, setApproval] = React.useState<QuoteApprovalView | null>(null);
+  // Step 30: freight, the shop's freight options and the ship-to.
+  const [freight, setFreight] = React.useState<FreightView | null>(null);
+  const [freightOptions, setFreightOptions] = React.useState<FreightOptionsView | null>(null);
+  const [shipTo, setShipTo] = React.useState<ShipToView | null>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [salesRepEmail, setSalesRepEmail] = React.useState<string | null>(null);
 
@@ -1092,6 +1101,9 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         setProcessLines(Array.isArray(asOk.processLines) ? asOk.processLines : []);
         setReviewFlags(Array.isArray(asOk.reviewFlags) ? asOk.reviewFlags : []);
         setApproval(asOk.approval && typeof asOk.approval === "object" ? asOk.approval : null);
+        setFreight(asOk.freight && typeof asOk.freight === "object" ? asOk.freight : null);
+        setFreightOptions(asOk.freightOptions && typeof asOk.freightOptions === "object" ? asOk.freightOptions : null);
+        setShipTo(asOk.shipTo && typeof asOk.shipTo === "object" ? asOk.shipTo : null);
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setPrintModel(asOk.printModel === "per_color" ? "per_color" : "legacy");
@@ -1621,8 +1633,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   // Rough shipping estimate from admin knob:
   //   shippingEstimate = (foam+packaging+printing subtotal) * roughShipPct / 100
   //   capped at shippingCapUsd, if set
+  // Step 30: once the shop has freight set up (or staff set it), the rough
+  // estimate is replaced by the real freight line.
+  const freightActive = !!freight && freight.status !== "not_set_up";
+  const freightLine = freight && freight.in_total && (freight.status === "estimated" || freight.status === "override" || freight.status === "free");
   const { shippingEstimate, shippingIsCapped } = React.useMemo(() => {
-    if (roughShipPct == null || (effectiveGrandTotal ?? 0) <= 0) {
+    if (freightActive || roughShipPct == null || (effectiveGrandTotal ?? 0) <= 0) {
       return { shippingEstimate: 0, shippingIsCapped: false };
     }
     const raw = Math.round(effectiveGrandTotal * (roughShipPct / 100) * 100) / 100;
@@ -1630,7 +1646,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
       return { shippingEstimate: shippingCapUsd, shippingIsCapped: true };
     }
     return { shippingEstimate: raw, shippingIsCapped: false };
-  }, [roughShipPct, shippingCapUsd, effectiveGrandTotal]);
+  }, [roughShipPct, shippingCapUsd, effectiveGrandTotal, freightActive]);
 
   // Planning total adds rough shipping to the effective grand total
   const planningTotal = (effectiveGrandTotal ?? 0) + (shippingEstimate || 0);
@@ -2739,10 +2755,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             </div>
                           )}
 
+                      {freightLine && freight && (
+                        <div data-freight-line>
+                          <div style={labelStyle}>{freight.status === "free" ? "Freight (free)" : "Freight (prepaid & add)"}</div>
+                          <div style={{ fontSize: 13 }}>{formatUsd(freight.cost)}</div>
+                        </div>
+                      )}
+
                       {effectiveGrandTotal > 0 && (
                         <div>
                           <div style={labelStyle}>
-                            Total estimate (foam + packaging + printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""})
+                            Total estimate (foam + packaging + printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""}
+                            {freightLine ? " + freight" : ""})
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal)}</div>
                         </div>
@@ -3451,8 +3475,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <>
                               <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
                                 {isBoxesOnly
-                                  ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""})`
-                                  : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""})`}
+                                  ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${freightLine ? " + freight" : ""})`
+                                  : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""}${freightLine ? " + freight" : ""})`}
                               </div>
                               <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}</div>
                             </>
@@ -3733,6 +3757,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             )}
 
             {/* Step 28: estimate / accepted / confirmed, with Accept for the buyer */}
+            {/* Step 30: shipping (freight terms, ship-to, freight) */}
+            {quoteNo ? (
+              <ShipToCard
+                quoteNo={quoteNo}
+                freight={freight}
+                options={freightOptions}
+                shipTo={shipTo}
+                canEdit={!!approval?.buyer_can_edit && !quote?.locked}
+              />
+            ) : null}
+
             {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} /> : null}
 
             {/* Step 25: things the shop will check before confirming */}
