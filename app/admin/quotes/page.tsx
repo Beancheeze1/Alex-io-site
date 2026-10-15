@@ -257,17 +257,28 @@ export default function AdminQuotesPage() {
         body: JSON.stringify({ quoteNo, lock }),
       });
       let data = await res.json().catch(() => null);
-      // Step 25: review flags — show them and release only if staff confirm.
-      if (lock && res.status === 409 && data?.error === "REVIEW_FLAGS") {
-        const list = Array.isArray(data.flags)
-          ? data.flags.map((f: { message?: string }) => `• ${f?.message ?? ""}`).join("\n")
-          : "";
-        const go = window.confirm(`${data.message}\n\n${list}\n\nRelease for manufacturing anyway?`);
-        if (!go) return null;
+      // Step 25: review flags, Step 28: not confirmed — show each and release
+      // only if staff confirm (the acks add up across the retries).
+      const acks: Record<string, boolean> = {};
+      for (let i = 0; i < 2 && lock && res.status === 409; i++) {
+        let text: string;
+        if (data?.error === "REVIEW_FLAGS" && !acks.ack_flags) {
+          const list = Array.isArray(data.flags)
+            ? data.flags.map((f: { message?: string }) => `• ${f?.message ?? ""}`).join("\n")
+            : "";
+          text = `${data.message}\n\n${list}\n\nRelease for manufacturing anyway?`;
+          acks.ack_flags = true;
+        } else if (data?.error === "NOT_CONFIRMED" && !acks.ack_unconfirmed) {
+          text = `${data.message}\n\nRelease for manufacturing anyway?`;
+          acks.ack_unconfirmed = true;
+        } else {
+          break;
+        }
+        if (!window.confirm(text)) return null;
         res = await fetch("/api/admin/quotes/lock", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ quoteNo, lock, ack_flags: true }),
+          body: JSON.stringify({ quoteNo, lock, ...acks }),
         });
         data = await res.json().catch(() => null);
       }
@@ -999,6 +1010,8 @@ function displayStatus(status: string | null | undefined): string {
   if (s === "engineering" || s === "in_progress") return "Engineering";
   if (s === "sent") return "Sent";
   if (s === "approved") return "Approved";
+  if (s === "accepted") return "Accepted";
+  if (s === "confirmed") return "Confirmed";
   if (s === "rejected") return "Rejected";
 
   // Fallback: show raw status text capitalized
@@ -1011,7 +1024,7 @@ function chipClassForStatus(status: string | null | undefined): string {
   if (s === "engineering" || s === "in_progress") {
     return "bg-[var(--status-pending-bg)] text-[var(--status-pending-text)] border border-[var(--status-pending-text)]/40";
   }
-  if (s === "sent" || s === "approved") {
+  if (s === "sent" || s === "approved" || s === "accepted" || s === "confirmed") {
     return "bg-[var(--status-success-bg)] text-[var(--status-success-text)] border border-[var(--status-success-text)]/40";
   }
   if (s === "rejected") {

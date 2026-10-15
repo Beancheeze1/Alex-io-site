@@ -66,6 +66,10 @@ type PricingSettings = {
   die_cut_upcharge_usd: number;
 
   cushion_family_order: string[];
+
+  // Step 28: quote terms
+  quote_valid_days: number;
+  lead_time_text: string;
 } & Record<FoamKey, number> &
   Record<ReviewKey, number>;
 
@@ -99,6 +103,9 @@ export default function AdminSettingsPage() {
     die_cut_upcharge_usd: 0,
     ...(Object.fromEntries(FOAM_FIELDS.map((f) => [f.key, f.key === "press_parts_per_hit" ? 1 : 0])) as Record<FoamKey, number>),
     ...(Object.fromEntries(REVIEW_FIELDS.map((f) => [f.key, f.dflt])) as Record<ReviewKey, number>),
+
+    quote_valid_days: 30,
+    lead_time_text: "",
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -185,6 +192,11 @@ export default function AdminSettingsPage() {
           ...(Object.fromEntries(
             REVIEW_FIELDS.map((f) => [f.key, numberOr((s as Record<string, unknown>)[f.key], prev[f.key])]),
           ) as Record<ReviewKey, number>),
+          quote_valid_days: numberOr((s as Record<string, unknown>).quote_valid_days, prev.quote_valid_days),
+          lead_time_text:
+            typeof (s as Record<string, unknown>).lead_time_text === "string"
+              ? String((s as Record<string, unknown>).lead_time_text)
+              : prev.lead_time_text,
         }));
       } catch (e: any) {
         console.error("Admin settings load error:", e);
@@ -594,6 +606,43 @@ export default function AdminSettingsPage() {
                   their layer or overlapping, and foam that doesn&apos;t fit its box)
                   show &quot;Things to check&quot; on the quote, and Release for
                   manufacturing asks you to confirm. They never change a price.
+                </p>
+              </div>
+
+              {/* Step 28: quote terms */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-quote-terms>
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">Quote terms</h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-[var(--text-secondary)]">Quotes are valid for (days, 0 = no expiry)</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      aria-label="Quote valid days"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                      value={settings.quote_valid_days}
+                      onChange={(e) =>
+                        setSettings((s) => ({ ...s, quote_valid_days: Math.max(0, Math.round(Number(e.target.value) || 0)) }))
+                      }
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-[var(--text-secondary)]">Lead time (shown on quotes)</span>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      placeholder="e.g. 3-4 weeks after approval"
+                      aria-label="Lead time"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                      value={settings.lead_time_text}
+                      onChange={(e) => setSettings((s) => ({ ...s, lead_time_text: e.target.value }))}
+                    />
+                  </label>
+                </div>
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
+                  Buyers can accept a quote until it expires; &quot;Reprice at today&apos;s rates&quot; restarts the
+                  clock. Staff can change the expiry date or lead time on any quote.
                 </p>
               </div>
 

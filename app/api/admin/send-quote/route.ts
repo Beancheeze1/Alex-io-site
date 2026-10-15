@@ -19,6 +19,8 @@ import { computePricing } from "@/app/lib/pricing/compute";
 import { lockedChargeSettings, lockedFoamPrice, quotePriceModel } from "@/app/lib/pricing/foam-lock";
 import { foamChargeLines, latestLayoutJson, quoteFoamGeometry } from "@/app/lib/pricing/foam-quote";
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
+import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
+import { computeApproval } from "@/app/lib/quote-approval-core";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -332,6 +334,19 @@ export async function POST(req: NextRequest) {
 
     const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
 
+    // Step 28: price valid until / lead time, the same as the quote page.
+    let validUntil: string | null = null;
+    let leadTime: string | null = null;
+    try {
+      const ap = computeApproval(await loadApprovalRow(quote.id), grandTotal, await quoteTerms(Number(user.tenant_id)));
+      leadTime = ap.lead_time;
+      if (ap.expires_at && ap.stage !== "confirmed") {
+        validUntil = new Date(ap.expires_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+      }
+    } catch (e) {
+      console.warn("[send-quote] quote terms unavailable", String(e));
+    }
+
     // Rough shipping estimate: this shop's % + cap (Step 19: per shop), the
     // same setting the live quote page reads.
     const shipSettings = await loadShippingSettings(Number(user.tenant_id) || null).catch(() => null);
@@ -488,6 +503,8 @@ export async function POST(req: NextRequest) {
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
       processLines: processLines.length > 0 ? processLines : null,
+      validUntil,
+      leadTime,
       grandTotal,
       shippingEstimate: shippingEstimate > 0 ? shippingEstimate : null,
       shippingIsCapped,

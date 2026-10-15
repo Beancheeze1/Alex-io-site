@@ -12,6 +12,7 @@ import { buildStepFromLayout } from "@/lib/cad/step";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { quoteReviewFlags } from "@/app/lib/pricing/foam-quote";
+import { approvalForQuote } from "@/app/lib/quote-approval";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,6 +185,28 @@ export async function POST(req: NextRequest) {
           error: "REVIEW_FLAGS",
           message: `This quote has ${flags.length} thing${flags.length > 1 ? "s" : ""} to check before release.`,
           flags,
+        },
+        409,
+      );
+    }
+  }
+
+  // Step 28: release normally follows the shop's confirmation. An unconfirmed
+  // quote is refused until staff say to release it anyway (ack_unconfirmed).
+  if (!quote.locked && body?.ack_unconfirmed !== true) {
+    const approval = await approvalForQuote({ id: quote.id, quote_no: quote.quote_no, tenant_id: Number(user.tenant_id) });
+    if (approval && approval.stage !== "confirmed") {
+      return json(
+        {
+          ok: false,
+          error: "NOT_CONFIRMED",
+          message:
+            approval.stage === "accepted"
+              ? "The buyer accepted this quote but the shop hasn't confirmed it yet."
+              : approval.stage === "needs_reapproval"
+                ? "The price changed since the buyer accepted: it needs their re-approval and your confirmation."
+                : "This quote hasn't been accepted by the buyer or confirmed by the shop.",
+          stage: approval.stage,
         },
         409,
       );

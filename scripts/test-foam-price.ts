@@ -11,6 +11,7 @@ import { foamGeometry } from "../app/lib/pricing/foam-geometry";
 import { pickFoamProcess, priceFoamProcess, resolveFoamMethod } from "../app/lib/pricing/foam-process";
 import { cleanQtyList, foamBreakList } from "../app/lib/pricing/qty-list";
 import { reviewFoam } from "../app/lib/pricing/foam-review";
+import { buyerCanAccept, cleanText, computeApproval, staffCanConfirm } from "../app/lib/quote-approval-core";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -337,6 +338,46 @@ check(
 );
 check("review: unpriced material", codes(reviewFoam({ ...base, layout: twoLayer, materialUnpriced: true })), "material_unpriced");
 check("review: walls off when minimum is 0", reviewFoam({ ...base, layout: one({ lengthIn: 4, widthIn: 3, depthIn: 1, x: 0, y: 0 }), settings: {} }).length, 0);
+
+// ---- Step 28: estimate -> accepted -> confirmed ----
+{
+  const now = new Date("2026-10-20T12:00:00Z");
+  const terms = { quote_valid_days: 30, lead_time_text: "3-4 weeks" };
+  const base = { created_at: "2026-10-15T12:00:00Z" };
+  const e = computeApproval(base, 1000, terms, now);
+  check("new quote is an estimate", e.stage, "estimate");
+  check("expires 30 days after it was created", e.expires_at, "2026-11-14T12:00:00.000Z");
+  check("not expired yet", e.expired, false);
+  check("shop lead time shown", e.lead_time, "3-4 weeks");
+  check("buyer can accept an estimate", buyerCanAccept(e, false), true);
+  check("released quote can't be accepted", buyerCanAccept(e, true), false);
+  check("staff can't confirm an estimate", staffCanConfirm(e), false);
+
+  const acc = { ...base, accepted_at: "2026-10-16T12:00:00Z", accepted_name: "Pat", accepted_total: 1000 };
+  const a1 = computeApproval(acc, 1000, terms, now);
+  check("accepted at the current total", a1.stage, "accepted");
+  check("staff can confirm", staffCanConfirm(a1), true);
+  check("buyer can't accept twice", buyerCanAccept(a1, false), false);
+  check("price change after acceptance -> needs re-approval", computeApproval(acc, 1000.01, terms, now).stage, "needs_reapproval");
+  check("buyer can re-approve a changed price", buyerCanAccept(computeApproval(acc, 1100, terms, now), false), true);
+
+  const conf = { ...acc, confirmed_at: "2026-10-17T12:00:00Z", confirmed_by: "Chuck", confirmed_total: 1000 };
+  check("confirmed at the current total", computeApproval(conf, 1000, terms, now).stage, "confirmed");
+  check("price change after confirmation -> needs re-approval", computeApproval(conf, 990, terms, now).stage, "needs_reapproval");
+  check("same total to the cent counts as unchanged", computeApproval(conf, 1000.004, terms, now).stage, "confirmed");
+
+  const late = new Date("2026-11-20T12:00:00Z");
+  const ex = computeApproval(base, 1000, terms, late);
+  check("past 30 days -> expired", ex.expired, true);
+  check("expired quote can't be accepted", buyerCanAccept(ex, false), false);
+  check("confirmed quotes don't expire", computeApproval(conf, 1000, terms, late).expired, false);
+  check("reprice restarts the clock", computeApproval({ ...base, priced_at: "2026-11-10T12:00:00Z" }, 1000, terms, late).expired, false);
+  check("staff expiry date wins", computeApproval({ ...base, expires_at: "2026-12-31T23:59:59Z" }, 1000, terms, late).expires_at, "2026-12-31T23:59:59.000Z");
+  check("0 days = never expires", computeApproval(base, 1000, { quote_valid_days: 0 }, late).expires_at, null);
+  check("quote lead time overrides the shop's", computeApproval({ ...base, lead_time_text: "2 weeks" }, 1000, terms, now).lead_time, "2 weeks");
+  check("no price -> can't accept", buyerCanAccept(computeApproval(base, 0, terms, now), false), false);
+  check("cleanText trims and caps", cleanText("  PO   123  ", 5), "PO 12");
+}
 
 if (failed) {
   console.log(`\n${failed} FAILED`);

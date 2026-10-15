@@ -38,6 +38,9 @@ import { foamChargeLines, latestLayoutJson, quoteFoamGeometry, quoteReviewFlags 
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { buyerMayEdit } from "@/lib/quote-edit";
+import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
+import { buyerCanAccept, computeApproval } from "@/app/lib/quote-approval-core";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -827,6 +830,12 @@ export async function GET(req: NextRequest) {
       "material_name",
       "material_family",
     ];
+    // Step 28: estimate -> accepted -> confirmed, expiry and lead time.
+    const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
+    const approval = computeApproval(await loadApprovalRow(quote.id), grandTotal, await quoteTerms(tenantId));
+    const buyerCanEdit = isStaffCaller || buyerMayEdit(req, String(quoteNo));
+    const canAccept = buyerCanEdit && buyerCanAccept(approval, !!(quote as { locked?: boolean | null }).locked);
+
     const factsObj = (facts || {}) as Record<string, unknown>;
     const factsOut = isStaffCaller
       ? factsObj
@@ -855,7 +864,13 @@ export async function GET(req: NextRequest) {
       reviewFlags,
       // Staff only: how the cutting charges were worked out.
       ...(isStaffCaller ? { foamProcessDetail: proc.detail, priceModel: proc.model } : {}),
-      grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge,
+      grandTotal,
+      approval: {
+        ...approval,
+        // Who accepted / confirmed is for the buyer and staff; the PO too.
+        buyer_can_edit: buyerCanEdit,
+        can_accept: canAccept,
+      },
       isPrinted,
       printModel: pc.printModel,
       printSummary: pc.printSummary,

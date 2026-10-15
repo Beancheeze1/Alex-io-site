@@ -59,6 +59,13 @@ export async function POST(req: NextRequest) {
       [quote.id],
     );
 
+    // Step 28: repricing restarts the "quote valid" clock (and drops an expiry set on the quote).
+    try {
+      await q(`UPDATE public.quotes SET priced_at = now(), expires_at = NULL WHERE id = $1`, [quote.id]);
+    } catch (e) {
+      console.warn("[admin/quotes/reprice] expiry not reset (migration 038 not run?)", String(e));
+    }
+
     // Charges: today's printing / die-cut settings are saved on the next view.
     try {
       await q(`UPDATE public.quotes SET price_lock = NULL WHERE id = $1`, [quote.id]);

@@ -26,6 +26,7 @@ import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
 import RunMethodControl from "@/components/admin/RunMethodControl";
 import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
+import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
@@ -2517,6 +2518,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
               <div style={cardBase}>
                 <div style={cardTitleStyle}>Pricing snapshot</div>
+                {/* Step 28: estimate -> accepted -> confirmed, expiry, lead time */}
+                {quoteNoValue ? <QuoteApprovalPanel quoteNo={quoteNoValue} /> : null}
                 {quoteNoValue ? (
                   <RepriceQuoteButton quoteNo={quoteNoValue} locked={!!quoteState?.locked} />
                 ) : null}

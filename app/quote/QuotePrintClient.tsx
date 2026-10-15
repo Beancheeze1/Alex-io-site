@@ -30,6 +30,7 @@ import { usePageTracker } from "@/hooks/usePageTracker";
 import { buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, uploadArtwork } from "@/lib/artwork";
+import QuoteApprovalCard, { type QuoteApprovalView } from "@/components/quote/QuoteApprovalCard";
 
 type QuoteRow = {
   id: number;
@@ -138,6 +139,8 @@ type ApiOk = {
   // Step 25: things the shop will check before confirming
   reviewFlags?: { code: string; message: string }[];
   grandTotal: number;
+  // Step 28: estimate -> accepted -> confirmed, expiry, lead time
+  approval?: QuoteApprovalView | null;
   isPrinted?: boolean;
   printModel?: "per_color" | "legacy";
   printSummary?: string | null;
@@ -844,6 +847,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
   const [processLines, setProcessLines] = React.useState<ProcessLine[]>([]);
   const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
+  const [approval, setApproval] = React.useState<QuoteApprovalView | null>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [salesRepEmail, setSalesRepEmail] = React.useState<string | null>(null);
 
@@ -1087,6 +1091,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         );
         setProcessLines(Array.isArray(asOk.processLines) ? asOk.processLines : []);
         setReviewFlags(Array.isArray(asOk.reviewFlags) ? asOk.reviewFlags : []);
+        setApproval(asOk.approval && typeof asOk.approval === "object" ? asOk.approval : null);
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setPrintModel(asOk.printModel === "per_color" ? "per_color" : "legacy");
@@ -3726,6 +3731,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 </div>
               </div>
             )}
+
+            {/* Step 28: estimate / accepted / confirmed, with Accept for the buyer */}
+            {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} /> : null}
 
             {/* Step 25: things the shop will check before confirming */}
             {reviewFlags.length > 0 && (

@@ -53,6 +53,10 @@ export type PricingSettings = {
   foam_max_block_w_in: number;
   foam_max_block_t_in: number;
 
+  // Step 28: quote terms (app/lib/quote-approval-core.ts).
+  quote_valid_days: number; // estimates expire after this many days (0 = never)
+  lead_time_text: string; // e.g. "3-4 weeks after approval" ("" = not shown)
+
   cushion_family_order: string[];
 };
 
@@ -90,6 +94,9 @@ const DEFAULTS: PricingSettings = {
   foam_max_block_l_in: 0,
   foam_max_block_w_in: 0,
   foam_max_block_t_in: 0,
+
+  quote_valid_days: 30,
+  lead_time_text: "",
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };

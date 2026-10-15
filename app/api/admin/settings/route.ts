@@ -92,6 +92,9 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       ...FOAM_PROCESS_KEYS,
       // Step 25: review flag limits
       ...REVIEW_SETTING_KEYS,
+      // Step 28: quote terms
+      "quote_valid_days",
+      "lead_time_text",
     ];
 
     const filtered: Partial<PricingSettings> = {};
@@ -111,6 +114,17 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
         error = validateKerfPct(value);
       } else if (k === "cushion_family_order") {
         error = validateCushionFamilyOrder(value);
+      } else if (k === "lead_time_text") {
+        // Step 28: free text shown on quotes, up to 120 characters.
+        error =
+          typeof value === "string" && value.length <= 120
+            ? null
+            : { field: k, message: "Lead time must be text of at most 120 characters." };
+      } else if (k === "quote_valid_days") {
+        error =
+          typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 3650
+            ? null
+            : { field: k, message: "Quote valid days must be a whole number from 0 to 3650." };
       } else {
         error = validateNonNegative(k, value);
       }
