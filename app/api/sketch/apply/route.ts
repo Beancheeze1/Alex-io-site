@@ -25,6 +25,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { internalHeaders, internalOrStaff, staffMayTouchQuote } from "@/lib/internal-call";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import { saveFacts } from "@/app/lib/memory";
 
@@ -54,6 +55,7 @@ type QuoteRow = {
   email: string | null;
   phone: string | null;
   status: string;
+  locked: boolean | null;
 };
 
 type QuoteItemRow = {
@@ -122,7 +124,7 @@ async function calcQuoteCI(opts: {
 
   const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...internalHeaders() },
     body: JSON.stringify({
       length_in: L,
       width_in: W,
@@ -189,6 +191,10 @@ async function buildPriceBreaksForSketch(opts: {
 }
 
 export async function POST(req: NextRequest) {
+  // Step 19: called by /api/sketch-upload (internal header) or by staff only.
+  const caller = await internalOrStaff(req);
+  if (!caller) return err("unauthorized", undefined, 401);
+
   try {
     const body = (await req.json().catch(() => ({}))) as ApplyInput;
     const quoteNo = (body.quote_no || "").trim();
@@ -202,7 +208,7 @@ export async function POST(req: NextRequest) {
     // 1) Load quote header
     const quote = await one<QuoteRow>(
       `
-      SELECT id, quote_no, customer_name, email, phone, status
+      SELECT id, quote_no, customer_name, email, phone, status, locked
       FROM quotes
       WHERE quote_no = $1
       LIMIT 1;
@@ -212,6 +218,13 @@ export async function POST(req: NextRequest) {
 
     if (!quote) {
       return err("quote_not_found", { quoteNo }, 404);
+    }
+    if (!caller.internal && !(await staffMayTouchQuote(caller.user, quote.id))) {
+      return err("quote_not_found", { quoteNo }, 404);
+    }
+    // Step 19: a released quote is never changed (or re-emailed) by a sketch.
+    if (quote.locked) {
+      return err("quote_locked", "This quote is released. Revise it first.", 409);
     }
 
     // Decide where to send the auto-quote email.

@@ -13,6 +13,7 @@
 
 import { q, one } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
+import { internalHeaders } from "@/lib/internal-call";
 import { resolveBoxUnitPrice } from "@/app/lib/box-tier-pricing";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ async function calcFoamTotal(
   try {
     const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...internalHeaders() },
       body: JSON.stringify({
         length_in: L, width_in: W, height_in: H,
         material_id, qty, cavities: [], round_to_bf: false,

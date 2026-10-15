@@ -1,5 +1,6 @@
 // app/quote/[quote_no]/page.tsx
 import { q, one } from "@/lib/db";
+import { internalHeaders } from "@/lib/internal-call";
 
 type QuoteRow = {
   id: number;
@@ -146,7 +147,7 @@ export default async function QuotePrintPage(props: { params: { quote_no: string
       try {
         const res = await fetch(`${base}/api/quotes/calc`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...internalHeaders() },
           body: JSON.stringify({
             length_in: item.length_in,
             width_in: item.width_in,

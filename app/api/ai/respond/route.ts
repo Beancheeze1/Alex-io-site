@@ -1,5 +1,6 @@
 // app/api/ai/respond/route.ts
 import { NextResponse } from "next/server";
+import { legacyRouteBlocked } from "@/lib/internal-call";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -128,6 +129,11 @@ function composeHtml(toEmail: string, subject: string, text: string, quote: any,
 }
 
 export async function POST(req: Request) {
+  // Step 19: old endpoint with no caller in the app. Public calls get 410 and are
+  // logged as "[legacy-route] blocked" so any outside user shows up in the logs.
+  const blocked = legacyRouteBlocked(req, "/api/ai/respond");
+  if (blocked) return blocked;
+
   try {
     const { toEmail, subject, text, threadId, dryRun }: RespondInput = await req.json();
 

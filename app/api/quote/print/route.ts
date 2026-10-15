@@ -28,6 +28,7 @@ import { loadFacts } from "@/app/lib/memory";
 import { buildLayoutExports, computeGeometryHash, embedGeometryHashInStep, extractGeometryHashFromStep } from "@/app/lib/layout/exports";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { internalHeaders } from "@/lib/internal-call";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
@@ -235,7 +236,7 @@ async function priceViaCalcRoute(params: {
 
   const r = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...internalHeaders() },
     body: JSON.stringify(payload),
   });
 
@@ -750,6 +751,31 @@ export async function GET(req: NextRequest) {
     const dieCuttingTriggered = dieCutTriggerQty > 0 && orderQty >= dieCutTriggerQty;
     const dieCuttingCharge = dieCuttingTriggered ? dieCutUpchargeUsd : 0;
 
+    // Step 19: buyers (and anyone with the quote number) get only the facts
+    // the quote page and editor use. Staff get everything.
+    const PUBLIC_FACT_KEYS = [
+      "revision",
+      "revision_updated_at",
+      "released_rev",
+      "stage_rev",
+      "printed",
+      "pack_type",
+      "notes",
+      "customer_box_in",
+      "print_spec",
+      "print_mode",
+      "qty",
+      "box_qty_breaks",
+      "dims",
+      "material_id",
+      "material_name",
+      "material_family",
+    ];
+    const factsObj = (facts || {}) as Record<string, unknown>;
+    const factsOut = isStaffCaller
+      ? factsObj
+      : Object.fromEntries(PUBLIC_FACT_KEYS.filter((k) => k in factsObj).map((k) => [k, factsObj[k]]));
+
     return ok({
       ok: true,
       quote,
@@ -773,7 +799,7 @@ export async function GET(req: NextRequest) {
       platesTotal: pc.platesTotal,
       digitalOnly: pc.digitalOnly,
       customerBoxDims: customerBox ?? null,
-      facts,
+      facts: factsOut,
       salesRepEmail,
     });
   } catch (err) {

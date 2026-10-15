@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
+import { internalOrStaff, staffMayTouchQuote } from "@/lib/internal-call";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,6 +39,10 @@ function err(error: string, detail?: any, status = 400) {
 }
 
 export async function POST(req: NextRequest) {
+  // Step 19: called by /api/sketch-upload (internal header) or by staff only.
+  const caller = await internalOrStaff(req);
+  if (!caller) return err("unauthorized", undefined, 401);
+
   try {
     const body = (await req.json().catch(() => ({}))) as ParseInput;
     const quoteNo = body.quote_no?.trim();
@@ -74,6 +79,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (!attachment) {
+      return err("attachment_not_found", { quoteNo, attachmentId }, 404);
+    }
+    if (!caller.internal && !(await staffMayTouchQuote(caller.user, attachment.quote_id))) {
       return err("attachment_not_found", { quoteNo, attachmentId }, 404);
     }
 

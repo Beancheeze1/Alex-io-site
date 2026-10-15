@@ -1,5 +1,6 @@
 // app/api/ai/price/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { legacyRouteBlocked } from "@/lib/internal-call";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { one } from "@/lib/db";
 
@@ -23,6 +24,11 @@ function nearlyInteger(n: number, tol = 1e-6) {
 }
 
 export async function POST(req: NextRequest) {
+  // Step 19: old endpoint with no caller in the app. Public calls get 410 and are
+  // logged as "[legacy-route] blocked" so any outside user shows up in the logs.
+  const blocked = legacyRouteBlocked(req, "/api/ai/price");
+  if (blocked) return blocked;
+
   try {
     // Resolve tenant from host header, then load tenant-scoped settings
     const hostname = req.headers.get("host") || "";

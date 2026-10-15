@@ -1232,13 +1232,16 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     refreshRequestedBoxes();
   }, [quoteNo, refreshRequestedBoxes]);
 
-  // Load rough shipping % knob from admin
+  // Load rough shipping % knob from admin (Step 19: this quote's shop)
   React.useEffect(() => {
     let active = true;
 
     async function load() {
       try {
-        const res = await fetch("/api/public/shipping-settings", { cache: "no-store" });
+        const res = await fetch(
+          `/api/public/shipping-settings${quoteNo ? `?quote_no=${encodeURIComponent(quoteNo)}` : ""}`,
+          { cache: "no-store" },
+        );
         const json = (await res.json().catch(() => null)) as ShippingSettingsResponse | null;
 
         if (!active) return;
@@ -1269,7 +1272,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     return () => {
       active = false;
     };
-  }, []);
+  }, [quoteNo]);
 
   const primaryItem = items[0] || null;
 

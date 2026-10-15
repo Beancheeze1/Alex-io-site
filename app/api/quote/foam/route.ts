@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { legacyRouteBlocked } from "@/lib/internal-call";
 import { Pool } from "pg";
 
 export const runtime = "nodejs";
@@ -44,6 +45,11 @@ function computeCavitiesCuIn(cavities: Cavity[] | undefined | null): number {
 
 /* -------------------- Route -------------------- */
 export async function POST(req: Request) {
+  // Step 19: old endpoint with no caller in the app. Public calls get 410 and are
+  // logged as "[legacy-route] blocked" so any outside user shows up in the logs.
+  const blocked = legacyRouteBlocked(req, "/api/quote/foam");
+  if (blocked) return blocked;
+
   try {
     const body = await req.json();
     const length_in = N(body.length_in);

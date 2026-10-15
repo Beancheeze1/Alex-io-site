@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
+import { isPlatformOwner } from "@/lib/admin-auth";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { isInternalCall } from "@/lib/internal-call";
+
+// Step 19: who may call this route and what they get back.
+//   - Internal server-to-server calls (x-alexio-internal header): full result,
+//     and may name the shop with tenant_id.
+//   - Signed-in staff (admin / cs / sales): full result for their own shop
+//     (the platform owner may pass tenant_id).
+//   - Everyone else: 30/min per IP, the host's shop only, and only the totals
+//     (no rates, markup, kerf, minimum or setup).
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -88,25 +100,8 @@ function cavityVolumeCi(s: string): number {
   return 0;
 }
 
-/** GET = simple help / function inspector (unchanged behavior) */
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  if (url.searchParams.get("inspect")) {
-    const funcs = await q<{ schema: string; name: string; args: string }>(
-      `
-      SELECT n.nspname AS schema,
-             p.proname AS name,
-             pg_get_function_arguments(p.oid) AS args
-      FROM pg_proc p
-      JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE p.proname = 'calc_foam_quote'
-      ORDER BY 1,2;
-      `,
-    );
-
-    return NextResponse.json({ ok: true, functions: funcs });
-  }
-
+/** GET = simple usage help. (Step 19: the database function inspector is gone.) */
+export async function GET() {
   return ok({
     usage: "POST JSON to compute a foam quote",
     expects: {
@@ -150,6 +145,15 @@ export async function GET(req: NextRequest) {
  * - Also attaches a light-weight cushion summary when cushion_curves has data.
  */
 export async function POST(req: NextRequest) {
+  // Step 19: internal call, staff, or public (rate-limited, totals only).
+  const internal = isInternalCall(req);
+  const user = internal ? null : await getCurrentUserFromRequest(req);
+  const staff = !!user && isRoleAllowed(user, ["admin", "cs", "sales"]);
+  if (!internal && !staff) {
+    const rate = await rateLimit(req, 30, "foam-calc");
+    if (!rate.success) return rateLimitResponse(rate.reset);
+  }
+
   let body: In;
   try {
     body = (await req.json()) as In;
@@ -205,9 +209,14 @@ export async function POST(req: NextRequest) {
     // Load tenant-scoped pricing settings
     // Prefer explicit tenant_id from payload (server-to-server calls pass this directly).
     // Fall back to host-based subdomain lookup for direct browser/external calls.
+    // Step 19: only internal calls (or the platform owner) may name the shop.
+    // Staff price for their own shop; the public gets the host's shop.
     let tenantId: number | string = "default";
-    if (body.tenant_id != null && body.tenant_id !== "") {
-      tenantId = body.tenant_id;
+    const askedTenant = body.tenant_id != null && body.tenant_id !== "" ? body.tenant_id : null;
+    if (askedTenant != null && (internal || (staff && isPlatformOwner(user)))) {
+      tenantId = askedTenant;
+    } else if (staff && user?.tenant_id != null) {
+      tenantId = Number(user.tenant_id);
     } else {
       const hostname = req.headers.get("host") || "";
       const subdomain = hostname.split(".")[0];
@@ -402,6 +411,19 @@ export async function POST(req: NextRequest) {
       cushion,
     };
 
+    // Step 19: the public sees the price, not how it's built.
+    if (!internal && !staff) {
+      return ok({
+        variant_used: "ts_volumetric_v1",
+        result: {
+          total: result.total,
+          used_min_charge: result.used_min_charge,
+          piece_ci: result.piece_ci,
+          material_name: result.material_name,
+        },
+      });
+    }
+
     return ok({
       input: {
         length_in,
@@ -417,6 +439,7 @@ export async function POST(req: NextRequest) {
       result,
     });
   } catch (e: any) {
-    return bad("calc_exception", { message: String(e?.message || e) }, 500);
+    console.error("[quotes/calc] failed:", e);
+    return bad("calc_exception", internal || staff ? { message: String(e?.message || e) } : undefined, 500);
   }
 }

@@ -56,6 +56,7 @@ import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import logger from "@/lib/logger";
 import { handleApiError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { internalHeaders } from "@/lib/internal-call";
 import { extractQuoteNoFromText } from "@/lib/quote-no";
 import { newUniqueQuoteNo } from "@/lib/quote-no-server";
 
@@ -945,7 +946,7 @@ async function fetchCalcQuote(opts: { dims: string; qty: number; material_id: nu
 
   const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...internalHeaders() },
     body: JSON.stringify({
       length_in: L,
       width_in: W,

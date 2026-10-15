@@ -1,5 +1,6 @@
 // app/api/ai/quote/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { legacyRouteBlocked } from "@/lib/internal-call";
 import { extractSpecs } from "@/app/lib/ai/extract";
 import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import { absoluteUrl } from "@/app/lib/internalFetch"; // <-- use same helper as orchestrator
@@ -14,6 +15,11 @@ type QuoteInput = {
 };
 
 export async function POST(req: NextRequest) {
+  // Step 19: old endpoint with no caller in the app. Public calls get 410 and are
+  // logged as "[legacy-route] blocked" so any outside user shows up in the logs.
+  const blocked = legacyRouteBlocked(req, "/api/ai/quote");
+  if (blocked) return blocked;
+
   try {
     const body = (await req.json()) as Partial<QuoteInput>;
     const raw = String(body?.text ?? "");

@@ -27,6 +27,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { internalHeaders } from "@/lib/internal-call";
 import { findOrCreateUploadDraft } from "@/lib/quote-draft";
 import { stlToFacesJson } from "@/lib/stl/processor";
 
@@ -707,7 +708,7 @@ export async function POST(req: NextRequest) {
     try {
       const parseResp = await fetch(`${base}/api/sketch/parse`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...internalHeaders() },
         body: JSON.stringify({
           quote_no: storedQuoteNo,
           attachmentId,
@@ -728,7 +729,7 @@ export async function POST(req: NextRequest) {
       if (storedQuoteNo) {
         const applyResp = await fetch(`${base}/api/sketch/apply`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...internalHeaders() },
           body: JSON.stringify({
             quote_no: storedQuoteNo,
             attachmentId,

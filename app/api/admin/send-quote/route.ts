@@ -7,6 +7,7 @@
 // totals are always correct.
 
 import { NextRequest, NextResponse } from "next/server";
+import { loadShippingSettings } from "@/lib/shipping-settings";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { q, one } from "@/lib/db";
@@ -302,16 +303,11 @@ export async function POST(req: NextRequest) {
 
     const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
 
-    // Rough shipping estimate: same global knob + cap the live quote page
-    // reads from public.shipping_settings. Computed independently here
-    // (like the rest of this route's pricing) since send-quote avoids
-    // internal HTTP calls.
-    const shippingSettingsRow = await one<{ rough_ship_pct: number | string; shipping_cap_usd: number | string | null }>(
-      `select rough_ship_pct, shipping_cap_usd from public.shipping_settings order by id asc limit 1`,
-      [],
-    ).catch(() => null);
-    const roughShipPct = shippingSettingsRow ? Number(shippingSettingsRow.rough_ship_pct) : 2.0;
-    const shippingCapUsd = shippingSettingsRow?.shipping_cap_usd != null ? Number(shippingSettingsRow.shipping_cap_usd) : 200.0;
+    // Rough shipping estimate: this shop's % + cap (Step 19: per shop), the
+    // same setting the live quote page reads.
+    const shipSettings = await loadShippingSettings(Number(user.tenant_id) || null).catch(() => null);
+    const roughShipPct = shipSettings ? shipSettings.rough_ship_pct : 2.0;
+    const shippingCapUsd = shipSettings ? shipSettings.shipping_cap_usd : 200.0;
     const rawShippingEstimate =
       Number.isFinite(roughShipPct) && grandTotal > 0
         ? Math.round(grandTotal * (roughShipPct / 100) * 100) / 100
