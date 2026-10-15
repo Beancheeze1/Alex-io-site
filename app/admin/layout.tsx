@@ -13,6 +13,7 @@ import { getCurrentUserFromCookies } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import LogoutButton from "@/components/LogoutButton";
 import AdminAlertsBell from "@/components/admin/AdminAlertsBell";
+import ReviewQueueLink from "@/components/admin/ReviewQueueLink";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,6 +144,8 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
+
+                <ReviewQueueLink />
                 <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
                   Spec requests
                 </Link>
@@ -167,6 +170,7 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
+                <ReviewQueueLink />
                 <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
                   Spec requests
                 </Link>
@@ -182,6 +186,7 @@ export default async function AdminLayout({ children }: Props) {
                 <Link href="/admin/quotes" className="hover:text-[var(--text-primary)]">
                   Quotes
                 </Link>
+                <ReviewQueueLink />
                 <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
                   Spec requests
                 </Link>

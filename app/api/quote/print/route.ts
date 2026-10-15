@@ -42,6 +42,7 @@ import { buyerMayEdit } from "@/lib/quote-edit";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { buyerCanAccept, computeApproval } from "@/app/lib/quote-approval-core";
 import { freightForQuote } from "@/app/lib/freight";
+import { markStaffViewed } from "@/app/lib/review-queue";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -386,6 +387,8 @@ export async function GET(req: NextRequest) {
     // staffUnlockedRegen below. Computed once here and reused for the final
     // CAD RBAC redaction further down, rather than checking the role twice.
     const isStaffCaller = isRoleAllowed(user, ["admin", "sales", "cs"]);
+    // Step 32: staff opening the quote takes it out of "New, not opened".
+    if (isStaffCaller) await markStaffViewed(quote.id);
 
     // Attach revision to the quote header we return.
     // This does NOT require DB schema changes and is safe for current consumers.
