@@ -21,11 +21,22 @@
 // The method is "plates" or "digital"; with no choice (auto) a quantity under
 // the shop's short-run cutoff is digital, once the shop has a CAD cut rate.
 //
+// Step 26, board bought as sheets (settings.board_method "sheet"): step 1
+// becomes, per quantity,
+//   sheets = ceil(qty / blanks per sheet x (1 + waste%))   (waste = spoilage)
+//   MSF    = sheets x sheet sq ft / 1000, at least the corrugator minimum
+//   Board  = MSF x grade $/MSF
+// The sheet (size, blanks per sheet) comes from computeSheet. Everything
+// else is unchanged; "blank" (the default) is the Step 2 formula.
+//
 // Imports only ./corrugated-blank so it runs anywhere (server, browser, tsx).
 
 import {
   computeRscBlank,
+  computeSheet,
   type BlankResult,
+  type BoardMethod,
+  type SheetResult,
   type CorrugatedRates,
   type FluteSpec,
   type JointType,
@@ -43,6 +54,8 @@ export type BoxSettings = CorrugatedRates & {
   flap_pct: number;
   round_to_in: number;
   edge_trim_in: number;
+  /** Step 26: missing = "blank" (Step 2 board formula). */
+  board_method?: BoardMethod;
 };
 
 /** Step 15: production (plates, press, die/converting) or short run (digital + CAD cut). */
@@ -88,6 +101,9 @@ export type QtyPrice = {
   extended_usd: number; // unit x qty, cents
   method: RunMethod; // Step 15
   plates_line_usd: number; // Step 15: plates at this quantity (0 for digital)
+  sheets?: number; // Step 26 (sheet method): sheets bought, spoilage included
+  msf?: number; // Step 26 (sheet method): MSF charged (at least the minimum)
+  min_msf_applied?: boolean; // Step 26: the corrugator minimum was charged
 };
 
 export type BoxPriceOk = {
@@ -99,6 +115,8 @@ export type BoxPriceOk = {
   plates_line_usd: number; // marked up, one time, when run with plates (see each quantity)
   quantities: QtyPrice[]; // ascending, de-duplicated
   warnings: string[]; // rates at $0 that probably shouldn't be
+  board_method: BoardMethod; // Step 26
+  sheet: SheetResult | null; // Step 26: the sheet bought (sheet method only)
 };
 
 export type BoxPriceErr = { ok: false; error: string; message: string };
@@ -165,6 +183,11 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     waste_pct: s.waste_pct,
   });
 
+  // Step 26: board bought as sheets.
+  const boardMethod: BoardMethod = s.board_method === "sheet" ? "sheet" : "blank";
+  const sheet = boardMethod === "sheet" ? computeSheet(blank, s) : null;
+  const minMsf = Math.max(0, Number(s.sheet_min_msf) || 0);
+
   const spot = colors.filter((c) => c === "spot").length;
   const flood = colors.length - spot;
   const runPerMPerSide = spot * s.print_run_spot_per_m + flood * s.print_run_flood_per_m;
@@ -176,7 +199,15 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
   const printed = colors.length > 0;
   const quantities: QtyPrice[] = qtys.map((qty) => {
     const method = resolveRunMethod(inp.method, qty, s);
-    const board = ((blank.sqft_each_with_waste * qty) / 1000) * cost;
+    let board = ((blank.sqft_each_with_waste * qty) / 1000) * cost;
+    let sheetInfo: Pick<QtyPrice, "sheets" | "msf" | "min_msf_applied"> = {};
+    if (sheet) {
+      const sheets = Math.ceil((qty / sheet.up) * (1 + s.waste_pct / 100) - 1e-9);
+      const msfBought = (sheets * sheet.sqft) / 1000;
+      const msf = Math.max(msfBought, minMsf);
+      board = msf * cost;
+      sheetInfo = { sheets, msf: r4(msf), min_msf_applied: msf > msfBought + 1e-12 };
+    }
     let converting: number;
     let run: number;
     let setup: number;
@@ -216,6 +247,7 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
       extended_usd: r2(unit * qty),
       method,
       plates_line_usd: r2(platesLine),
+      ...sheetInfo,
     };
   });
 
@@ -235,6 +267,11 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     if (s.cad_cut_per_box_usd === 0) warnings.push("CAD cut rate is $0.");
     if (printed && s.digital_per_sqft_usd === 0) warnings.push("Digital print rate is $0.");
   }
+  if (sheet?.oversize) {
+    warnings.push(
+      `The ${r4(blank.length_in)} x ${r4(blank.width_in)} in blank doesn't fit the largest sheet (${s.sheet_max_length_in} x ${s.sheet_max_width_in} in).`,
+    );
+  }
 
   return {
     ok: true,
@@ -245,6 +282,8 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     plates_line_usd: r2(platesLineRaw),
     quantities,
     warnings,
+    board_method: boardMethod,
+    sheet,
   };
 }
 

@@ -350,7 +350,16 @@ export async function resolveCustomSelection(
       pricing_source: "corrugated_engine",
       needs_review: false,
       pricing_note: engine.warnings.length ? `Check corrugated rates: ${engine.warnings.join(" ")}` : null,
-      pricing_detail: { blank: engine.blank, quantity: qp, warnings: engine.warnings, print, run_method: qp.method },
+      pricing_detail: {
+        blank: engine.blank,
+        quantity: qp,
+        warnings: engine.warnings,
+        print,
+        run_method: qp.method,
+        // Step 26: board bought as sheets (null on blank pricing)
+        board_method: engine.board_method,
+        sheet: engine.sheet,
+      },
     };
   }
 

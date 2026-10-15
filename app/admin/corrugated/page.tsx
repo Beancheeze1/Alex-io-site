@@ -16,10 +16,13 @@ import {
   JOINT_TYPES,
   RATE_FIELDS,
   ROUND_TO_OPTIONS,
+  SHEET_KEYS,
   SHORT_RUN_KEYS,
   computeRscBlank,
+  computeSheet,
   formatInches,
   parseInches,
+  type BoardMethod,
   type FluteSpec,
   type JointType,
   type RateKey,
@@ -63,6 +66,7 @@ type ApiConfig = {
     flap_pct: number;
     round_to_in: number;
     edge_trim_in: number;
+    board_method?: BoardMethod; // Step 26
   };
   flutes: FluteSpec[];
   grades: {
@@ -166,6 +170,20 @@ type PriceCheckRow = {
   extended_usd: number;
   method?: "plates" | "digital"; // Step 15
   plates_line_usd?: number;
+  sheets?: number; // Step 26
+  msf?: number;
+  min_msf_applied?: boolean;
+};
+
+type SheetInfo = {
+  up: number;
+  across_length: number;
+  across_width: number;
+  length_in: number;
+  width_in: number;
+  sqft: number;
+  sqft_per_box: number;
+  oversize: boolean;
 };
 
 type PriceCheckResponse = {
@@ -179,6 +197,13 @@ type PriceCheckResponse = {
   plates_line_usd?: number;
   warnings?: string[];
   quantities?: PriceCheckRow[];
+  board_method?: BoardMethod; // Step 26
+  sheet?: SheetInfo | null;
+};
+
+const BOARD_METHOD_LABELS: Record<BoardMethod, string> = {
+  blank: "Blank area + waste % (sq ft of the blank)",
+  sheet: "Sheets bought from your corrugator",
 };
 
 export default function CorrugatedSettingsPage() {
@@ -200,6 +225,7 @@ export default function CorrugatedSettingsPage() {
   });
   const [flutes, setFlutes] = React.useState<FluteRow[]>([]);
   const [grades, setGrades] = React.useState<GradeRow[]>([]);
+  const [boardMethod, setBoardMethod] = React.useState<BoardMethod>("blank"); // Step 26
   const [pv, setPv] = React.useState({ L: "12", W: "10", D: "8", gradeKey: "" });
 
   // Price check (uses SAVED settings via /api/admin/corrugated/price)
@@ -221,6 +247,7 @@ export default function CorrugatedSettingsPage() {
       round_to_in: s.round_to_in,
       edge_trim_in: formatInches(s.edge_trim_in),
     });
+    setBoardMethod(s.board_method === "sheet" ? "sheet" : "blank");
     setFlutes(cfg.flutes.map(fluteToRow));
     setGrades(
       cfg.grades.map((g) => ({
@@ -373,6 +400,7 @@ export default function CorrugatedSettingsPage() {
     settings.flap_pct = flap;
     settings.round_to_in = layout.round_to_in;
     settings.edge_trim_in = trim;
+    settings.board_method = boardMethod;
 
     const fl: FluteSpec[] = [];
     for (const r of flutes) {
@@ -503,8 +531,23 @@ export default function CorrugatedSettingsPage() {
     });
     const cost = grade.cost.trim() === "" ? null : parseNum(grade.cost);
     const jointVal = layout.joint_type === "taped" ? 0 : flute.glue_joint_in;
-    return { blank, gradeName: grade.name || "unnamed grade", flute, L, W, D, flap, trim, waste, cost, jointVal };
-  }, [pv, grades, flutes, rates.waste_pct, layout]);
+    // Step 26: the sheet bought for this blank (sheet method only).
+    let sheet: SheetInfo | null = null;
+    if (boardMethod === "sheet") {
+      const sv = {
+        sheet_trim_in: parseNum(rates.sheet_trim_in),
+        sheet_round_to_in: parseNum(rates.sheet_round_to_in),
+        sheet_max_length_in: parseNum(rates.sheet_max_length_in),
+        sheet_max_width_in: parseNum(rates.sheet_max_width_in),
+        sheet_max_up: parseNum(rates.sheet_max_up),
+      };
+      if (Object.values(sv).some((v) => v === null)) {
+        return { error: "Fix the values under Board bought as sheets to see the preview." };
+      }
+      sheet = computeSheet(blank, sv as Record<keyof typeof sv, number>);
+    }
+    return { blank, gradeName: grade.name || "unnamed grade", flute, L, W, D, flap, trim, waste, cost, jointVal, sheet };
+  }, [pv, grades, flutes, rates, layout, boardMethod]);
 
   const saveBar = (
     <div className="flex items-center gap-3">
@@ -709,7 +752,7 @@ export default function CorrugatedSettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key)).map((f) => (
+                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key) && !SHEET_KEYS.has(f.key)).map((f) => (
                   <tr key={f.key} className="border-t border-[var(--border)]">
                     <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
                     <td className={`${TD} w-36`}>
@@ -769,6 +812,70 @@ export default function CorrugatedSettingsPage() {
               </tbody>
             </table>
           </div>
+        </section>
+
+        {/* Step 26: board bought as sheets */}
+        <section className={`${CARD} mb-6`} data-sheet-settings>
+          <div className={SECTION_LABEL}>Board bought as sheets</div>
+          <p className="mb-3 mt-1 text-xs">
+            If you buy sheets from a corrugator, price board by the sheet: the blank plus the corrugator&apos;s
+            trim, rounded to their size step, with as many blanks per sheet as fit your largest sheet (all the
+            same way round). Trim / waste % then adds spoilage sheets, and orders under the corrugator&apos;s
+            minimum are charged as the minimum. Board grade cost per MSF is per MSF of sheet.
+          </p>
+          <label className={`${FIELD_LABEL} mb-3 max-w-md`}>
+            <span className="text-[var(--text-primary)]">Board cost from</span>
+            <select
+              className={INPUT}
+              value={boardMethod}
+              data-board-method
+              onChange={(e) => {
+                setBoardMethod(e.target.value === "sheet" ? "sheet" : "blank");
+                touch();
+              }}
+            >
+              {(["blank", "sheet"] as const).map((m) => (
+                <option key={m} value={m}>
+                  {BOARD_METHOD_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className={`${TABLE_WRAP} ${boardMethod === "sheet" ? "" : "opacity-60"}`}>
+            <table className="min-w-full text-left text-xs">
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TH}>Setting</th>
+                  <th className={TH}>Value</th>
+                  <th className={TH}>Unit</th>
+                  <th className={TH}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {RATE_FIELDS.filter((f) => SHEET_KEYS.has(f.key)).map((f) => (
+                  <tr key={f.key} className="border-t border-[var(--border)]">
+                    <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
+                    <td className={`${TD} w-36`}>
+                      <input
+                        className={INPUT}
+                        inputMode="decimal"
+                        value={rates[f.key]}
+                        aria-label={f.label}
+                        onChange={(e) => setRate(f.key, e.target.value)}
+                      />
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>{f.unit}</td>
+                    <td className={`${TD} text-[var(--text-muted)]`}>{f.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {boardMethod === "blank" ? (
+            <p className="mt-2 text-[11px] text-[var(--text-faint)]">
+              These are only used when board cost is from sheets.
+            </p>
+          ) : null}
         </section>
 
         {/* Scoring and layout */}
@@ -985,9 +1092,29 @@ export default function CorrugatedSettingsPage() {
                   <dd className="text-right text-[var(--text-primary)]">
                     {preview.cost === null
                       ? "Set a cost per MSF"
-                      : `$${((preview.blank.sqft_each_with_waste / 1000) * preview.cost).toFixed(4)}`}
+                      : preview.sheet
+                        ? `$${(((preview.sheet.sqft_per_box * (1 + preview.waste / 100)) / 1000) * preview.cost).toFixed(4)} from sheets`
+                        : `$${((preview.blank.sqft_each_with_waste / 1000) * preview.cost).toFixed(4)}`}
                   </dd>
                 </dl>
+                {preview.sheet ? (
+                  <div className="mt-3 border-t border-[var(--border)] pt-3 text-[11px]" data-sheet-preview>
+                    <div className="text-[var(--text-muted)]">Sheet bought</div>
+                    <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                      {fi(preview.sheet.length_in)} × {fi(preview.sheet.width_in)} in · {preview.sheet.up} up (
+                      {preview.sheet.across_length} × {preview.sheet.across_width})
+                    </div>
+                    <div className="text-[var(--text-secondary)]">
+                      {preview.sheet.sqft.toFixed(3)} sq ft per sheet · {preview.sheet.sqft_per_box.toFixed(3)} sq ft
+                      per box before spoilage
+                    </div>
+                    {preview.sheet.oversize ? (
+                      <div className="mt-1 text-[var(--attention)]">
+                        One blank doesn&apos;t fit your largest sheet. It&apos;s priced one up at its own size.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-page)] p-4 text-[11px] leading-relaxed">
                 <div className="text-[var(--text-muted)]">How it was worked out (inches)</div>
@@ -1115,6 +1242,9 @@ export default function CorrugatedSettingsPage() {
                   {pcResult.colors
                     ? ` · ${pcResult.colors} color${pcResult.colors > 1 ? "s" : ""}, ${pcResult.sides === 2 ? "two sides" : "one side"}`
                     : " · no print"}
+                  {pcResult.sheet
+                    ? ` · sheet ${fi(pcResult.sheet.length_in)} × ${fi(pcResult.sheet.width_in)} in, ${pcResult.sheet.up} up`
+                    : ""}
                 </div>
                 <div className={TABLE_WRAP}>
                   <table className="min-w-full text-left text-xs">
@@ -1122,6 +1252,7 @@ export default function CorrugatedSettingsPage() {
                       <tr>
                         <th className={TH}>Quantity</th>
                         <th className={TH}>Run</th>
+                        {pcResult.sheet ? <th className={`${TH} text-right`}>Sheets / MSF</th> : null}
                         <th className={`${TH} text-right`}>Board</th>
                         <th className={`${TH} text-right`}>Converting</th>
                         <th className={`${TH} text-right`}>Print run</th>
@@ -1136,6 +1267,12 @@ export default function CorrugatedSettingsPage() {
                         <tr key={qr.quantity} className="border-t border-[var(--border)]">
                           <td className={TD}>{qr.quantity.toLocaleString("en-US")}</td>
                           <td className={TD}>{qr.method === "digital" ? "Digital + CAD cut" : "Plates"}</td>
+                          {pcResult.sheet ? (
+                            <td className={`${TD} text-right`}>
+                              {(qr.sheets ?? 0).toLocaleString("en-US")} / {(qr.msf ?? 0).toFixed(3)}
+                              {qr.min_msf_applied ? " (minimum)" : ""}
+                            </td>
+                          ) : null}
                           <td className={`${TD} text-right`}>{usd(qr.board_usd)}</td>
                           <td className={`${TD} text-right`}>{usd(qr.converting_usd)}</td>
                           <td className={`${TD} text-right`}>{usd(qr.print_run_usd)}</td>
@@ -1161,7 +1298,8 @@ export default function CorrugatedSettingsPage() {
                 <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                   Board, converting, print run and setup are your costs before markup. Box total and unit price
                   include markup and the minimum order; plates include markup. Short runs show CAD cut under
-                  Converting and digital print under Print run.
+                  Converting and digital print under Print run. With board from sheets, Sheets / MSF is what you
+                  buy from the corrugator, spoilage and their minimum included.
                 </p>
               </div>
             )

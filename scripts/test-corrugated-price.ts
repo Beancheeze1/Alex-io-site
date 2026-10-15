@@ -4,7 +4,7 @@
 // example (12 x 10 x 8 C-flute, 1-color spot, placeholder rates).
 // Run: npm run test:corrugated   (= npx --yes tsx scripts/test-corrugated-price.ts)
 
-import { DEFAULT_FLUTES } from "../lib/corrugated-blank";
+import { DEFAULT_FLUTES, computeSheet } from "../lib/corrugated-blank";
 import {
   describePrintSpec,
   parsePrintSpec,
@@ -34,6 +34,13 @@ const settings: BoxSettings = {
   cad_cut_per_box_usd: 0,
   digital_setup_usd: 0,
   digital_per_sqft_usd: 0,
+  // Step 26: sheet settings (only used with board_method "sheet").
+  sheet_trim_in: 0,
+  sheet_round_to_in: 0,
+  sheet_max_length_in: 0,
+  sheet_max_width_in: 0,
+  sheet_max_up: 6,
+  sheet_min_msf: 0,
   joint_type: "glued",
   flap_pct: 50,
   round_to_in: 0.0625,
@@ -194,6 +201,51 @@ check(
   "describePrintSpec digital",
   describePrintSpec({ colors: ["spot", "flood"], sides: 2 }, "digital") === "Digital print, two sides",
 );
+
+// 7. Step 26: board bought as sheets
+check("blank method by default", r1.ok && r1.board_method === "blank" && r1.sheet === null, r1.ok ? r1.board_method : r1);
+
+const sheetSet = { sheet_trim_in: 0.5, sheet_round_to_in: 0.25, sheet_max_length_in: 60, sheet_max_width_in: 40, sheet_max_up: 6 };
+const g6 = computeSheet({ length_in: 20, width_in: 10 }, sheetSet);
+check("20 x 10 blank on a 60 x 40 sheet: 6 up (2 x 3), 40.5 x 30.5", g6.up === 6 && g6.across_length === 2 && g6.across_width === 3 && g6.length_in === 40.5 && g6.width_in === 30.5, g6);
+const g4 = computeSheet({ length_in: 20, width_in: 10 }, { ...sheetSet, sheet_max_up: 4 });
+check("most 4 per sheet: 2 x 2, 40.5 x 20.5", g4.up === 4 && g4.length_in === 40.5 && g4.width_in === 20.5, g4);
+const g1 = computeSheet({ length_in: 20, width_in: 10 }, { ...sheetSet, sheet_max_length_in: 0 });
+check("no largest sheet: one up", g1.up === 1 && g1.length_in === 20.5 && g1.width_in === 10.5 && !g1.oversize, g1);
+const gr = computeSheet({ length_in: 20, width_in: 10 }, { ...sheetSet, sheet_trim_in: 0.3, sheet_max_length_in: 0 });
+check("sheet size rounds up to the step", gr.length_in === 20.5 && gr.width_in === 10.5, gr);
+const go = computeSheet({ length_in: 20, width_in: 10 }, { ...sheetSet, sheet_max_width_in: 10 });
+check("blank bigger than the largest sheet: oversize, one up", go.oversize && go.up === 1, go);
+
+const sh1 = { ...settings, board_method: "sheet" as const, sheet_trim_in: 0.5, sheet_round_to_in: 0.125, sheet_max_length_in: 0, sheet_max_width_in: 0 };
+const s1 = priceRscBox({ ...base, settings: sh1, quantities: [1000] });
+if (!s1.ok) {
+  check("sheet pricing prices", false, s1);
+} else {
+  const q = s1.quantities[0];
+  // sheet 46.625 x 18.875 = 6.111437 sq ft; 1,100 sheets (10% spoilage) = 6.722581 MSF x $85
+  check("one up: sheet 46.625 x 18.875", s1.sheet?.length_in === 46.625 && s1.sheet?.width_in === 18.875 && s1.sheet?.up === 1, s1.sheet);
+  check("1,000 boxes = 1,100 sheets", q.sheets === 1100, q);
+  check("board = $571.42", near(q.board_usd, 571.42), q);
+  check("converting unchanged ($60)", q.converting_usd === 60, q);
+}
+const s2 = priceRscBox({ ...base, settings: { ...sh1, sheet_round_to_in: 0, sheet_max_length_in: 100, sheet_max_width_in: 40 }, quantities: [1000] });
+if (!s2.ok) {
+  check("number-up prices", false, s2);
+} else {
+  const q = s2.quantities[0];
+  // 2 x 2 up: 92.75 x 37.25 = 23.992622 sq ft; 275 sheets = 6.597971 MSF x $85
+  check("4 up on a 100 x 40 sheet", s2.sheet?.up === 4 && s2.sheet?.length_in === 92.75 && s2.sheet?.width_in === 37.25, s2.sheet);
+  check("1,000 boxes 4 up = 275 sheets, board $560.83", q.sheets === 275 && near(q.board_usd, 560.83), q);
+}
+const s3 = priceRscBox({ ...base, settings: { ...sh1, sheet_min_msf: 1 }, quantities: [10], print: { colors: [], sides: 1 } });
+check(
+  "corrugator minimum: 11 sheets charged as 1 MSF = $85",
+  s3.ok && s3.quantities[0].sheets === 11 && s3.quantities[0].msf === 1 && s3.quantities[0].min_msf_applied === true && s3.quantities[0].board_usd === 85,
+  s3.ok ? s3.quantities[0] : s3,
+);
+const s4 = priceRscBox({ ...base, settings: { ...sh1, sheet_max_length_in: 40, sheet_max_width_in: 40 }, quantities: [1000] });
+check("blank too big for the largest sheet warns", s4.ok && s4.sheet?.oversize === true && s4.warnings.some((w) => w.includes("largest sheet")), s4.ok ? s4.warnings : s4);
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

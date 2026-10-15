@@ -11,6 +11,8 @@ import {
   JOINT_TYPES,
   RATE_FIELDS,
   ROUND_TO_OPTIONS,
+  parseBoardMethod,
+  type BoardMethod,
   type CorrugatedRates,
   type FluteSpec,
   type JointType,
@@ -22,6 +24,7 @@ export type CorrugatedSettings = CorrugatedRates & {
   flap_pct: number;
   round_to_in: number;
   edge_trim_in: number;
+  board_method: BoardMethod; // Step 26
 };
 
 export type BoardGrade = {
@@ -57,7 +60,7 @@ export type CorrugatedInput = {
   grades: GradeInput[];
 };
 
-const LAYOUT_COLS = ["joint_type", "flap_pct", "round_to_in", "edge_trim_in"] as const;
+const LAYOUT_COLS = ["joint_type", "flap_pct", "round_to_in", "edge_trim_in", "board_method"] as const;
 
 /**
  * Seeds a tenant's settings row, default flutes and default grades — once,
@@ -116,6 +119,7 @@ export async function loadCorrugated(tenantId: number): Promise<CorrugatedConfig
     flap_pct: Number(s?.flap_pct ?? 50),
     round_to_in: Number(s?.round_to_in ?? 0.0625),
     edge_trim_in: Number(s?.edge_trim_in ?? 0),
+    board_method: parseBoardMethod(s?.board_method),
   };
 
   const flRows = await q<Record<string, any>>(
@@ -314,6 +318,13 @@ export function validateCorrugatedInput(
     for (const f of RATE_FIELDS) rates[f.key] = numIn(s[f.key], f.label, 0, f.max);
     // Step 15: the short-run cutoff is a box count.
     rates.digital_under_qty = Math.round(rates.digital_under_qty);
+    // Step 26: blanks per sheet is a whole number, at least 1.
+    rates.sheet_max_up = Math.max(1, Math.round(rates.sheet_max_up));
+    const bm = s.board_method === undefined || s.board_method === null || s.board_method === "" ? "blank" : s.board_method;
+    if (bm !== "blank" && bm !== "sheet") {
+      throw new FieldError("Board cost must be blank or sheet.");
+    }
+    const board_method: BoardMethod = bm;
 
     const joint_type = String(s.joint_type ?? "") as JointType;
     if (!JOINT_TYPES.includes(joint_type)) {
@@ -394,7 +405,7 @@ export function validateCorrugatedInput(
     return {
       ok: true,
       value: {
-        settings: { ...rates, joint_type, flap_pct, round_to_in, edge_trim_in },
+        settings: { ...rates, joint_type, flap_pct, round_to_in, edge_trim_in, board_method },
         flutes,
         grades,
       },

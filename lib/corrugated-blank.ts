@@ -60,7 +60,7 @@ export const DEFAULT_GRADES: DefaultGrade[] = [
 
 /** Run and print rates, in the order the admin page shows them. */
 export const RATE_FIELDS = [
-  { key: "waste_pct", label: "Trim / waste", unit: "% of board", max: 100, note: "Added to square footage" },
+  { key: "waste_pct", label: "Trim / waste", unit: "% of board", max: 100, note: "Blank pricing: added to square footage. Sheet pricing: extra sheets for spoilage" },
   { key: "order_setup_usd", label: "Order setup (make-ready)", unit: "$ per order", max: 1000000, note: "Spread across the quantity" },
   { key: "converting_per_m", label: "Converting cost", unit: "$ per 1,000 boxes", max: 1000000, note: "Slotting, folding, gluing" },
   { key: "plate_spot_usd", label: "Plate cost — spot", unit: "$ per color", max: 1000000, note: "One-time; shown as its own line" },
@@ -76,7 +76,37 @@ export const RATE_FIELDS = [
   { key: "cad_cut_per_box_usd", label: "CAD cut", unit: "$ per box", max: 1000000, note: "Short runs: replaces converting" },
   { key: "digital_setup_usd", label: "Digital print setup", unit: "$ per order", max: 1000000, note: "File prep; printed short runs only" },
   { key: "digital_per_sqft_usd", label: "Digital print", unit: "$ per sq ft per side", max: 1000000, note: "Blank area, full color; no plates" },
+  // Step 26: board bought as sheets from a corrugator (used when board_method = "sheet").
+  { key: "sheet_trim_in", label: "Corrugator trim", unit: "in per sheet", max: 12, note: "Added to the sheet's length and width" },
+  { key: "sheet_round_to_in", label: "Sheet size step", unit: "in", max: 12, note: "Sheet length and width round up to this, e.g. 0.125. 0 = exact" },
+  { key: "sheet_max_length_in", label: "Largest sheet: length", unit: "in", max: 1000, note: "Along the blank's length. 0 = one blank per sheet" },
+  { key: "sheet_max_width_in", label: "Largest sheet: width", unit: "in", max: 1000, note: "Along the blank's width. 0 = one blank per sheet" },
+  { key: "sheet_max_up", label: "Most blanks per sheet", unit: "blanks", max: 50, note: "1 = one blank per sheet" },
+  { key: "sheet_min_msf", label: "Corrugator minimum", unit: "MSF per order", max: 1000000, note: "Smaller orders are charged as this much board. 0 = none" },
 ] as const;
+
+/** Step 26: the rate fields shown under "Board bought as sheets" on the admin page. */
+export const SHEET_KEYS: ReadonlySet<string> = new Set([
+  "sheet_trim_in",
+  "sheet_round_to_in",
+  "sheet_max_length_in",
+  "sheet_max_width_in",
+  "sheet_max_up",
+  "sheet_min_msf",
+]);
+
+/**
+ * Step 26: how board is costed.
+ *   "blank" = blank sq ft x (1 + waste %) x $/MSF (Steps 1-25, the default)
+ *   "sheet" = sheets bought from the corrugator: sheet sq ft x sheets x $/MSF,
+ *             several blanks per sheet when they fit, waste % = spoilage sheets,
+ *             and the corrugator's minimum MSF per order.
+ */
+export type BoardMethod = "blank" | "sheet";
+
+export function parseBoardMethod(raw: unknown): BoardMethod {
+  return raw === "sheet" ? "sheet" : "blank";
+}
 
 /** Step 15: the rate fields shown under "Short runs" on the admin page. */
 export const SHORT_RUN_KEYS: ReadonlySet<string> = new Set([
@@ -130,6 +160,78 @@ export function computeRscBlank(
   const sqft_each_with_waste = sqft_each * (1 + layout.waste_pct / 100);
 
   return { raw_length_in, raw_width_in, length_in, width_in, sqft_each, sqft_each_with_waste };
+}
+
+export type SheetSettings = {
+  sheet_trim_in: number;
+  sheet_round_to_in: number;
+  sheet_max_length_in: number;
+  sheet_max_width_in: number;
+  sheet_max_up: number;
+};
+
+export type SheetResult = {
+  up: number; // blanks per sheet
+  across_length: number; // blanks side by side along the blank's length
+  across_width: number; // rows along the blank's width
+  length_in: number; // sheet size, trimmed and rounded
+  width_in: number;
+  sqft: number; // per sheet
+  sqft_per_box: number; // sheet sq ft / up
+  oversize: boolean; // one blank (+ trim) is bigger than the largest sheet
+};
+
+/**
+ * Step 26: the sheet a shop buys for a blank. Blanks are laid out in a grid,
+ * all the same way round (flute direction never turns), as many as fit the
+ * largest sheet, up to the shop's most-blanks-per-sheet. Ties go to the
+ * smaller sheet. With no largest sheet set, one blank per sheet.
+ *   sheet length = across_length x blank length + trim, rounded up
+ *   sheet width  = across_width  x blank width  + trim, rounded up
+ */
+export function computeSheet(blank: { length_in: number; width_in: number }, s: SheetSettings): SheetResult {
+  const bl = blank.length_in;
+  const bw = blank.width_in;
+  const trim = Math.max(0, Number(s.sheet_trim_in) || 0);
+  const step = Math.max(0, Number(s.sheet_round_to_in) || 0);
+  const maxL = Math.max(0, Number(s.sheet_max_length_in) || 0);
+  const maxW = Math.max(0, Number(s.sheet_max_width_in) || 0);
+  const maxUp = Math.max(1, Math.round(Number(s.sheet_max_up) || 1));
+  const size = (a: number, b: number) => ({
+    length_in: roundUp(a * bl + trim, step),
+    width_in: roundUp(b * bw + trim, step),
+  });
+
+  let best = { a: 1, b: 1, ...size(1, 1) };
+  let oversize = false;
+  if (maxL > 0 && maxW > 0) {
+    const one = size(1, 1);
+    oversize = one.length_in > maxL + 1e-9 || one.width_in > maxW + 1e-9;
+    if (!oversize) {
+      for (let a = 1; a <= maxUp; a++) {
+        for (let b = 1; a * b <= maxUp; b++) {
+          const sz = size(a, b);
+          if (sz.length_in > maxL + 1e-9 || sz.width_in > maxW + 1e-9) continue;
+          const better =
+            a * b > best.a * best.b ||
+            (a * b === best.a * best.b && sz.length_in * sz.width_in < best.length_in * best.width_in - 1e-9);
+          if (better) best = { a, b, ...sz };
+        }
+      }
+    }
+  }
+  const up = best.a * best.b;
+  const sqft = (best.length_in * best.width_in) / 144;
+  return {
+    up,
+    across_length: best.a,
+    across_width: best.b,
+    length_in: best.length_in,
+    width_in: best.width_in,
+    sqft,
+    sqft_per_box: sqft / up,
+    oversize,
+  };
 }
 
 /** "1 3/8", "1-3/8", "3/16", "-1/16", "0.1875", "2" -> inches. Invalid -> null. */
