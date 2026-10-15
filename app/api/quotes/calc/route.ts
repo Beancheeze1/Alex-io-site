@@ -5,6 +5,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { isInternalCall } from "@/lib/internal-call";
+import { applyShopPrice, shopMaterialPrice } from "@/lib/material-prices";
 
 // Step 19: who may call this route and what they get back.
 //   - Internal server-to-server calls (x-alexio-internal header): full result,
@@ -227,6 +228,10 @@ export async function POST(req: NextRequest) {
       tenantId = tenantRow?.id ?? "default";
     }
     const settings = await getPricingSettings(tenantId);
+
+    // Step 20: the shop's own price / minimum / waste % for this material
+    // override the shared catalog (blank fields keep the catalog value).
+    applyShopPrice(mat, await shopMaterialPrice(tenantId, material_id));
 
     // --- Volumes (cubic inches) ---
     const piece_ci_raw = length_in * width_in * height_in;

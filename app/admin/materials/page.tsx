@@ -1,15 +1,12 @@
 // app/admin/materials/page.tsx
 //
-// Materials admin landing page.
-// Path A / Straight Path:
-//  - Client-only.
-//  - Primarily read-only, but now supports safe inline edits
-//    of price_per_cuin and min_charge_usd via /api/admin/materials (PATCH).
-//  - Does NOT change any pricing math; only updates DB inputs.
-//
-// Shows:
-//  - Summary counts (total / active / by family).
-//  - Table of materials with family, density, SKU, and basic pricing info.
+// Materials admin page (Step 20: per-shop prices).
+//  - The shared catalog (names, families, densities, catalog prices) is the
+//    same for every shop; only the platform owner edits catalog prices.
+//  - Each shop sets its OWN price per cu in, minimum charge and waste % per
+//    material ("Your price"). Blank = use the catalog value.
+//  - Saves via PATCH /api/admin/materials (scope "shop" or "catalog").
+//  - Does NOT change any pricing math; only inputs.
 
 "use client";
 
@@ -27,11 +24,19 @@ type MaterialRow = {
   cost_per_ci_usd: number | string | null;
   price_per_cuin: number | string | null;
   min_charge_usd: number | string | null;
+  kerf_waste_pct?: number | string | null;
   is_active: boolean;
+  // Step 20: this shop's own prices (null = uses the catalog)
+  shop_price_per_cuin?: number | null;
+  shop_min_charge_usd?: number | null;
+  shop_kerf_waste_pct?: number | null;
 };
+
+type EditMode = "shop" | "catalog";
 
 type MaterialsResponse = {
   ok: boolean;
+  is_owner?: boolean;
   materials: MaterialRow[];
   stats: {
     total: number;
@@ -76,6 +81,9 @@ export default function AdminMaterialsPage() {
   const [editingId, setEditingId] = React.useState<number | null>(null);
   const [editPrice, setEditPrice] = React.useState<string>("");
   const [editMinCharge, setEditMinCharge] = React.useState<string>("");
+  const [editKerf, setEditKerf] = React.useState<string>("");
+  const [editMode, setEditMode] = React.useState<EditMode>("shop");
+  const [isOwner, setIsOwner] = React.useState(false);
   const [savingId, setSavingId] = React.useState<number | null>(null);
   const [saveError, setSaveError] = React.useState<string | null>(null);
 
@@ -105,6 +113,7 @@ export default function AdminMaterialsPage() {
           })),
         );
         setStats(json.stats || null);
+        setIsOwner(json.is_owner === true);
       } catch (err: any) {
         console.error("Admin materials load error:", err);
         if (!active) return;
@@ -156,10 +165,19 @@ export default function AdminMaterialsPage() {
 
   const hasData = filteredMaterials.length > 0;
 
-  function beginEdit(row: MaterialRow) {
+  function beginEdit(row: MaterialRow, mode: EditMode) {
     setEditingId(row.id);
-    setEditPrice(toEditableString(row.price_per_cuin));
-    setEditMinCharge(toEditableString(row.min_charge_usd));
+    setEditMode(mode);
+    if (mode === "catalog") {
+      setEditPrice(toEditableString(row.price_per_cuin));
+      setEditMinCharge(toEditableString(row.min_charge_usd));
+      setEditKerf("");
+    } else {
+      // Blank = this shop uses the catalog value.
+      setEditPrice(toEditableString(row.shop_price_per_cuin));
+      setEditMinCharge(toEditableString(row.shop_min_charge_usd));
+      setEditKerf(toEditableString(row.shop_kerf_waste_pct));
+    }
     setSaveError(null);
   }
 
@@ -167,46 +185,37 @@ export default function AdminMaterialsPage() {
     setEditingId(null);
     setEditPrice("");
     setEditMinCharge("");
+    setEditKerf("");
     setSavingId(null);
     setSaveError(null);
+  }
+
+  /** "" -> null (use the catalog); otherwise a non-negative number, or undefined if invalid. */
+  function parseField(raw: string, max?: number): number | null | undefined {
+    const t = raw.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < 0 || (max !== undefined && n > max)) return undefined;
+    return n;
   }
 
   async function saveRow(row: MaterialRow) {
     if (savingId) return;
     setSaveError(null);
 
-    const trimmedPrice = editPrice.trim();
-    const trimmedMin = editMinCharge.trim();
-
-    let priceValue: number | null = null;
-    let minValue: number | null = null;
-
-    if (trimmedPrice !== "") {
-      const n = Number(trimmedPrice);
-      if (!Number.isFinite(n) || n < 0) {
-        setSaveError("Price per cu in must be a non-negative number.");
-        return;
-      }
-      priceValue = n;
+    const priceValue = parseField(editPrice);
+    const minValue = parseField(editMinCharge);
+    const kerfValue = parseField(editKerf, 100);
+    if (priceValue === undefined) {
+      setSaveError("Price per cu in must be 0 or more (or blank).");
+      return;
     }
-
-    if (trimmedMin !== "") {
-      const n = Number(trimmedMin);
-      if (!Number.isFinite(n) || n < 0) {
-        setSaveError("Min charge must be a non-negative number.");
-        return;
-      }
-      minValue = n;
+    if (minValue === undefined) {
+      setSaveError("Min charge must be 0 or more (or blank).");
+      return;
     }
-
-    // If both are blank and match existing blanks, nothing to do.
-    if (
-      priceValue === null &&
-      minValue === null &&
-      (row.price_per_cuin === null || row.price_per_cuin === "") &&
-      (row.min_charge_usd === null || row.min_charge_usd === "")
-    ) {
-      cancelEdit();
+    if (editMode === "shop" && kerfValue === undefined) {
+      setSaveError("Waste % must be from 0 to 100 (or blank).");
       return;
     }
 
@@ -216,11 +225,17 @@ export default function AdminMaterialsPage() {
       const res = await fetch("/api/admin/materials", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: row.id,
-          price_per_cuin: priceValue,
-          min_charge_usd: minValue,
-        }),
+        body: JSON.stringify(
+          editMode === "catalog"
+            ? { id: row.id, scope: "catalog", price_per_cuin: priceValue, min_charge_usd: minValue }
+            : {
+                id: row.id,
+                scope: "shop",
+                price_per_cuin: priceValue,
+                min_charge_usd: minValue,
+                kerf_waste_pct: kerfValue,
+              },
+        ),
       });
 
       const json = await res.json();
@@ -343,15 +358,15 @@ export default function AdminMaterialsPage() {
               Material notes
             </div>
             <p className="text-xs text-[var(--text-secondary)]">
-              This view now supports safe inline edits of base pricing:
+              Set your own prices for each material:
             </p>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-[11px] text-[var(--text-secondary)]">
-              <li>Update price-per-cubic-inch and minimum charges in place.</li>
               <li>
-                All changes flow into the existing pricing engine without
-                touching any math.
+                <span className="text-[var(--text-primary)]">Your price</span>, minimum charge and waste % are used
+                for your shop&apos;s quotes only.
               </li>
-              <li>Future: flags, links to cushion curves, and more.</li>
+              <li>Leave a field blank to use the catalog value shown in grey.</li>
+              <li>Saved quotes keep their prices until they&apos;re repriced or changed.</li>
             </ul>
             <p className="mt-3 text-[11px] text-[var(--text-faint)]">
               Use this area for admin-only pricing inputs. Customers never see
@@ -421,8 +436,10 @@ export default function AdminMaterialsPage() {
                   <th className="px-3 py-2 font-medium">Family</th>
                   <th className="px-3 py-2 font-medium">Density</th>
                   <th className="px-3 py-2 font-medium">SKU</th>
-                  <th className="px-3 py-2 font-medium">Price/cu in</th>
-                  <th className="px-3 py-2 font-medium">Min charge</th>
+                  <th className="px-3 py-2 font-medium">Catalog $/cu in</th>
+                  <th className="px-3 py-2 font-medium">Your $/cu in</th>
+                  <th className="px-3 py-2 font-medium">Your min charge</th>
+                  <th className="px-3 py-2 font-medium">Your waste %</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium text-right">
                     Actions
@@ -433,7 +450,7 @@ export default function AdminMaterialsPage() {
                 {loading && !error && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={10}
                       className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       Loading materials…
@@ -444,7 +461,7 @@ export default function AdminMaterialsPage() {
                 {!loading && error && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={10}
                       className="px-3 py-4 text-center text-xs text-[var(--attention)]"
                     >
                       Unable to load materials.
@@ -455,7 +472,7 @@ export default function AdminMaterialsPage() {
                 {!loading && !error && !hasData && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={10}
                       className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       No materials match the current filters.
@@ -475,12 +492,19 @@ export default function AdminMaterialsPage() {
                       m.price_per_cuin,
                       4,
                     );
-                    const minCharge = formatNumber(
-                      m.min_charge_usd,
-                      2,
-                    );
+                    // Step 20: the shop's own value, else the catalog's (shown grey).
+                    const yourPrice = formatNumber(m.shop_price_per_cuin ?? m.price_per_cuin, 4);
+                    const yourMin = formatNumber(m.shop_min_charge_usd ?? m.min_charge_usd, 2);
+                    const yourKerf = formatNumber(m.shop_kerf_waste_pct ?? m.kerf_waste_pct ?? null, 1);
+                    const ownPrice = m.shop_price_per_cuin != null;
+                    const ownMin = m.shop_min_charge_usd != null;
+                    const ownKerf = m.shop_kerf_waste_pct != null;
+                    const editInput =
+                      "w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1 py-0.5 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]";
 
                     const isEditing = editingId === m.id;
+                    const editingShop = isEditing && editMode === "shop";
+                    const editingCatalog = isEditing && editMode === "catalog";
                     const rowSaving = savingId === m.id;
 
                     return (
@@ -509,35 +533,87 @@ export default function AdminMaterialsPage() {
                           )}
                         </td>
                         <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
-                          {isEditing ? (
+                          {editingCatalog ? (
                             <input
                               type="number"
                               step="0.0001"
-                              className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1 py-0.5 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                              aria-label="Catalog price per cu in"
+                              className={editInput}
                               value={editPrice}
-                              onChange={(e) =>
-                                setEditPrice(e.target.value)
-                              }
+                              onChange={(e) => setEditPrice(e.target.value)}
                             />
                           ) : pricePerCuIn ? (
                             <span>${pricePerCuIn}</span>
                           ) : (
                             <span className="text-[var(--text-faint)]">—</span>
                           )}
+                          {editingCatalog ? (
+                            <div className="mt-1">
+                              <input
+                                type="number"
+                                step="0.01"
+                                aria-label="Catalog min charge"
+                                placeholder="catalog min $"
+                                className={editInput}
+                                value={editMinCharge}
+                                onChange={(e) => setEditMinCharge(e.target.value)}
+                              />
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-[var(--text-secondary)]" data-your-price>
+                          {editingShop ? (
+                            <input
+                              type="number"
+                              step="0.0001"
+                              aria-label="Your price per cu in"
+                              placeholder={pricePerCuIn ? `catalog ${pricePerCuIn}` : "catalog"}
+                              className={editInput}
+                              value={editPrice}
+                              onChange={(e) => setEditPrice(e.target.value)}
+                            />
+                          ) : yourPrice ? (
+                            <span className={ownPrice ? "text-[var(--text-primary)]" : "text-[var(--text-faint)]"}>
+                              ${yourPrice}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--text-faint)]">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
-                          {isEditing ? (
+                          {editingShop ? (
                             <input
                               type="number"
                               step="0.01"
-                              className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1 py-0.5 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                              aria-label="Your min charge"
+                              placeholder={formatNumber(m.min_charge_usd, 2) ? `catalog ${formatNumber(m.min_charge_usd, 2)}` : "catalog"}
+                              className={editInput}
                               value={editMinCharge}
-                              onChange={(e) =>
-                                setEditMinCharge(e.target.value)
-                              }
+                              onChange={(e) => setEditMinCharge(e.target.value)}
                             />
-                          ) : minCharge ? (
-                            <span>${minCharge}</span>
+                          ) : yourMin ? (
+                            <span className={ownMin ? "text-[var(--text-primary)]" : "text-[var(--text-faint)]"}>
+                              ${yourMin}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--text-faint)]">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
+                          {editingShop ? (
+                            <input
+                              type="number"
+                              step="0.1"
+                              aria-label="Your waste percent"
+                              placeholder={formatNumber(m.kerf_waste_pct ?? null, 1) ? `catalog ${formatNumber(m.kerf_waste_pct ?? null, 1)}` : "settings"}
+                              className={editInput}
+                              value={editKerf}
+                              onChange={(e) => setEditKerf(e.target.value)}
+                            />
+                          ) : yourKerf ? (
+                            <span className={ownKerf ? "text-[var(--text-primary)]" : "text-[var(--text-faint)]"}>
+                              {yourKerf}%
+                            </span>
                           ) : (
                             <span className="text-[var(--text-faint)]">—</span>
                           )}
@@ -574,13 +650,26 @@ export default function AdminMaterialsPage() {
                               </button>
                             </div>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => beginEdit(m)}
-                              className="rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-0.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
-                            >
-                              Edit
-                            </button>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => beginEdit(m, "shop")}
+                                data-edit-shop-price={m.id}
+                                className="rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-0.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+                              >
+                                Edit my price
+                              </button>
+                              {isOwner ? (
+                                <button
+                                  type="button"
+                                  onClick={() => beginEdit(m, "catalog")}
+                                  data-edit-catalog={m.id}
+                                  className="rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-0.5 font-medium text-[var(--text-muted)] hover:bg-[var(--surface-subtle)]"
+                                >
+                                  Edit catalog
+                                </button>
+                              ) : null}
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -591,10 +680,8 @@ export default function AdminMaterialsPage() {
           </div>
 
           <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-            Changes made here update the{" "}
-            <span className="font-mono text-[var(--text-secondary)]">materials</span> table and
-            flow into the pricing engine as inputs. The underlying math and
-            quoting logic remain unchanged.
+            &ldquo;Your&rdquo; columns are your shop&apos;s own prices; grey values come from the shared catalog
+            because you haven&apos;t set your own. Only the platform owner can change catalog prices.
           </p>
         </section>
       </div>

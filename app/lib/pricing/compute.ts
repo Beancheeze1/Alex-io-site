@@ -159,6 +159,7 @@ export function computePricingBreakdown(args: {
 
 import { one } from "@/lib/db";
 import { getPricingSettings as getPricingSettingsAsync } from "@/app/lib/pricing/settings";
+import { applyShopPrice, shopMaterialPrice } from "@/lib/material-prices";
 
 type MaterialRowAsync = {
   id: number;
@@ -213,6 +214,9 @@ export async function computePricing(params: {
   if (!mat) throw new Error(`material_not_found:${material_id}`);
 
   const settings = await getPricingSettingsAsync(params.tenant_id ?? "default");
+
+  // Step 20: the shop's own material prices override the shared catalog.
+  applyShopPrice(mat, await shopMaterialPrice(params.tenant_id ?? "default", material_id));
 
   let cav_ci = 0;
   for (const c of cavs) cav_ci += cavVolCi(c);
