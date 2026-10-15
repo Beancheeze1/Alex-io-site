@@ -95,6 +95,8 @@ export type TemplateInput = {
   printSublabel?: string | null;          // per-color quotes: e.g. "2-color print (1 spot, 1 flood), one side"
   dieCuttingCharge?: number | null;
   dieCutTriggerQty?: number | null;
+  // Step 23: cutting / lamination lines (replace the single die-cut line when present)
+  processLines?: { label: string; amount: number; note?: string | null }[] | null;
   grandTotal?: number | null;
   shippingEstimate?: number | null;   // rough shipping estimate, already capped
   shippingIsCapped?: boolean;
@@ -696,7 +698,11 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const baseTotal = grandTotalAmt ?? (pricingPending ? null : pricing.total ?? null);
   const hasPackaging = packagingSubtotalAmt != null && packagingSubtotalAmt > 0;
   const hasPrinting  = printingUpchargeAmt != null && printingUpchargeAmt > 0;
-  const hasDieCutting = dieCuttingChargeAmt != null && dieCuttingChargeAmt > 0;
+  const processLinesVal = Array.isArray(input.processLines) ? input.processLines : [];
+  const hasDieCutting =
+    (dieCuttingChargeAmt != null && dieCuttingChargeAmt > 0) || processLinesVal.some((l) => Number(l.amount) > 0);
+  const escText = (s: unknown) =>
+    String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const hasShipping = shippingEstimateAmt != null && shippingEstimateAmt > 0;
   const displayTotal = hasShipping && baseTotal != null ? baseTotal + shippingEstimateAmt : baseTotal;
   void showHowBuilt; // retained for potential future use
@@ -766,7 +772,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                           <td style="width:23%;vertical-align:top;text-align:right;">
                             <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Est. total</div>
                             <div style="font-size:16px;font-weight:800;color:#f97316;">${displayTotal != null ? fmtMoney(displayTotal) : "Pending"}</div>
-                            ${hasPackaging || hasPrinting || hasDieCutting || hasShipping ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}${hasDieCutting ? " + die-cut" : ""}${hasShipping ? " + ship" : ""}</div>` : ""}
+                            ${hasPackaging || hasPrinting || hasDieCutting || hasShipping ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}${hasDieCutting ? " + cutting" : ""}${hasShipping ? " + ship" : ""}</div>` : ""}
                           </td>
                         </tr>
                       </table>
@@ -807,7 +813,15 @@ export function renderQuoteEmail(input: TemplateInput): string {
                             <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(printingUpchargeAmt as number)}</div>
                           </td>
                         </tr>` : ""}
-                        ${hasDieCutting ? `<tr>
+                        ${processLinesVal.length > 0 ? processLinesVal.map((l) => `<tr>
+                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Machining &ndash; ${escText(l.label)}</div>
+                            ${l.note ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">${escText(l.note)}</div>` : ""}
+                          </td>
+                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
+                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(Number(l.amount) || 0)}</div>
+                          </td>
+                        </tr>`).join("") : hasDieCutting ? `<tr>
                           <td style="padding:8px 0;${hasShipping ? "border-bottom:1px solid #1f2937;" : ""}vertical-align:top;">
                             <div style="font-size:13px;font-weight:600;color:#f9fafb;">Machining &ndash; Die-cutting charge</div>
                             <div style="font-size:11px;color:#6b7280;margin-top:1px;">Applied at qty ${dieCutTriggerQtyVal && dieCutTriggerQtyVal > 0 ? `&ge; ${dieCutTriggerQtyVal}` : "threshold"}</div>

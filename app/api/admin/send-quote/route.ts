@@ -16,7 +16,9 @@ import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { renderQuoteEmail, type TemplateLineItem, type TemplateLayoutLayer } from "@/app/lib/email/quoteTemplate";
 import { computePricing } from "@/app/lib/pricing/compute";
-import { lockedChargeSettings, lockedFoamPrice } from "@/app/lib/pricing/foam-lock";
+import { lockedChargeSettings, lockedFoamPrice, quotePriceModel } from "@/app/lib/pricing/foam-lock";
+import { foamChargeLines, latestLayoutJson, quoteFoamGeometry } from "@/app/lib/pricing/foam-quote";
+import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -174,6 +176,13 @@ export async function POST(req: NextRequest) {
     let primaryCalcRaw: any = {};
     let primaryCalcCaptured = false;
 
+    // Step 23: same as the quote page — price model, and the billable foam
+    // set's geometry (cavities, cut length, dies, glue lines) from the layout.
+    const priceModel = await quotePriceModel(quoteNo);
+    const layoutJsonForPricing = await latestLayoutJson(quote.id);
+    let primaryGeom: FoamGeometry | null = null;
+    let primaryQty = 0;
+
     for (const it of itemsRaw) {
       const L = Number(it.length_in);
       const W = Number(it.width_in);
@@ -192,6 +201,12 @@ export async function POST(req: NextRequest) {
       }
 
       const forceSkive = !skiveConsumed && hasLayerRows && layeredSkiveRequired;
+      let cavityCi = 0;
+      if (!primaryGeom) {
+        primaryGeom = quoteFoamGeometry(layoutJsonForPricing, { L, W, H });
+        primaryQty = qty;
+        if (priceModel === 2) cavityCi = primaryGeom.cavity_ci;
+      }
       let priced: { unit: number; total: number; raw: any };
       try {
         // Step 10B: price lock — same saved price as the quote page.
@@ -202,11 +217,12 @@ export async function POST(req: NextRequest) {
             price_total_usd: it.stored_total_usd,
             calc_snapshot: it.calc_snapshot,
           },
-          { L, W, H, qty, material_id: mid, force_skived: forceSkive },
+          { L, W, H, qty, material_id: mid, force_skived: forceSkive, cavity_ci: cavityCi },
           async () => {
             const result = await computePricing({
               L, W, H, qty, material_id: mid,
               force_skived: forceSkive,
+              cavity_ci: cavityCi,
               tenant_id: user.tenant_id,
             });
             return { unit: result.total / qty, total: result.total, detail: result };
@@ -288,18 +304,21 @@ export async function POST(req: NextRequest) {
     });
     const { isPrinted, artSetupFee, printingUpchargePct, printingUpchargeAmt, printingUpcharge } = pc;
 
-    // Die-cutting charge: same rule as /api/quote/print — flat fee once the
-    // order's real qty (the primary, non-layout-layer, non-packaging row)
-    // reaches the configured trigger. Computed independently here (like the
-    // rest of this route's pricing) since send-quote avoids calling other
-    // internal routes over HTTP.
+    // Step 23: cutting / lamination / old flat die-cut fee — the same
+    // foamChargeLines() the quote page uses (app/lib/pricing/foam-quote.ts).
+    // The old fee keeps this route's old order qty (the primary row).
     const orderQtyForDieCut = Number(
       items.find((it) => !isLayoutLayerRow(it.notes) && !isPackagingRow(it.notes))?.qty,
     ) || 0;
+    const proc = foamChargeLines({
+      settings,
+      geom: primaryGeom,
+      qty: primaryQty,
+      legacyQty: orderQtyForDieCut,
+      facts,
+    });
     const dieCutTriggerQty = Number(settings.die_cut_trigger_qty) || 0;
-    const dieCutUpchargeUsd = Number(settings.die_cut_upcharge_usd) || 0;
-    const dieCuttingTriggered = dieCutTriggerQty > 0 && orderQtyForDieCut >= dieCutTriggerQty;
-    const dieCuttingCharge = dieCuttingTriggered ? dieCutUpchargeUsd : 0;
+    const dieCuttingCharge = proc.total;
 
     const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
 
@@ -458,6 +477,7 @@ export async function POST(req: NextRequest) {
       printSublabel: pc.printModel === "per_color" ? pc.printSummary : null,
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
+      processLines: proc.lines.length > 0 ? proc.lines : null,
       grandTotal,
       shippingEstimate: shippingEstimate > 0 ? shippingEstimate : null,
       shippingIsCapped,

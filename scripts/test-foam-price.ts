@@ -7,6 +7,8 @@
 // Run: npm run test:foam   (= npx --yes tsx scripts/test-foam-price.ts)
 
 import { cavityVolumeCi, priceFoam, type FoamMaterial, type FoamSettings } from "../app/lib/pricing/foam-core";
+import { foamGeometry } from "../app/lib/pricing/foam-geometry";
+import { pickFoamProcess, priceFoamProcess, resolveFoamMethod } from "../app/lib/pricing/foam-process";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -96,11 +98,13 @@ check("skive: forced on a whole-inch part", priceFoam(epe22, shop, { ...part, fo
 //    material % instead: (1,584 x 1.10 + 60) x 1.45 = 2,613.48
 check("skive: material % upcharge", priceFoam({ ...epe22, skiving_upcharge_pct: 10 }, shop, { ...part, force_skived: true }).total, 2613.48);
 
-// 6) Board-foot rounding keeps skive and setup.
+// 6) Board-foot rounding keeps skive and setup, and uses the rate actually charged.
 //    66,000 ci / 144 = 458.33 bf → 458.5 bf x $3.46/bf (0.024 x 144, to the cent) = 1,586.41 + 60 = 1,646.41 x 1.45 = 2,387.29
 const bf = priceFoam(epe22, shop, { ...part, round_to_bf: true });
 check("round_to_bf: quarter board feet", bf.board_feet_rounded, 458.5);
 check("round_to_bf: keeps setup", bf.total, 2387.29);
+// Step 23: a stale stored $/bf (catalog has $34/bf next to $0.024/cu in) is ignored.
+check("round_to_bf: ignores a stale stored $/bf", priceFoam({ ...epe22, price_per_bf: 34 }, shop, { ...part, round_to_bf: true }).total, 2387.29);
 
 // 7) Minimum charge (per order)
 const tiny = priceFoam({ ...epe22, cutting_setup_fee_usd: null }, shop, { L: 2, W: 2, H: 1, qty: 1 });
@@ -115,6 +119,110 @@ check("cavities never go below zero volume", priceFoam(epe22, shop, { ...part, c
 
 // 9) Markup fallback
 check("invalid markup → 1", priceFoam(epe22, { ...shop, markup_factor_default: 0 }, part).markup_factor, 1);
+
+
+// ---------------------------------------------------------------------------
+// Step 23: layout geometry (cavities, cut length, dies, glue lines)
+// ---------------------------------------------------------------------------
+const twoLayer = {
+  block: { lengthIn: 12, widthIn: 10, thicknessIn: 2 },
+  stack: [
+    {
+      thicknessIn: 1,
+      cavities: [
+        { shape: "rect", lengthIn: 4, widthIn: 3, depthIn: 0.5, x: 0.1, y: 0.1 },
+        { shape: "circle", lengthIn: 2, widthIn: 2, diameterIn: 2, depthIn: 1, x: 0.6, y: 0.5 },
+      ],
+    },
+    { thicknessIn: 1, cavities: [] },
+  ],
+};
+const g = foamGeometry(twoLayer, { L: 12, W: 10, H: 2 });
+//   cavities: 4x3x0.5 = 6 + π·1²·1 = 3.1416 → 9.1416 cu in
+check("geom: cavity volume (rect + circle)", Math.round(g.cavity_ci * 1000) / 1000, 9.142);
+//   cut: layer 1 = 44 + 14 + 2π (6.2832) = 64.2832; layer 2 = 44 → 108.283
+check("geom: cut inches per part", g.cut_in_per_piece, 108.283);
+check("geom: 2 different layers → 2 dies", g.dies.length, 2);
+check("geom: rule inches", g.rule_in_total, 108.283);
+check("geom: 2 layers → 1 glue line", g.glue_lines, 1);
+check("geom: layers cut", g.layers_cut, 2);
+check("geom: from layout", g.from_layout, true);
+
+const sameLayers = foamGeometry(
+  { block: { lengthIn: 12, widthIn: 10, thicknessIn: 3 }, stack: [{ thicknessIn: 1, cavities: [] }, { thicknessIn: 1, cavities: [] }, { thicknessIn: 1, cavities: [], loose: true }] },
+  { L: 12, W: 10, H: 3 },
+);
+check("geom: identical layers share one die", sameLayers.dies.length, 1);
+check("geom: loose top pad is not glued", sameLayers.glue_lines, 1);
+
+const shapes = foamGeometry(
+  {
+    block: { lengthIn: 12, widthIn: 10, thicknessIn: 2, cornerStyle: "chamfer", chamferIn: 1 },
+    cavities: [
+      { shape: "roundedRect", lengthIn: 4, widthIn: 3, cornerRadiusIn: 0.5, depthIn: 1, x: 0, y: 0 },
+      { shape: "poly", lengthIn: 6, widthIn: 5, depthIn: 5, x: 0.5, y: 0.5, points: [{ x: 0, y: 0 }, { x: 0.5, y: 0 }, { x: 0.5, y: 0.5 }, { x: 0, y: 0.5 }] },
+    ],
+  },
+  { L: 12, W: 10, H: 2 },
+);
+//   rounded rect 4x3 r0.5: 12 − (4−π)·0.25 = 11.7854 × 1 deep; poly 6x5 = 30 × min(5, 2) = 60 → 71.785
+check("geom: rounded rect + poly volume (depth capped at the layer)", Math.round(shapes.cavity_ci * 1000) / 1000, 71.785);
+//   chamfered outline 44 − 4·1·(2−√2) = 41.657; + rounded rect 13.1416 + poly 22 → 76.799
+check("geom: chamfer + rounded rect + poly cut", shapes.cut_in_per_piece, 76.799);
+check("geom: no layout → solid block", foamGeometry(null, { L: 12, W: 10, H: 2 }).cut_in_per_piece, 44);
+
+// Material line with the layout's cavities: (240 − 9.1416) × 250 × 1.1 × 0.024 = 1,523.67 + 60 = 1,583.67 × 1.45
+check("material: layout cavities come off the volume", priceFoam(epe22, shop, { ...part, cavity_ci: g.cavity_ci }).total, 2296.31);
+
+// ---------------------------------------------------------------------------
+// Step 23: cutting + lamination charges
+// ---------------------------------------------------------------------------
+const proc = pickFoamProcess({
+  foam_die_over_qty: 500,
+  cnc_setup_usd: 50,
+  cnc_feed_in_per_min: 100,
+  cnc_cost_per_min: 2,
+  die_base_usd: 75,
+  die_rule_per_in_usd: 1.5,
+  press_setup_usd: 40,
+  press_rate_per_hr: 120,
+  press_hits_per_hr: 600,
+  press_parts_per_hit: 1,
+  lam_setup_usd: 25,
+  lam_per_glue_line_usd: 0.1,
+});
+const legacy = { trigger_qty: 50, upcharge_usd: 100, qty: 0 };
+check("method: auto below the cutoff = CNC", resolveFoamMethod("auto", 100, proc), "cnc");
+check("method: auto at the cutoff = die", resolveFoamMethod("auto", 500, proc), "die");
+check("method: staff can force CNC", resolveFoamMethod("cnc", 5000, proc), "cnc");
+check("method: no rates = old fee", resolveFoamMethod("auto", 100, pickFoamProcess({})), null);
+
+//   CNC, qty 100: 50 + (108.283 ÷ 100 × 100 = 108.283 min) × $2 = 266.566 × 1.45 = 386.52
+const cnc = priceFoamProcess({ model: 2, geom: g, qty: 100, settings: proc, markup: 1.45, legacy });
+check("CNC: method", cnc.method, "cnc");
+check("CNC: charge", cnc.lines.find((l) => l.key === "cnc")?.amount, 386.52);
+//   lamination, qty 100: 25 + 100 × 1 × 0.10 = 35 × 1.45 = 50.75
+check("lamination: charge", cnc.lines.find((l) => l.key === "lamination")?.amount, 50.75);
+check("CNC: no old die-cut fee", cnc.lines.some((l) => l.key === "die_cut_legacy"), false);
+
+//   Die, qty 1000: (75 + 64.2832 × 1.5) + (75 + 44 × 1.5) = 312.4248 × 1.45 = 453.02
+const die = priceFoamProcess({ model: 2, geom: g, qty: 1000, settings: proc, markup: 1.45, legacy });
+check("die: method", die.method, "die");
+check("die: one-time charge (2 dies)", die.lines.find((l) => l.key === "die")?.amount, 453.02);
+//   press: 1000 parts × 2 layers = 2,000 hits ÷ 600/hr × $120 = 400 + 40 = 440 × 1.45 = 638.00
+check("press: charge", die.lines.find((l) => l.key === "press")?.amount, 638.0);
+check("press: hits", die.detail.press_hits, 2000);
+const owned = priceFoamProcess({ model: 2, geom: g, qty: 1000, settings: proc, markup: 1.45, dieOwned: true, legacy });
+check("die: customer owns the die → $0", owned.lines.find((l) => l.key === "die")?.amount, 0);
+check("die: press still charged when the die is owned", owned.lines.find((l) => l.key === "press")?.amount, 638.0);
+
+// Old flat fee: model 1 quotes, and shops with no CNC / die rates
+const m1 = priceFoamProcess({ model: 1, geom: g, qty: 100, settings: proc, markup: 1.45, legacy: { ...legacy, qty: 100 } });
+check("model 1: old flat die-cut fee only", m1.lines.map((l) => `${l.key}:${l.amount}`).join(","), "die_cut_legacy:100");
+const noRates = priceFoamProcess({ model: 2, geom: g, qty: 100, settings: pickFoamProcess({}), markup: 1.45, legacy: { ...legacy, qty: 100 } });
+check("no CNC/die rates: old flat fee", noRates.total, 100);
+const noRatesLow = priceFoamProcess({ model: 2, geom: g, qty: 10, settings: pickFoamProcess({}), markup: 1.45, legacy: { ...legacy, qty: 10 } });
+check("no rates, under the old trigger: nothing", noRatesLow.lines.length, 0);
 
 if (failed) {
   console.log(`\n${failed} FAILED`);

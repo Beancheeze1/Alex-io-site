@@ -20,6 +20,24 @@
 import * as React from "react";
 import Link from "next/link";
 
+// Step 23: foam cutting (CNC short run / steel-rule die + press) and
+// lamination rates. All are the shop's COST; the markup is applied on top.
+const FOAM_FIELDS = [
+  { key: "cnc_setup_usd", label: "CNC setup ($ per order)", step: "0.01" },
+  { key: "cnc_feed_in_per_min", label: "CNC feed rate (inches of cut / minute)", step: "1" },
+  { key: "cnc_cost_per_min", label: "CNC machine cost ($ / minute)", step: "0.01" },
+  { key: "foam_die_over_qty", label: "Use a steel-rule die at this qty and up (0 = CNC unless forced)", step: "1" },
+  { key: "die_base_usd", label: "Die base fee ($ per die)", step: "0.01" },
+  { key: "die_rule_per_in_usd", label: "Steel rule ($ / inch)", step: "0.01" },
+  { key: "press_setup_usd", label: "Press setup ($ per order)", step: "0.01" },
+  { key: "press_rate_per_hr", label: "Press rate ($ / hour)", step: "0.01" },
+  { key: "press_hits_per_hr", label: "Press hits per hour", step: "1" },
+  { key: "press_parts_per_hit", label: "Parts per hit", step: "1" },
+  { key: "lam_setup_usd", label: "Lamination setup ($ per order)", step: "0.01" },
+  { key: "lam_per_glue_line_usd", label: "Lamination ($ per glue line, per part)", step: "0.01" },
+] as const;
+type FoamKey = (typeof FOAM_FIELDS)[number]["key"];
+
 type PricingSettings = {
   skive_upcharge_each: number;
   printing_upcharge_usd: number;   // flat "Art Setup" fee
@@ -38,7 +56,7 @@ type PricingSettings = {
   die_cut_upcharge_usd: number;
 
   cushion_family_order: string[];
-};
+} & Record<FoamKey, number>;
 
 type SettingsResponse = {
   ok: boolean;
@@ -68,6 +86,7 @@ export default function AdminSettingsPage() {
 
     die_cut_trigger_qty: 500,
     die_cut_upcharge_usd: 0,
+    ...(Object.fromEntries(FOAM_FIELDS.map((f) => [f.key, f.key === "press_parts_per_hit" ? 1 : 0])) as Record<FoamKey, number>),
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -147,6 +166,10 @@ export default function AdminSettingsPage() {
           )
             ? ((s as any).cushion_family_order as string[])
             : prev.cushion_family_order,
+
+          ...(Object.fromEntries(
+            FOAM_FIELDS.map((f) => [f.key, numberOr((s as Record<string, unknown>)[f.key], prev[f.key])]),
+          ) as Record<FoamKey, number>),
         }));
       } catch (e: any) {
         console.error("Admin settings load error:", e);
@@ -427,39 +450,12 @@ export default function AdminSettingsPage() {
               {/* Machine & markup */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
                 <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
-                  Machine throughput &amp; markup
+                  Markup
                 </h2>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-[var(--text-secondary)]">
-                      Machine throughput (in³ / minute)
-                    </span>
-                    <input
-                      type="number"
-                      step="1"
-                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
-                      value={settings.machining_in3_per_min}
-                      onChange={(e) =>
-                        setNum("machining_in3_per_min")(e.target.value)
-                      }
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-[var(--text-secondary)]">
-                      Machine cost ($ / minute)
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
-                      value={settings.machine_cost_per_min}
-                      onChange={(e) =>
-                        setNum("machine_cost_per_min")(e.target.value)
-                      }
-                    />
-                  </label>
-
+                  {/* Step 23: the old "machine throughput / cost" knobs were removed
+                      here — nothing has priced with them since Step 22. CNC
+                      machine time is now under "Foam cutting & lamination". */}
                   <label className="flex flex-col gap-1 text-xs md:col-span-2">
                     <span className="text-[var(--text-secondary)]">
                       Default markup factor (× over raw cost)
@@ -476,8 +472,8 @@ export default function AdminSettingsPage() {
                   </label>
                 </div>
                 <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-                  These values will eventually align with the pricing breakdown
-                  you see in the quote viewer: material vs. machine vs. markup.
+                  Applied to foam material and to the foam cutting / lamination
+                  rates below.
                 </p>
               </div>
 
@@ -522,7 +518,39 @@ export default function AdminSettingsPage() {
                 <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   Flat charge applied once when an order's quantity reaches the
                   trigger. Set the upcharge to 0 to keep this off — it never
-                  applies unless both values are set above 0.
+                  applies unless both values are set above 0. Once you set CNC
+                  or die rates below, they replace this fee on new quotes.
+                </p>
+              </div>
+
+              {/* Step 23: foam cutting & lamination */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-foam-process-settings>
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
+                  Foam cutting &amp; lamination
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {FOAM_FIELDS.map((f) => (
+                    <label key={f.key} className="flex flex-col gap-1 text-xs">
+                      <span className="text-[var(--text-secondary)]">{f.label}</span>
+                      <input
+                        type="number"
+                        step={f.step}
+                        min="0"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                        value={settings[f.key]}
+                        onChange={(e) => setNum(f.key)(e.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
+                  Your costs; your markup is added. CNC short run = setup + (inches
+                  of cut per part ÷ feed rate) × qty × $/minute. Steel-rule die =
+                  base fee + inches of rule × $/inch, once per part (each
+                  different layer gets its own die). Press = setup + hits ÷ hits
+                  per hour × $/hour. Lamination = setup + glue lines × qty ×
+                  $/glue line. Leave CNC and die at 0 to keep the flat
+                  die-cutting charge above.
                 </p>
               </div>
 

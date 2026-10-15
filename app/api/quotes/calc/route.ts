@@ -29,6 +29,7 @@ type In = {
   material_id: number | string;
   qty: number | string;
   cavities?: string[] | null; // e.g., ["3x3x1", "Ø6x1"]
+  cavity_ci?: number | string | null; // Step 23: cavity volume per piece from the saved layout (internal / staff)
   round_to_bf?: boolean;
   force_skived?: boolean;
   tenant_id?: number | string | null; // shop id or slug; REQUIRED on internal (server-to-server) calls
@@ -148,6 +149,9 @@ export async function POST(req: NextRequest) {
       Array.isArray(body.cavities) && body.cavities.length
         ? body.cavities.map((s) => String(s))
         : [];
+    // Step 23: the quote page / email send the layout's cavity volume directly.
+    const cavityCiIn = Number(body.cavity_ci);
+    const cavity_ci = (internal || staff) && Number.isFinite(cavityCiIn) && cavityCiIn > 0 ? cavityCiIn : 0;
 
     // Load material row
     const mat = await one<MaterialRow>(
@@ -214,6 +218,7 @@ export async function POST(req: NextRequest) {
       H: height_in,
       qty,
       cavities: cavitiesArr,
+      cavity_ci,
       round_to_bf,
       force_skived,
     });
@@ -295,6 +300,7 @@ export async function POST(req: NextRequest) {
         material_id,
         qty,
         cavities: cavitiesArr,
+        cavity_ci,
         round_to_bf,
         force_skived,
       },

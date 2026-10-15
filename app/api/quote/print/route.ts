@@ -33,7 +33,9 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
-import { lockedChargeSettings, lockedFoamPrice } from "@/app/lib/pricing/foam-lock";
+import { lockedChargeSettings, lockedFoamPrice, quotePriceModel } from "@/app/lib/pricing/foam-lock";
+import { foamChargeLines, latestLayoutJson, quoteFoamGeometry } from "@/app/lib/pricing/foam-quote";
+import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { addAdminAlert } from "@/lib/admin-alerts";
 
@@ -219,6 +221,7 @@ async function priceViaCalcRoute(params: {
   material_id: number;
   force_skived?: boolean;
   tenant_id?: number | string | null;
+  cavity_ci?: number | null; // Step 23: cavity volume per piece (model 2)
 }): Promise<{ unit: number; total: number; raw: any | null }> {
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
   const url = `${base}/api/quotes/calc?t=${Date.now()}`;
@@ -229,7 +232,8 @@ async function priceViaCalcRoute(params: {
     height_in: params.H,
     material_id: params.material_id,
     qty: params.qty,
-    cavities: [], // match email (no cavity subtraction)
+    cavities: [],
+    cavity_ci: params.cavity_ci ?? 0, // Step 23: cavities from the saved layout (same as the email)
     round_to_bf: false,
     force_skived: params.force_skived === true,
     tenant_id: params.tenant_id ?? null,
@@ -412,6 +416,14 @@ export async function GET(req: NextRequest) {
 
     let items: ItemRow[] = [];
 
+    // Step 23: price model (1 = quote priced before Step 23: no cavity
+    // subtraction, old die-cut fee) and the billable foam set's geometry
+    // (cavities, cut length, dies, glue lines) from the saved layout.
+    const priceModel = await quotePriceModel(String(quoteNo));
+    const layoutJsonForPricing = itemsRaw.length > 0 ? await latestLayoutJson(quote.id) : null;
+    let primaryGeom: FoamGeometry | null = null;
+    let primaryQty = 0;
+
     /* ============================================================
        PRE-APPLY PATH (facts only, no DB items)
        ============================================================ */
@@ -423,6 +435,8 @@ export async function GET(req: NextRequest) {
       const materialId = safeNum((facts as any).material_id);
 
       if (dimsParsed && qty && qty > 0 && materialId && materialId > 0) {
+        primaryGeom = quoteFoamGeometry(null, dimsParsed);
+        primaryQty = Number(qty);
         const priced = await priceViaCalcRoute({
           L: dimsParsed.L,
           W: dimsParsed.W,
@@ -512,11 +526,21 @@ export async function GET(req: NextRequest) {
             hasLayoutLayerRows &&
             layeredSkiveRequired;
 
+          // Step 23: the first billable foam line is the full set — its
+          // cavities (model 2) come off the volume, and its geometry drives
+          // the cutting / lamination charges.
+          let cavityCi = 0;
+          if (!primaryGeom) {
+            primaryGeom = quoteFoamGeometry(layoutJsonForPricing, { L, W, H });
+            primaryQty = qty;
+            if (priceModel === 2) cavityCi = primaryGeom.cavity_ci;
+          }
+
           // Step 10B: price lock — the saved price is used until the foam
-          // (size, qty, material, skive) changes or staff reprice the quote.
+          // (size, qty, material, skive, cavities) changes or staff reprice the quote.
           const priced = await lockedFoamPrice(
             it,
-            { L, W, H, qty, material_id: materialId, force_skived: forceLayeredSkive },
+            { L, W, H, qty, material_id: materialId, force_skived: forceLayeredSkive, cavity_ci: cavityCi },
             async () => {
               const p = await priceViaCalcRoute({
                 L,
@@ -526,6 +550,7 @@ export async function GET(req: NextRequest) {
                 material_id: materialId,
                 force_skived: forceLayeredSkive,
                 tenant_id: tenantId,
+                cavity_ci: cavityCi,
               });
               // Step 22: a material with no price is priced at the shop's
               // default rate — tell the shop once, when the price is saved.
@@ -752,16 +777,21 @@ export async function GET(req: NextRequest) {
     });
     const { isPrinted, artSetupFee, printingUpchargePct, printingUpchargeAmt, printingUpcharge } = pc;
 
-    // Die-cutting charge: flat fee triggered once order qty reaches the
-    // configured threshold. items[] is already sorted primary-first
-    // (sortItemsForQuoteDisplay), and every row on a quote shares the same
-    // order qty, so items[0] reliably carries the real order quantity for
-    // both pre-Apply (facts-only) and post-Apply (DB-backed) paths.
+    // Step 23: foam cutting (CNC short run, or steel-rule die + press),
+    // lamination, or — shops without CNC / die rates, and quotes priced before
+    // Step 23 — the old flat die-cut fee (order qty = items[0], as before).
     const orderQty = Number(items[0]?.qty) || 0;
+    const proc = foamChargeLines({
+      settings,
+      geom: primaryGeom,
+      qty: primaryQty,
+      legacyQty: orderQty,
+      facts: facts as Record<string, unknown>,
+    });
     const dieCutTriggerQty = Number(settings.die_cut_trigger_qty) || 0;
-    const dieCutUpchargeUsd = Number(settings.die_cut_upcharge_usd) || 0;
-    const dieCuttingTriggered = dieCutTriggerQty > 0 && orderQty >= dieCutTriggerQty;
-    const dieCuttingCharge = dieCuttingTriggered ? dieCutUpchargeUsd : 0;
+    // Kept for older screens: the whole cutting / lamination total.
+    const dieCuttingCharge = proc.total;
+    const dieCuttingTriggered = proc.lines.length > 0;
 
     // Step 19: buyers (and anyone with the quote number) get only the facts
     // the quote page and editor use. Staff get everything.
@@ -804,6 +834,11 @@ export async function GET(req: NextRequest) {
       dieCutTriggerQty,
       dieCuttingTriggered,
       dieCuttingCharge,
+      // Step 23: each cutting / lamination line, and how the foam is cut.
+      processLines: proc.lines,
+      foamMethod: proc.method,
+      // Staff only: how the cutting charges were worked out.
+      ...(isStaffCaller ? { foamProcessDetail: proc.detail, priceModel: proc.model } : {}),
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge,
       isPrinted,
       printModel: pc.printModel,

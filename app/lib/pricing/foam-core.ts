@@ -48,6 +48,9 @@ export type FoamInput = {
   H: number;
   qty: number;
   cavities?: string[] | null;
+  // Step 23: cavity volume per piece already worked out from the saved layout
+  // (app/lib/pricing/foam-geometry.ts). Added to any `cavities` strings.
+  cavity_ci?: number | null;
   round_to_bf?: boolean;
   force_skived?: boolean;
 };
@@ -119,6 +122,8 @@ export function priceFoam(mat: FoamMaterial, settings: FoamSettings, input: Foam
   const piece_ci_raw = L * W * H;
   let cavities_ci = 0;
   for (const c of cavities) cavities_ci += cavityVolumeCi(String(c));
+  const cavCiIn = Number(input.cavity_ci);
+  if (Number.isFinite(cavCiIn) && cavCiIn > 0) cavities_ci += cavCiIn;
   const piece_ci = Math.max(piece_ci_raw - cavities_ci, 0);
   const order_ci = piece_ci * qty;
 
@@ -148,7 +153,9 @@ export function priceFoam(mat: FoamMaterial, settings: FoamSettings, input: Foam
     price_per_ci = ci ?? (bf != null ? bf / 144 : FALLBACK_RATE_PER_CI);
     price_source = "shop_default";
   }
-  const price_per_bf = perBf ?? round2(price_per_ci * 144);
+  // Step 23: per board foot always matches the rate actually charged (a
+  // stale stored $/bf no longer leaks into round_to_bf when $/cu in is set).
+  const price_per_bf = price_source === "price_per_bf" && perBf != null ? perBf : round2(price_per_ci * 144);
 
   // Skiving
   const skive_pct = num(mat.skiving_upcharge_pct) ?? 0;

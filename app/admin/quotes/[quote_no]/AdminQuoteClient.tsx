@@ -24,6 +24,7 @@ import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
 import RunMethodControl from "@/components/admin/RunMethodControl";
+import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
@@ -111,6 +112,8 @@ type ApiOk = {
   dieCuttingCharge?: number;
   dieCuttingTriggered?: boolean;
   dieCutTriggerQty?: number;
+  // Step 23: cutting / lamination lines (dieCuttingCharge = their total)
+  processLines?: { key: string; label: string; amount: number; note: string | null }[];
   grandTotal?: number;
   customerBoxDims?: { L: number; W: number; H: number } | null;
   customerBoxMatch?: {
@@ -1182,6 +1185,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [dieCuttingCharge, setDieCuttingCharge] = React.useState<number>(0);
   const [dieCuttingTriggered, setDieCuttingTriggered] = React.useState<boolean>(false);
   const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
+  const [processLines, setProcessLines] = React.useState<
+    { key: string; label: string; amount: number; note: string | null }[]
+  >([]);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
   const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
@@ -1402,6 +1408,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 ? Number((json as ApiOk).dieCutTriggerQty)
                 : 0,
             );
+            setProcessLines(Array.isArray((json as ApiOk)?.processLines) ? ((json as ApiOk).processLines ?? []) : []);
             setGrandTotal(
               Number.isFinite((json as ApiOk)?.grandTotal as any)
                 ? Number((json as ApiOk).grandTotal)
@@ -2510,6 +2517,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   <RepriceQuoteButton quoteNo={quoteNoValue} locked={!!quoteState?.locked} />
                 ) : null}
                 {quoteNoValue && (boxSelections?.length ?? 0) > 0 ? <RunMethodControl quoteNo={quoteNoValue} /> : null}
+                {/* Step 23: how the foam is cut (hides itself on quotes with no foam) */}
+                {quoteNoValue ? <FoamMethodControl quoteNo={quoteNoValue} /> : null}
                 {items.length === 0 ? (
                   <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                     No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.
@@ -2544,16 +2553,24 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                             <div>{formatUsd(effectivePrintingUpcharge)}</div>
                           </div>
                         )}
-                        {(dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
-                          <div>
-                            <div style={labelStyle}>Die-cutting charge</div>
-                            <div>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
-                          </div>
-                        )}
+                        {processLines.length > 0
+                          ? processLines.map((l, i) => (
+                              <div key={`proc-${i}`}>
+                                <div style={labelStyle}>{l.label}</div>
+                                <div>{formatUsd(l.amount)}</div>
+                                {l.note ? <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{l.note}</div> : null}
+                              </div>
+                            ))
+                          : (dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                              <div>
+                                <div style={labelStyle}>Die-cutting charge</div>
+                                <div>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
+                              </div>
+                            )}
                         {effectiveGrandTotal > 0 && (
                           <div>
                             <div style={labelStyle}>
-                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})
+                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""})
                             </div>
                             <div style={{ fontSize: 16, fontWeight: 600 }}>
                               {formatUsd(effectiveGrandTotal)}

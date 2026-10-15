@@ -7,6 +7,7 @@ import {
 } from "@/app/lib/pricing/settings";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { adminOnly } from "@/lib/admin-auth";
+import { FOAM_PROCESS_KEYS } from "@/app/lib/pricing/foam-process";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,6 +87,8 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       "die_cut_trigger_qty",
       "die_cut_upcharge_usd",
       "cushion_family_order",
+      // Step 23: foam cutting + lamination rates
+      ...FOAM_PROCESS_KEYS,
     ];
 
     const filtered: Partial<PricingSettings> = {};

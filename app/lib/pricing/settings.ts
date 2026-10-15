@@ -30,6 +30,22 @@ export type PricingSettings = {
   die_cut_trigger_qty: number;
   die_cut_upcharge_usd: number;
 
+  // Step 23: foam cutting + lamination (app/lib/pricing/foam-process.ts).
+  // All are the shop's COST (the markup is applied); 0 = not used. While no
+  // CNC or die rates are set, the flat die-cut fee above still applies.
+  foam_die_over_qty: number; // auto: steel-rule die at or above this qty
+  cnc_setup_usd: number;
+  cnc_feed_in_per_min: number;
+  cnc_cost_per_min: number;
+  die_base_usd: number;
+  die_rule_per_in_usd: number;
+  press_setup_usd: number;
+  press_rate_per_hr: number;
+  press_hits_per_hr: number;
+  press_parts_per_hit: number;
+  lam_setup_usd: number;
+  lam_per_glue_line_usd: number;
+
   cushion_family_order: string[];
 };
 
@@ -48,6 +64,19 @@ const DEFAULTS: PricingSettings = {
 
   die_cut_trigger_qty: 500,
   die_cut_upcharge_usd: 0,
+
+  foam_die_over_qty: 0,
+  cnc_setup_usd: 0,
+  cnc_feed_in_per_min: 0,
+  cnc_cost_per_min: 0,
+  die_base_usd: 0,
+  die_rule_per_in_usd: 0,
+  press_setup_usd: 0,
+  press_rate_per_hr: 0,
+  press_hits_per_hr: 0,
+  press_parts_per_hit: 1,
+  lam_setup_usd: 0,
+  lam_per_glue_line_usd: 0,
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };

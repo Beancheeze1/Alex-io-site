@@ -27,6 +27,7 @@ export async function computePricing(params: {
   qty: number;
   material_id: number;
   cavities?: string[];
+  cavity_ci?: number | null; // Step 23: cavity volume per piece from the layout
   force_skived?: boolean;
   round_to_bf?: boolean;
   tenant_id: number | string;
@@ -54,6 +55,7 @@ export async function computePricing(params: {
     H: params.H,
     qty: params.qty,
     cavities: params.cavities ?? [],
+    cavity_ci: params.cavity_ci ?? 0,
     round_to_bf: params.round_to_bf === true,
     force_skived: params.force_skived === true,
   });

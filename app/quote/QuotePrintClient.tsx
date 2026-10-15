@@ -80,6 +80,9 @@ type ItemRow = {
 
 };
 
+// Step 23: one cutting / lamination charge (CNC, die, press, lamination, or the old die-cut fee)
+type ProcessLine = { key: string; label: string; amount: number; note: string | null };
+
 type LayoutPkgRow = {
   id: number;
   quote_id: number;
@@ -130,6 +133,8 @@ type ApiOk = {
   dieCuttingCharge?: number;
   dieCuttingTriggered?: boolean;
   dieCutTriggerQty?: number;
+  // Step 23: cutting / lamination lines (dieCuttingCharge = their total)
+  processLines?: ProcessLine[];
   grandTotal: number;
   isPrinted?: boolean;
   printModel?: "per_color" | "legacy";
@@ -835,6 +840,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [dieCuttingCharge, setDieCuttingCharge] = React.useState<number>(0);
   const [dieCuttingTriggered, setDieCuttingTriggered] = React.useState<boolean>(false);
   const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
+  const [processLines, setProcessLines] = React.useState<ProcessLine[]>([]);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [salesRepEmail, setSalesRepEmail] = React.useState<string | null>(null);
 
@@ -1076,6 +1082,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         setDieCutTriggerQty(
           typeof asOk.dieCutTriggerQty === "number" ? asOk.dieCutTriggerQty : 0,
         );
+        setProcessLines(Array.isArray(asOk.processLines) ? asOk.processLines : []);
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setPrintModel(asOk.printModel === "per_color" ? "per_color" : "legacy");
@@ -2640,17 +2647,24 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </div>
                       )}
 
-                      {(dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
-                        <div>
-                          <div style={labelStyle}>Die-cutting charge</div>
-                          <div style={{ fontSize: 13 }}>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
-                        </div>
-                      )}
+                      {processLines.length > 0
+                        ? processLines.map((l, i) => (
+                            <div key={`proc-${i}`}>
+                              <div style={labelStyle}>{l.label}</div>
+                              <div style={{ fontSize: 13 }}>{formatUsd(l.amount)}</div>
+                            </div>
+                          ))
+                        : (dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                            <div>
+                              <div style={labelStyle}>Die-cutting charge</div>
+                              <div style={{ fontSize: 13 }}>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
+                            </div>
+                          )}
 
                       {effectiveGrandTotal > 0 && (
                         <div>
                           <div style={labelStyle}>
-                            Total estimate (foam + packaging + printing{effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})
+                            Total estimate (foam + packaging + printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""})
                           </div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal)}</div>
                         </div>
@@ -3213,8 +3227,35 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </tr>
                       )}
 
-                      {/* Die-cutting charge — its own line item, not folded into packaging or printing */}
-                      {(dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                      {/* Step 23: each cutting / lamination charge is its own line */}
+                      {processLines.map((l, i) => (
+                        <tr key={`proc-row-${i}`}>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.08em",
+                                color: "var(--text-secondary)",
+                                marginBottom: 2,
+                              }}
+                            >
+                              Machining – {l.label}
+                            </div>
+                            {l.note ? <div style={{ fontWeight: 500 }}>{l.note}</div> : null}
+                          </td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                            {formatUsd(l.amount)}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Die-cutting charge — its own line item (older responses without processLines) */}
+                      {processLines.length === 0 && (dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
                         <tr>
                           <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                             <div
@@ -3308,13 +3349,20 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             </>
                           )}
 
-                          {/* Die-cutting charge line in summary */}
-                          {effectiveDieCuttingCharge > 0 && (
-                            <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Die-cutting charge</div>
-                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveDieCuttingCharge)}</div>
-                            </>
-                          )}
+                          {/* Cutting / lamination lines in summary (Step 23) */}
+                          {processLines.length > 0
+                            ? processLines.map((l, i) => (
+                                <React.Fragment key={`proc-sum-${i}`}>
+                                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>{l.label}</div>
+                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(l.amount)}</div>
+                                </React.Fragment>
+                              ))
+                            : effectiveDieCuttingCharge > 0 && (
+                                <>
+                                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Die-cutting charge</div>
+                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveDieCuttingCharge)}</div>
+                                </>
+                              )}
 
                           {/* Grand subtotal — show when packaging, printing, or die-cutting is present */}
                           {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0 || effectiveDieCuttingCharge > 0) && (
@@ -3322,7 +3370,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
                                 {isBoxesOnly
                                   ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""})`
-                                  : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + die-cutting" : ""})`}
+                                  : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""})`}
                               </div>
                               <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}</div>
                             </>

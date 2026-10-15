@@ -13,8 +13,16 @@
 // Charges: the printing (art setup fee + %) and die-cut settings in force the
 // first time a quote is priced are saved in quotes.price_lock (migration 031)
 // and used from then on, until staff reprice.
+//
+// Step 23: the lock also records the price MODEL. Quotes first priced before
+// Step 23 (a lock without "model") stay on model 1: no cavity subtraction,
+// the flat die-cut fee, no lamination, until staff reprice. New quotes are
+// model 2, and their lock saves the foam cutting / lamination rates and the
+// markup too. Model-2 foam lines with cavities add the cavity volume to the
+// lock key, so a cavity change reprices the line.
 
 import { one, q } from "@/lib/db";
+import { pickFoamProcess, type FoamProcessSettings } from "@/app/lib/pricing/foam-process";
 
 export type FoamLockInput = {
   L: number;
@@ -23,10 +31,15 @@ export type FoamLockInput = {
   qty: number;
   material_id: number;
   force_skived?: boolean;
+  // Step 23 (model 2): cavity volume per piece; only added to the key when > 0,
+  // so lines without cavities keep the key they already had.
+  cavity_ci?: number | null;
 };
 
 export function foamLockKey(i: FoamLockInput): string {
-  return [i.L, i.W, i.H, i.qty, i.material_id, i.force_skived ? 1 : 0].map((v) => String(v)).join("|");
+  const base = [i.L, i.W, i.H, i.qty, i.material_id, i.force_skived ? 1 : 0].map((v) => String(v)).join("|");
+  const cav = Number(i.cavity_ci);
+  return Number.isFinite(cav) && cav > 0 ? `${base}|c${Math.round(cav * 100) / 100}` : base;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,20 +118,50 @@ export type ChargeSettings = {
   printing_upcharge_pct: number;
   die_cut_trigger_qty: number;
   die_cut_upcharge_usd: number;
+  // Step 23
+  model: 1 | 2;
+  markup_factor_default: number;
+  foam_process: FoamProcessSettings;
 };
 
-function pickCharges(raw: unknown): ChargeSettings {
+function pickCharges(raw: unknown, defaultModel: 1 | 2): ChargeSettings {
   const s = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const n = (v: unknown) => {
     const x = Number(v);
     return Number.isFinite(x) ? x : 0;
   };
+  const model: 1 | 2 = s.model === 2 ? 2 : s.model === 1 ? 1 : defaultModel;
   return {
     printing_upcharge_usd: n(s.printing_upcharge_usd),
     printing_upcharge_pct: n(s.printing_upcharge_pct),
     die_cut_trigger_qty: n(s.die_cut_trigger_qty),
     die_cut_upcharge_usd: n(s.die_cut_upcharge_usd),
+    model,
+    markup_factor_default: n(s.markup_factor_default) > 0 ? n(s.markup_factor_default) : 1,
+    // A model-1 lock has no foam rates: all 0, so nothing new is charged.
+    foam_process: pickFoamProcess(s.foam_process ?? (model === 2 ? s : null)),
   };
+}
+
+/**
+ * Step 23: the price model for a quote — 1 for quotes whose saved lock is
+ * from before Step 23, 2 otherwise (a quote with no lock yet gets model 2
+ * when its lock is saved). Read-only.
+ */
+export async function quotePriceModel(quoteNo: string): Promise<1 | 2> {
+  try {
+    const row = await one<{ price_lock: unknown }>(
+      `SELECT price_lock FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+      [quoteNo],
+    );
+    const lock = parseJson(row?.price_lock);
+    if (lock && lock.charges && typeof lock.charges === "object") {
+      return lock.charges.model === 2 ? 2 : 1;
+    }
+  } catch {
+    // migration 031 not run: today's rules
+  }
+  return 2;
 }
 
 /**
@@ -131,7 +174,7 @@ export async function lockedChargeSettings(
   liveSettings: unknown,
   canSave: boolean,
 ): Promise<ChargeSettings> {
-  const live = pickCharges(liveSettings);
+  const live = pickCharges(liveSettings, 2);
   try {
     const row = await one<{ price_lock: unknown }>(
       `SELECT price_lock FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
@@ -139,7 +182,8 @@ export async function lockedChargeSettings(
     );
     const lock = parseJson(row?.price_lock);
     if (lock && lock.charges && typeof lock.charges === "object") {
-      return pickCharges(lock.charges);
+      // A lock saved before Step 23 has no "model": it stays on model 1.
+      return pickCharges(lock.charges, 1);
     }
     if (row && canSave) {
       await q(
