@@ -2,9 +2,9 @@
 //
 // POST /api/quote/boxes-only — create a priced "Boxes only" quote (Corrugated
 // Step 4): no foam, no layout editor. Pricing reuses Step 3:
-//   custom RSC   -> corrugated engine with board grade + print (fallback:
-//                   nearest stock + needs_review)
-//   custom mailer-> nearest stock (+ print adder)
+//   custom box   -> corrugated engine with board grade + print (fallback:
+//                   nearest stock + needs_review). Step 27: any style in
+//                   lib/box-styles.ts (die-cut styles add a cutting die)
 //   stock carton -> catalog tier price (+ print adder)
 //   plates       -> plates_usd per box, shown as one line
 // The quote is on the per-color print model (facts.print_spec is always set).
@@ -24,7 +24,8 @@
 //   quote_no, tenant_slug?, quote_source?, sales_rep_slug?,
 //   customer: { name, email, company?, phone? },
 //   qty,
-//   box: { sku } | { L, W, D, style: "rsc"|"mailer", grade_id? },
+//   box: { sku } | { L, W, D, style, grade_id?, cells_across?, cells_down? },
+//        style: rsc | hsc | fol | mailer | tray | pad | partition (Step 27)
 //   print_spec?: { colors: ("spot"|"flood")[], sides: 1|2 },
 //   qty_breaks?: number[],   // up to 3 more quantities to compare (Step 5)
 //   run_method?: "plates" | "digital",  // Step 15, staff only; else auto
@@ -44,6 +45,7 @@ import { findOrCreateCustomer } from "@/app/lib/customers";
 import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { tenantOffersQuoteType } from "@/lib/quote-types-server";
+import { parseCustomBoxInput, type CustomBoxInput } from "@/lib/box-styles";
 import {
   customSelectionInsert,
   repriceQuoteBoxes,
@@ -111,17 +113,13 @@ export async function POST(req: NextRequest) {
     // ---- Box ----
     const box = (b.box && typeof b.box === "object" ? b.box : {}) as Record<string, any>;
     const sku = str(box.sku, 80);
-    let custom: { L: number; W: number; D: number; style: "rsc" | "mailer"; gradeId: number | null } | null = null;
+    let custom: (CustomBoxInput & { gradeId: number | null }) | null = null;
     if (!sku) {
-      const L = Number(box.L);
-      const W = Number(box.W);
-      const D = Number(box.D);
-      if (![L, W, D].every((n) => Number.isFinite(n) && n > 0 && n <= 1000)) {
-        return bad("invalid_dims", "Enter the box inside length, width and depth.");
-      }
-      const style: "rsc" | "mailer" = String(box.style || "").toLowerCase() === "mailer" ? "mailer" : "rsc";
+      // Step 27: any style (pads have no depth; partitions need cells).
+      const parsed = parseCustomBoxInput(box);
+      if (!parsed.ok) return bad("invalid_dims", parsed.message);
       const g = Number(box.grade_id);
-      custom = { L, W, D, style, gradeId: Number.isInteger(g) && g > 0 ? g : null };
+      custom = { ...parsed.value, gradeId: Number.isInteger(g) && g > 0 ? g : null };
     }
 
     const print: PrintSpec = parsePrintSpec(b.print_spec) ?? { colors: [], sides: 1 };
@@ -257,6 +255,7 @@ export async function POST(req: NextRequest) {
         gradeId: custom.gradeId,
         print,
         method: runMethod,
+        cells: custom.cells,
       });
       const ins = customSelectionInsert({
         quoteId: quote.id,
@@ -267,6 +266,7 @@ export async function POST(req: NextRequest) {
         style: custom.style,
         qty,
         resolved,
+        cells: custom.cells,
       });
       await q(ins.text, ins.values);
     } else if (stockBox) {

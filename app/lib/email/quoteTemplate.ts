@@ -96,7 +96,7 @@ export type TemplateInput = {
   dieCuttingCharge?: number | null;
   dieCutTriggerQty?: number | null;
   // Step 23: cutting / lamination lines (replace the single die-cut line when present)
-  processLines?: { label: string; amount: number; note?: string | null }[] | null;
+  processLines?: { key?: string; label: string; amount: number; note?: string | null }[] | null;
   grandTotal?: number | null;
   shippingEstimate?: number | null;   // rough shipping estimate, already capped
   shippingIsCapped?: boolean;
@@ -815,7 +815,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
                         </tr>` : ""}
                         ${processLinesVal.length > 0 ? processLinesVal.map((l) => `<tr>
                           <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Machining &ndash; ${escText(l.label)}</div>
+                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${l.key === "box_die" ? "Packaging" : "Machining"} &ndash; ${escText(l.label)}</div>
                             ${l.note ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">${escText(l.note)}</div>` : ""}
                           </td>
                           <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">

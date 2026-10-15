@@ -4,7 +4,8 @@
 // example (12 x 10 x 8 C-flute, 1-color spot, placeholder rates).
 // Run: npm run test:corrugated   (= npx --yes tsx scripts/test-corrugated-price.ts)
 
-import { DEFAULT_FLUTES, computeSheet } from "../lib/corrugated-blank";
+import { DEFAULT_FLUTES, computeSheet, computeStyleBlank } from "../lib/corrugated-blank";
+import { parseBoxStyle, parseCells, parseCustomBoxInput } from "../lib/box-styles";
 import {
   describePrintSpec,
   parsePrintSpec,
@@ -41,6 +42,12 @@ const settings: BoxSettings = {
   sheet_max_width_in: 0,
   sheet_max_up: 6,
   sheet_min_msf: 0,
+  // Step 27: other styles (0 here; set in the style tests).
+  diecut_per_m: 0,
+  die_base_usd: 0,
+  die_per_in_usd: 0,
+  pad_per_m: 0,
+  partition_per_m: 0,
   joint_type: "glued",
   flap_pct: 50,
   round_to_in: 0.0625,
@@ -246,6 +253,90 @@ check(
 );
 const s4 = priceRscBox({ ...base, settings: { ...sh1, sheet_max_length_in: 40, sheet_max_width_in: 40 }, quantities: [1000] });
 check("blank too big for the largest sheet warns", s4.ok && s4.sheet?.oversize === true && s4.warnings.some((w) => w.includes("largest sheet")), s4.ok ? s4.warnings : s4);
+
+// 8. Step 27: more styles
+const lay = { joint_type: "glued" as const, flap_pct: 50, round_to_in: 0.0625, edge_trim_in: 0, waste_pct: 10 };
+const bHsc = computeStyleBlank("hsc", { L: 12, W: 10, D: 8 }, C, lay);
+check("HSC 12x10x8: 46.125 x 13.3125 (one set of flaps)", bHsc.length_in === 46.125 && bHsc.width_in === 13.3125, bHsc);
+const bFol = computeStyleBlank("fol", { L: 12, W: 10, D: 8 }, C, lay);
+check("FOL 12x10x8: 46.125 x 28.375 (full-width flaps)", bFol.length_in === 46.125 && bFol.width_in === 28.375, bFol);
+const bRsc = computeStyleBlank("rsc", { L: 12, W: 10, D: 8 }, C, lay);
+check("RSC through computeStyleBlank unchanged", bRsc.length_in === 46.125 && bRsc.width_in === 18.375 && bRsc.rule_in === 0, bRsc);
+const bPad = computeStyleBlank("pad", { L: 12, W: 10, D: 0 }, C, lay);
+check("pad 12 x 10", bPad.length_in === 12 && bPad.width_in === 10 && near(bPad.sqft_each, 0.8333, 0.0001), bPad);
+const bTray = computeStyleBlank("tray", { L: 12, W: 10, D: 8 }, C, lay);
+check("tray 12x10x8: 28.375 x 26.375, rule 185.5", bTray.length_in === 28.375 && bTray.width_in === 26.375 && bTray.rule_in === 185.5, bTray);
+const bMail = computeStyleBlank("mailer", { L: 12, W: 10, D: 3 }, C, lay);
+check("mailer 12x10x3: 24.75 x 32.125, rule 237.75", bMail.length_in === 24.75 && bMail.width_in === 32.125 && bMail.rule_in === 237.75, bMail);
+const bPart = computeStyleBlank("partition", { L: 12, W: 10, D: 6 }, C, lay, { across: 3, down: 4 });
+check(
+  "partition 12x10x6, 3 x 4 cells: 3 long 12x6 + 2 short 10x6 = 2.3333 sq ft, 5 pieces",
+  bPart.pieces.length === 2 && bPart.pieces[0].count === 3 && bPart.pieces[1].count === 2 && near(bPart.sqft_each, 2.3333, 0.0001) && bPart.pieces_per_box === 5,
+  bPart,
+);
+
+const st = { ...settings, diecut_per_m: 100, die_base_usd: 150, die_per_in_usd: 0.5, pad_per_m: 40, partition_per_m: 200 };
+const t1 = priceRscBox({ ...base, settings: st, style: "tray", quantities: [1000] });
+if (!t1.ok) {
+  check("tray prices", false, t1);
+} else {
+  const q = t1.quantities[0];
+  // die = (150 + 185.5 x 0.50) x 1.30 = 315.58
+  check("tray: die line $315.58, die-cut converting $100", t1.die_line_usd === 315.58 && q.die_line_usd === 315.58 && q.converting_usd === 100, { die: t1.die_line_usd, q });
+  check("tray: no die warning with rates set", !t1.warnings.some((w) => w.includes("die")), t1.warnings);
+}
+const t0 = priceRscBox({ ...base, style: "tray", quantities: [1000] });
+check("tray with $0 die rates warns", t0.ok && t0.warnings.includes("Cutting die cost is $0.") && t0.warnings.includes("Die-cut converting cost is $0."), t0.ok ? t0.warnings : t0);
+const t2 = priceRscBox({ ...base, settings: { ...st, digital_under_qty: 50, cad_cut_per_box_usd: 2 }, style: "tray", quantities: [25] });
+check("tray short run: CAD cut, no die", t2.ok && t2.quantities[0].method === "digital" && t2.quantities[0].die_line_usd === 0, t2.ok ? t2.quantities[0] : t2);
+const t3 = priceRscBox({ ...base, settings: { ...st, min_order_usd: 1000 }, style: "tray", quantities: [10], print: { colors: [], sides: 1 } });
+check(
+  "minimum counts the die: box total = 1000 - 315.58",
+  t3.ok && t3.quantities[0].min_applied && t3.quantities[0].box_total_usd === 684.42,
+  t3.ok ? t3.quantities[0] : t3,
+);
+const p1 = priceRscBox({ ...base, settings: st, style: "partition", cells: { across: 3, down: 4 }, dims: { L: 12, W: 10, D: 6 }, quantities: [1000] });
+if (!p1.ok) {
+  check("partition prices", false, p1);
+} else {
+  const q = p1.quantities[0];
+  check("partition: $200 per 1,000 sets, unprinted, warns", q.converting_usd === 200 && p1.colors === 0 && p1.plates_line_usd === 0 && p1.warnings.includes("Partitions are priced unprinted."), p1);
+  // board = 2.3333 x 1.1 x 1000 / 1000 x 85 = 218.17
+  check("partition board $218.17", near(q.board_usd, 218.17), q);
+}
+const p0 = priceRscBox({ ...base, style: "partition", cells: null, dims: { L: 12, W: 10, D: 6 } });
+check("partition without cells -> invalid_cells", !p0.ok && p0.error === "invalid_cells", p0);
+const p2 = priceRscBox({
+  ...base,
+  settings: { ...st, digital_under_qty: 50, cad_cut_per_box_usd: 2 },
+  style: "partition",
+  cells: { across: 3, down: 4 },
+  dims: { L: 12, W: 10, D: 6 },
+  quantities: [10],
+});
+check("partition short run: CAD cut per piece (10 sets x 5 x $2 = $100)", p2.ok && p2.quantities[0].converting_usd === 100, p2.ok ? p2.quantities[0] : p2);
+const p3 = priceRscBox({
+  ...base,
+  settings: { ...st, board_method: "sheet" },
+  style: "partition",
+  cells: { across: 3, down: 4 },
+  dims: { L: 12, W: 10, D: 6 },
+  quantities: [100],
+});
+// one up: 330 long-strip sheets + 220 short-strip sheets
+check("partition sheet costing: sheets per strip type (330 + 220)", p3.ok && p3.quantities[0].sheets === 550 && p3.piece_sheets.length === 2, p3.ok ? p3.quantities[0] : p3);
+const pd = priceRscBox({ ...base, settings: st, style: "pad", dims: { L: 12, W: 10, D: 0 }, quantities: [1000] });
+check("pad: no depth needed, pad cutting $40", pd.ok && pd.quantities[0].converting_usd === 40, pd.ok ? pd.quantities[0] : pd);
+const hs = priceRscBox({ ...base, settings: st, style: "hsc", quantities: [1000] });
+check("HSC uses RSC converting ($60), no die", hs.ok && hs.quantities[0].converting_usd === 60 && hs.die_line_usd === 0, hs.ok ? hs.quantities[0] : hs);
+check("parseBoxStyle", parseBoxStyle("HSC") === "hsc" && parseBoxStyle("Mailer box") === "mailer" && parseBoxStyle("bogus") === null);
+check("parseCells", parseCells(3, 4)?.across === 3 && parseCells(1, 1) === null && parseCells(0, 4) === null && parseCells(2.5, 2) === null);
+const ci = parseCustomBoxInput({ L: 12, W: 10, style: "pad" });
+check("pad input: depth not needed, stored as 0", ci.ok && ci.value.D === 0 && ci.value.style === "pad", ci);
+const cp = parseCustomBoxInput({ L: 12, W: 10, D: 6, style: "partition" });
+check("partition input without cells is refused", !cp.ok, cp);
+const cr = parseCustomBoxInput({ L: 12, W: 10, D: 8 });
+check("no style = RSC (old callers)", cr.ok && cr.value.style === "rsc", cr);
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

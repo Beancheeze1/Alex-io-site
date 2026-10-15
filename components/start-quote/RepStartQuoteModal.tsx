@@ -38,9 +38,10 @@ import BoxSizesEditor, {
   extraSizesProblem,
   type ExtraBoxSize,
 } from "@/components/start-quote/BoxSizesEditor";
+import { BOX_STYLES, boxStyleInfo, boxStyleOrRsc, parseCells, type BoxStyle } from "@/lib/box-styles";
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
-type BoxStyle = "mailer" | "rsc";
+// Step 27: BoxStyle comes from lib/box-styles (boxes only: every style).
 type FoamConfig = "bottom_top" | "bottom_only" | "custom";
 
 const DEFAULT_TOP_PAD_IN = 1.0;
@@ -342,6 +343,13 @@ export default function RepStartQuoteModal({
   const [boxW, setBoxW] = React.useState("");
   const [boxD, setBoxD] = React.useState("");
   const [boxStyle, setBoxStyle] = React.useState<BoxStyle>("mailer");
+  // Step 27: partition sets (boxes only).
+  const [cellsAcross, setCellsAcross] = React.useState("2");
+  const [cellsDown, setCellsDown] = React.useState("2");
+  // Step 27: foam + box only offers mailer and RSC.
+  React.useEffect(() => {
+    if (quoteType === "complete_pack" && boxStyle !== "rsc" && boxStyle !== "mailer") setBoxStyle("rsc");
+  }, [quoteType, boxStyle]);
   const [printed, setPrinted] = React.useState(false);
   // Per-color printing (Corrugated Step 3B); `printed` kept in sync.
   const [printColors, setPrintColors] = React.useState<("spot" | "flood")[]>([]);
@@ -464,7 +472,8 @@ export default function RepStartQuoteModal({
         if (cancelled) return;
 
         if (json?.ok) {
-          const list = boxStyle === "rsc" ? json.candidatesRsc : json.candidatesMailer;
+          // Step 27: the stock catalog has RSCs and mailers only.
+          const list = boxStyle === "rsc" ? json.candidatesRsc : boxStyle === "mailer" ? json.candidatesMailer : [];
           setStockCandidates(Array.isArray(list) ? list : []);
         } else {
           setStockCandidates([]);
@@ -634,6 +643,8 @@ export default function RepStartQuoteModal({
     setBoxW("");
     setBoxD("");
     setBoxStyle("mailer");
+    setCellsAcross("2");
+    setCellsDown("2");
     setPrinted(false);
     setPrintColors([]);
     setPrintSides(1);
@@ -747,9 +758,10 @@ export default function RepStartQuoteModal({
             : {
                 L: toNumOrNull(boxL),
                 W: toNumOrNull(boxW),
-                D: toNumOrNull(boxD),
+                D: boxStyleInfo(boxStyle).usesDepth ? toNumOrNull(boxD) : 0,
                 style: boxStyle,
-                grade_id: boxStyle === "rsc" && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
+                ...(boxStyleInfo(boxStyle).cells ? { cells_across: Number(cellsAcross), cells_down: Number(cellsDown) } : {}),
+                grade_id: /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
               };
         const repCustomer = {
           name: customerName.trim(),
@@ -1249,22 +1261,38 @@ export default function RepStartQuoteModal({
                             <Field label="Box W (in)">
                               <Input value={boxW} onChange={setBoxW} placeholder="12" />
                             </Field>
-                            <Field label="Box D (in)">
-                              <Input value={boxD} onChange={setBoxD} placeholder="6" />
-                            </Field>
+                            {quoteType !== "boxes_only" || boxStyleInfo(boxStyle).usesDepth ? (
+                              <Field label={quoteType === "boxes_only" && boxStyleInfo(boxStyle).cells ? "Height (in)" : "Box D (in)"}>
+                                <Input value={boxD} onChange={setBoxD} placeholder="6" />
+                              </Field>
+                            ) : null}
                           </div>
 
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <Field label="Box style">
                               <select
                                 value={boxStyle}
-                                onChange={(e) => setBoxStyle(e.target.value as BoxStyle)}
+                                onChange={(e) => setBoxStyle(boxStyleOrRsc(e.target.value))}
                                 className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                               >
-                                <option value="mailer" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Mailer</option>
-                                <option value="rsc" style={{ color: "#0f172a", backgroundColor: "#fff" }}>RSC</option>
+                                {/* Step 27: boxes only offers every style; foam + box keeps mailer / RSC. */}
+                                {BOX_STYLES.filter((st) => quoteType === "boxes_only" || st.key === "mailer" || st.key === "rsc").map((st) => (
+                                  <option key={st.key} value={st.key} style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                    {st.key === "mailer" ? "Mailer" : st.key === "rsc" ? "RSC" : st.label}
+                                  </option>
+                                ))}
                               </select>
                             </Field>
+                            {quoteType === "boxes_only" && boxStyleInfo(boxStyle).cells ? (
+                              <div className="grid grid-cols-2 gap-3">
+                                <Field label="Cells across">
+                                  <Input value={cellsAcross} onChange={setCellsAcross} placeholder="3" />
+                                </Field>
+                                <Field label="Cells down">
+                                  <Input value={cellsDown} onChange={setCellsDown} placeholder="4" />
+                                </Field>
+                              </div>
+                            ) : null}
                             {quoteType === "complete_pack" ? (
                               <Field label="Foam config">
                                 <select
@@ -1280,6 +1308,14 @@ export default function RepStartQuoteModal({
                             ) : null}
                           </div>
 
+                          {boxStyle !== "rsc" && boxStyle !== "mailer" ? (
+                            <div className="mt-4 text-xs text-[var(--text-muted)]" data-custom-style-note>
+                              Custom {boxStyleInfo(boxStyle).label.toLowerCase()}: priced from your corrugated rates
+                              {boxStyleInfo(boxStyle).cells && !parseCells(Number(cellsAcross), Number(cellsDown))
+                                ? ". Enter cells across and down (at least 2 cells)."
+                                : "."}
+                            </div>
+                          ) : (
                           <div className="mt-4">
                             <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                               BOX SELECTION
@@ -1373,6 +1409,7 @@ export default function RepStartQuoteModal({
                               </div>
                             )}
                           </div>
+                          )}
 
                           {quoteType === "complete_pack" ? (
                             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -1387,7 +1424,9 @@ export default function RepStartQuoteModal({
                             </div>
                           ) : null}
 
-                          {boxStyle === "rsc" && boxChoice === "custom" && boxGrades.length > 0 ? (
+                          {((boxStyle === "rsc" && boxChoice === "custom") ||
+                            (quoteType === "boxes_only" && (boxChoice === "custom" || (boxStyle !== "rsc" && boxStyle !== "mailer")))) &&
+                          boxGrades.length > 0 ? (
                             <div className="mt-4">
                               <Field label="Board grade">
                                 <select
@@ -1501,8 +1540,8 @@ export default function RepStartQuoteModal({
                                 size1Summary={
                                   boxChoice === "stock" && selectedStockSku
                                     ? `stock ${selectedStockSku}${qty ? `, qty ${qty}` : ""}`
-                                    : toNumOrNull(boxL) && toNumOrNull(boxW) && toNumOrNull(boxD)
-                                      ? `${boxL} x ${boxW} x ${boxD} in ${boxStyle.toUpperCase()}${qty ? `, qty ${qty}` : ""}`
+                                    : toNumOrNull(boxL) && toNumOrNull(boxW) && (toNumOrNull(boxD) || !boxStyleInfo(boxStyle).usesDepth)
+                                      ? `${boxL} x ${boxW}${boxStyleInfo(boxStyle).usesDepth ? ` x ${boxD}` : ""} in ${boxStyleInfo(boxStyle).label}${qty ? `, qty ${qty}` : ""}`
                                       : undefined
                                 }
                               />
@@ -1862,10 +1901,12 @@ export default function RepStartQuoteModal({
                               value={
                                 boxChoice === "stock" && selectedStockSku
                                   ? `Stock ${selectedStockSku}`
-                                  : `Custom ${boxL || "?"} × ${boxW || "?"} × ${boxD || "?"} in (${boxStyle.toUpperCase()})`
+                                  : `Custom ${boxL || "?"} × ${boxW || "?"}${boxStyleInfo(boxStyle).usesDepth ? ` × ${boxD || "?"}` : ""} in (${boxStyleInfo(boxStyle).label}${
+                                      boxStyleInfo(boxStyle).cells ? `, ${cellsAcross} × ${cellsDown} cells` : ""
+                                    })`
                               }
                             />
-                            {boxChoice !== "stock" && boxStyle === "rsc" ? (
+                            {boxChoice !== "stock" ? (
                               <ReviewRow
                                 label="Board grade"
                                 value={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Shop default"}

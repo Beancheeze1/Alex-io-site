@@ -17,6 +17,7 @@ import {
   quoteRunMethod,
   resolveCustomSelection,
 } from "@/app/lib/packaging-selection";
+import { parseBoxStyle, parseCells } from "@/lib/box-styles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,15 +114,19 @@ export async function POST(req: NextRequest) {
       custom_height_in: string | number;
       custom_style: string;
       qty: number;
+      cells_across: number | string | null;
+      cells_down: number | string | null;
     }>(
-      `SELECT id, custom_length_in, custom_width_in, custom_height_in, custom_style, qty
+      `SELECT id, custom_length_in, custom_width_in, custom_height_in, custom_style, qty,
+              custom_cells_across AS cells_across, custom_cells_down AS cells_down
          FROM public.quote_box_selections
         WHERE quote_id = $1 AND kind = 'custom'
         LIMIT 1`,
       [quote.id],
     );
-    if (!row || String(row.custom_style || "").toLowerCase() !== "rsc") {
-      return json({ ok: false, error: "no_custom_rsc", message: "This quote has no custom RSC box." }, 400);
+    // Step 27: every engine-priced style takes a board grade.
+    if (!row || !parseBoxStyle(row.custom_style)) {
+      return json({ ok: false, error: "no_custom_rsc", message: "This quote has no custom box priced from board grades." }, 400);
     }
 
     const resolved = await resolveCustomSelection(
@@ -131,7 +136,12 @@ export async function POST(req: NextRequest) {
       row.custom_style,
       Number(row.qty) || 1,
       Number(quote.tenant_id),
-      { gradeId, print: await printSpecForQuote(quote.quote_no), method: await quoteRunMethod(quote.quote_no) },
+      {
+        gradeId,
+        print: await printSpecForQuote(quote.quote_no),
+        method: await quoteRunMethod(quote.quote_no),
+        cells: parseCells(row.cells_across, row.cells_down),
+      },
     );
     const upd = customSelectionUpdate(row.id, resolved);
     const saved = await q(upd.text, upd.values);

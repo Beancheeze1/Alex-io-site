@@ -11,7 +11,12 @@
 // rates. If the engine can't price it (grade has no cost per MSF, no default
 // grade, settings missing), it falls back to the nearest stock box's tier
 // price and flags the row needs_review with a staff-only note.
-// Custom mailers keep nearest-stock pricing (die-cut styles: Phase 2).
+// Step 27: every style in lib/box-styles.ts (HSC, FOL, die-cut mailer and
+// tray, pads, partition sets) is priced by the same engine; die-cut styles
+// also get a one-time cutting die (tooling_usd, its own line like plates).
+// If the engine can't price it, RSC / HSC / FOL / mailer fall back to the
+// nearest stock box (needs_review); trays, pads and partitions get no price
+// (needs_review). An unknown style keeps the old nearest-stock price.
 //
 // Printing (Step 3B): quotes on the per-color model carry
 // facts.print_spec = { colors, sides }. Engine-priced RSC includes print in its
@@ -44,6 +49,7 @@ import {
   type RunMethod,
 } from "@/lib/corrugated-price";
 import { loadFacts } from "@/app/lib/memory";
+import { customBoxBaseDesc, parseBoxStyle, type PartitionCells } from "@/lib/box-styles";
 
 export type StockBoxRow = {
   id: number;
@@ -79,6 +85,7 @@ export type CustomResolvedSelection = ResolvedSelection &
     needs_review: boolean;
     pricing_note: string | null;
     pricing_detail: Record<string, unknown> | null;
+    tooling_usd: number | null; // Step 27: one-time cutting die (die-cut styles on the press)
   };
 
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -283,20 +290,27 @@ export async function resolveCustomSelection(
   customStyle: string,
   qty: number,
   tenantId: number | null = null,
-  opts: { gradeId?: number | null; print?: PrintSpec | null; method?: RunMethod | null } = {},
+  opts: {
+    gradeId?: number | null;
+    print?: PrintSpec | null;
+    method?: RunMethod | null;
+    cells?: PartitionCells | null; // Step 27: partition sets
+  } = {},
 ): Promise<CustomResolvedSelection> {
   const L = customLengthIn;
   const W = customWidthIn;
   const H = customHeightIn;
   const qtyForPrice = Math.max(1, Math.round(qty || 1));
-  const baseDesc = `Custom box ${L} x ${W} x ${H} in`;
-  const style = String(customStyle || "").toLowerCase();
+  // Step 27: any known style is engine-priced.
+  const style = parseBoxStyle(customStyle);
+  const cells = style === "partition" ? opts.cells ?? null : null;
+  const baseDesc = customBoxBaseDesc(style, L, W, H, cells);
   const print = opts.print ?? null;
   const printed = !!print && print.colors.length > 0;
   const method = opts.method ?? null; // Step 15: null = auto by quantity
   const printDesc = (m: RunMethod | null | undefined) => (printed ? ` · ${describePrintSpec(print, m)}` : "");
 
-  if (style !== "rsc" || !tenantId) {
+  if (!style || !tenantId) {
     const p = await nearestStockPrice(L, W, H, qtyForPrice, tenantId);
     const adder = printed ? await printAdderFor(tenantId, qtyForPrice, print, method, { L, W, H }) : null;
     const priced = withAdder(p.unit, p.extended, qtyForPrice, adder);
@@ -311,6 +325,7 @@ export async function resolveCustomSelection(
       needs_review: false,
       pricing_note: adder && adder.warnings.length ? `Check corrugated print rates: ${adder.warnings.join(" ")}` : null,
       pricing_detail: adder ? { run_method: adder.method } : null,
+      tooling_usd: null,
     };
   }
 
@@ -320,6 +335,8 @@ export async function resolveCustomSelection(
     colors: print ? print.colors : [],
     sides: (print ? print.sides : 1) as 1 | 2,
     method,
+    style,
+    cells,
   };
   let engine: CustomRscQuote | null = null;
   let engineError: string | null = null;
@@ -336,7 +353,7 @@ export async function resolveCustomSelection(
 
   const gradeId = engine?.grade?.id ?? null;
   const gradeName = engine?.grade?.name ?? null;
-  const rscDesc = gradeName ? `${baseDesc} (rsc, ${gradeName})` : `${baseDesc} (rsc)`;
+  const rscDesc = gradeName ? `${baseDesc} (${style}, ${gradeName})` : `${baseDesc} (${style})`;
 
   if (engine && engine.ok) {
     const qp = engine.quantities[0];
@@ -359,13 +376,22 @@ export async function resolveCustomSelection(
         // Step 26: board bought as sheets (null on blank pricing)
         board_method: engine.board_method,
         sheet: engine.sheet,
+        // Step 27
+        style,
+        ...(cells ? { cells } : {}),
+        ...(engine.blank.rule_in > 0 ? { die_rule_in: engine.blank.rule_in, die_line_usd: qp.die_line_usd } : {}),
       },
+      tooling_usd: qp.die_line_usd > 0 ? qp.die_line_usd : null,
     };
   }
 
   // Fallback (approved): nearest stock price (+ print adder), flagged for review.
-  const p = await nearestStockPrice(L, W, H, qtyForPrice, tenantId);
-  const adder = printed ? await printAdderFor(tenantId, qtyForPrice, print, method, { L, W, H }) : null;
+  // Step 27: only for boxes a stock box can stand in for.
+  const stockStandIn = style === "rsc" || style === "hsc" || style === "fol" || style === "mailer";
+  const p = stockStandIn
+    ? await nearestStockPrice(L, W, H, qtyForPrice, tenantId)
+    : { unit: null as number | null, extended: null as number | null };
+  const adder = printed && stockStandIn ? await printAdderFor(tenantId, qtyForPrice, print, method, { L, W, H }) : null;
   const priced = withAdder(p.unit, p.extended, qtyForPrice, adder);
   const reason = engine && !engine.ok ? engine.message : engineError ?? "Corrugated pricing is unavailable.";
   return {
@@ -384,6 +410,7 @@ export async function resolveCustomSelection(
         : adder
           ? { run_method: adder.method }
           : null,
+    tooling_usd: null,
   };
 }
 
@@ -393,7 +420,8 @@ export const CUSTOM_SELECTION_RETURNING = `
   custom_length_in, custom_width_in, custom_height_in, custom_style,
   description, qty, created_at, unit_price_usd, extended_price_usd,
   board_grade_id, board_grade_name, pricing_source, needs_review, pricing_note,
-  print_colors, print_sides, plates_usd`;
+  print_colors, print_sides, plates_usd,
+  tooling_usd, custom_cells_across, custom_cells_down`;
 
 /** INSERT for a kind='custom' selection row from a resolved price. */
 export function customSelectionInsert(args: {
@@ -405,6 +433,7 @@ export function customSelectionInsert(args: {
   style: string;
   qty: number;
   resolved: CustomResolvedSelection;
+  cells?: PartitionCells | null; // Step 27: partition sets
 }): { text: string; values: unknown[] } {
   const r = args.resolved;
   return {
@@ -414,10 +443,11 @@ export function customSelectionInsert(args: {
          custom_length_in, custom_width_in, custom_height_in, custom_style,
          description, qty, unit_price_usd, extended_price_usd,
          board_grade_id, board_grade_name, pricing_source, needs_review, pricing_note, pricing_detail,
-         print_colors, print_sides, print_usd, plates_usd)
+         print_colors, print_sides, print_usd, plates_usd,
+         tooling_usd, custom_cells_across, custom_cells_down)
       VALUES
         ($1, $2, 'custom', NULL, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb,
-         $17::jsonb, $18, $19, $20)
+         $17::jsonb, $18, $19, $20, $21, $22, $23)
       RETURNING ${CUSTOM_SELECTION_RETURNING}`,
     values: [
       args.quoteId, args.quoteNo, args.L, args.W, args.H, args.style,
@@ -426,6 +456,7 @@ export function customSelectionInsert(args: {
       r.pricing_detail === null ? null : JSON.stringify(r.pricing_detail),
       r.print_colors === null ? null : JSON.stringify(r.print_colors),
       r.print_sides, r.print_usd, r.plates_usd,
+      r.tooling_usd, args.cells?.across ?? null, args.cells?.down ?? null,
     ],
   };
 }
@@ -450,7 +481,8 @@ export function customSelectionUpdate(
              print_colors = $11::jsonb,
              print_sides = $12,
              print_usd = $13,
-             plates_usd = $14
+             plates_usd = $14,
+             tooling_usd = $15
        WHERE id = $1
       RETURNING ${CUSTOM_SELECTION_RETURNING}`,
     values: [
@@ -458,9 +490,16 @@ export function customSelectionUpdate(
       r.board_grade_id, r.board_grade_name, r.pricing_source, r.needs_review, r.pricing_note,
       r.pricing_detail === null ? null : JSON.stringify(r.pricing_detail),
       r.print_colors === null ? null : JSON.stringify(r.print_colors),
-      r.print_sides, r.print_usd, r.plates_usd,
+      r.print_sides, r.print_usd, r.plates_usd, r.tooling_usd,
     ],
   };
+}
+
+/** Step 27: a custom row's partition cells (null for other styles / bad data). */
+function rowCells(across: unknown, down: unknown): PartitionCells | null {
+  const a = Number(across);
+  const d = Number(down);
+  return Number.isInteger(a) && Number.isInteger(d) && a >= 1 && d >= 1 && a * d >= 2 ? { across: a, down: d } : null;
 }
 
 /**
@@ -488,6 +527,8 @@ export async function repriceQuoteBoxes(
     board_grade_id: string | number | null;
     print_colors: unknown;
     print_sides: number | string | null;
+    custom_cells_across: number | string | null;
+    custom_cells_down: number | string | null;
     b_id: number | null;
     sku: string | null;
     vendor: string | null;
@@ -500,6 +541,7 @@ export async function repriceQuoteBoxes(
     `SELECT qbs.id, qbs.kind, qbs.qty,
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
             qbs.board_grade_id, qbs.print_colors, qbs.print_sides,
+            qbs.custom_cells_across, qbs.custom_cells_down,
             b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
             b.inside_length_in, b.inside_width_in, b.inside_height_in
        FROM public.quote_box_selections qbs
@@ -524,7 +566,12 @@ export async function repriceQuoteBoxes(
         String(row.custom_style || ""),
         qty,
         tenantId,
-        { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print, method },
+        {
+          gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id),
+          print,
+          method,
+          cells: rowCells(row.custom_cells_across, row.custom_cells_down),
+        },
       );
       const upd = customSelectionUpdate(row.id, resolved);
       await q(upd.text, upd.values);
@@ -589,7 +636,8 @@ export type BoxBreakPrice = {
   qty: number;
   boxes_usd: number | null; // all boxes on the quote at this qty (null if any box has no price)
   plates_usd: number; // one-time plates, once per quote
-  total_usd: number | null; // boxes + plates
+  tooling_usd: number; // Step 27: one-time cutting dies
+  total_usd: number | null; // boxes + plates + dies
   unit_usd: number | null; // per box, only when the quote has exactly one box row
 };
 
@@ -618,6 +666,8 @@ export async function priceQuoteBoxesAtQtys(
     board_grade_id: string | number | null;
     print_colors: unknown;
     print_sides: number | string | null;
+    custom_cells_across: number | string | null;
+    custom_cells_down: number | string | null;
     b_id: number | null;
     sku: string | null;
     vendor: string | null;
@@ -630,6 +680,7 @@ export async function priceQuoteBoxesAtQtys(
     `SELECT qbs.id, qbs.kind,
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
             qbs.board_grade_id, qbs.print_colors, qbs.print_sides,
+            qbs.custom_cells_across, qbs.custom_cells_down,
             b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
             b.inside_length_in, b.inside_width_in, b.inside_height_in
        FROM public.quote_box_selections qbs
@@ -647,6 +698,7 @@ export async function priceQuoteBoxesAtQtys(
     const qty = Math.max(1, Math.round(Number(rawQty) || 1));
     let boxes: number | null = 0;
     let plates = 0;
+    let tooling = 0;
     let unit: number | null = null;
     let priced = 0;
 
@@ -656,6 +708,7 @@ export async function priceQuoteBoxesAtQtys(
       let ext: number | null = null;
       let u: number | null = null;
       let pl: number | null = null;
+      let tl: number | null = null;
 
       if (row.kind === "custom") {
         const r = await resolveCustomSelection(
@@ -665,11 +718,17 @@ export async function priceQuoteBoxesAtQtys(
           String(row.custom_style || ""),
           qty,
           tenantId,
-          { gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id), print, method },
+          {
+            gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id),
+            print,
+            method,
+            cells: rowCells(row.custom_cells_across, row.custom_cells_down),
+          },
         );
         ext = r.extended_price_usd;
         u = r.unit_price_usd;
         pl = r.plates_usd;
+        tl = r.tooling_usd;
       } else if (row.b_id != null) {
         const base = await resolveStockSelection(
           {
@@ -700,6 +759,7 @@ export async function priceQuoteBoxesAtQtys(
       priced += 1;
       boxes = boxes == null || ext == null ? null : r2(boxes + ext);
       plates = r2(plates + (pl ?? 0));
+      tooling = r2(tooling + (tl ?? 0));
       unit = u;
     }
 
@@ -707,7 +767,8 @@ export async function priceQuoteBoxesAtQtys(
       qty,
       boxes_usd: priced > 0 ? boxes : null,
       plates_usd: plates,
-      total_usd: priced > 0 && boxes != null ? r2(boxes + plates) : null,
+      tooling_usd: tooling,
+      total_usd: priced > 0 && boxes != null ? r2(boxes + plates + tooling) : null,
       unit_usd: priced === 1 ? unit : null,
     });
   }

@@ -18,6 +18,7 @@ import {
   type JointType,
 } from "@/lib/corrugated-blank";
 import { priceRscBox, type BoxPriceResult, type Coverage, type RunMethod } from "@/lib/corrugated-price";
+import type { BoxStyle, PartitionCells } from "@/lib/box-styles";
 
 export type CorrugatedSettings = CorrugatedRates & {
   joint_type: JointType;
@@ -250,13 +251,15 @@ export type CustomRscRequest = {
   colors: Coverage[];
   sides: 1 | 2;
   method?: RunMethod | null; // Step 15: null / missing = auto by quantity
+  style?: BoxStyle; // Step 27: missing = "rsc"
+  cells?: PartitionCells | null; // Step 27: partitions
 };
 
 export type CustomRscQuote = BoxPriceResult & {
   grade?: { id: number; name: string; flute: string };
 };
 
-/** Prices a custom-size RSC from the tenant's saved corrugated settings. */
+/** Prices a custom-size box (any Step 27 style; RSC by default) from the tenant's saved corrugated settings. */
 export async function priceCustomRsc(tenantId: number, req: CustomRscRequest): Promise<CustomRscQuote> {
   const cfg = await loadCorrugated(tenantId);
   const active = cfg.grades.filter((g) => g.active);
@@ -285,6 +288,8 @@ export async function priceCustomRsc(tenantId: number, req: CustomRscRequest): P
     flute,
     settings: cfg.settings,
     method: req.method ?? null,
+    style: req.style ?? "rsc",
+    cells: req.cells ?? null,
   });
   return { ...result, grade: { id: grade.id, name: grade.name, flute: grade.flute } };
 }

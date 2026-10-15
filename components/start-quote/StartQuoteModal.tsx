@@ -23,6 +23,7 @@ import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
 import { QUOTE_TYPE_LABELS } from "@/lib/quote-types";
 import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
+import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } from "@/lib/box-styles";
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -31,7 +32,8 @@ import BoxSizesEditor, {
 } from "@/components/start-quote/BoxSizesEditor";
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
-type BoxStyle = "mailer" | "rsc";
+// Step 27: BoxStyle comes from lib/box-styles (boxes-only offers every style;
+// foam + box keeps the RSC and mailer cards).
 type FoamConfig = "bottom_top" | "bottom_only" | "custom";
 
 const DEFAULT_TOP_PAD_IN = 1.0;
@@ -350,8 +352,11 @@ export default function StartQuoteModal({
     (searchParams.get("box_d") || "").trim(),
   );
   const [boxStyle, setBoxStyle] = React.useState<BoxStyle>(
-    (searchParams.get("box_style") || "").toLowerCase() === "rsc" ? "rsc" : "mailer",
+    parseBoxStyle(searchParams.get("box_style")) ?? "mailer",
   );
+  // Step 27: partition sets (boxes only).
+  const [cellsAcross, setCellsAcross] = React.useState<string>("2");
+  const [cellsDown, setCellsDown] = React.useState<string>("2");
   const [printed, setPrinted] = React.useState<boolean>(
     (searchParams.get("printed") || "").trim() === "1" ||
       (searchParams.get("box_printed") || "").trim() === "1",
@@ -410,7 +415,16 @@ export default function StartQuoteModal({
       cancelled = true;
     };
   }, [quoteType, searchParams]);
-  const customRscBox = boxStyle === "rsc" && !prefillPackagingSku.trim();
+  // Step 27: every custom boxes-only style is engine-priced with a grade;
+  // foam + box keeps the grade picker for RSC only (as before).
+  const customRscBox = !prefillPackagingSku.trim() && (quoteType === "boxes_only" || boxStyle === "rsc");
+  const styleInfo = boxStyleInfo(boxStyle);
+  const usesDepth = quoteType !== "boxes_only" || styleInfo.usesDepth;
+  const partitionCells = quoteType === "boxes_only" && styleInfo.cells ? parseCells(Number(cellsAcross), Number(cellsDown)) : null;
+  // Step 27: foam + box only offers the RSC and mailer cards.
+  React.useEffect(() => {
+    if (quoteType === "complete_pack" && boxStyle !== "rsc" && boxStyle !== "mailer") setBoxStyle("rsc");
+  }, [quoteType, boxStyle]);
 
   // Boxes only (Corrugated Step 4): contact details are collected on the
   // review step, and the quote is created + priced by /api/quote/boxes-only.
@@ -456,7 +470,7 @@ export default function StartQuoteModal({
       if (b.l) setBoxL(String(b.l));
       if (b.w) setBoxW(String(b.w));
       if (b.d) setBoxD(String(b.d));
-      setBoxStyle(String(b.style || "").toLowerCase() === "mailer" ? "mailer" : "rsc");
+      setBoxStyle(parseBoxStyle(b.style) ?? "rsc");
       const colors: ("spot" | "flood")[] = Array.isArray(prefillData.print?.colors)
         ? prefillData.print.colors
             .filter((c: unknown) => c === "spot" || c === "flood")
@@ -652,7 +666,8 @@ export default function StartQuoteModal({
         if (cancelled) return;
 
         if (json?.ok) {
-          const list = boxStyle === "rsc" ? json.candidatesRsc : json.candidatesMailer;
+          // Step 27: the stock catalog has RSCs and mailers only.
+          const list = boxStyle === "rsc" ? json.candidatesRsc : boxStyle === "mailer" ? json.candidatesMailer : [];
           setStockCandidates(Array.isArray(list) ? list : []);
         } else {
           setStockCandidates([]);
@@ -873,11 +888,19 @@ export default function StartQuoteModal({
       ? !!(
           toNumOrNull(boxL) &&
           toNumOrNull(boxW) &&
-          toNumOrNull(boxD) &&
+          (!usesDepth || toNumOrNull(boxD)) &&
           toNumOrNull(boxL)! > FIT_ALLOW_IN &&
-          toNumOrNull(boxW)! > FIT_ALLOW_IN
+          toNumOrNull(boxW)! > FIT_ALLOW_IN &&
+          // Step 27: partition sets need their cells
+          (!(quoteType === "boxes_only" && styleInfo.cells) || !!partitionCells)
         )
       : true;
+  // Step 27: "12x10x8", or "12x10" for pads.
+  const boxSizeText = usesDepth
+    ? normalizeDims3(boxLNum, boxWNum, boxDNum)
+    : boxLNum && boxWNum
+      ? `${boxLNum}x${boxWNum}`
+      : "";
 
   const foamConfigOk = quoteType === "complete_pack" ? !!foamConfig : true;
 
@@ -1324,8 +1347,9 @@ export default function StartQuoteModal({
         : {
             L: boxLNum,
             W: boxWNum,
-            D: boxDNum,
+            D: usesDepth ? boxDNum : 0,
             style: boxStyle,
+            ...(partitionCells ? { cells_across: partitionCells.across, cells_down: partitionCells.down } : {}),
             grade_id: customRscBox && /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null,
           };
       const size1Breaks = boBreaks
@@ -1509,12 +1533,12 @@ export default function StartQuoteModal({
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Box ID</div>
                             <div className="mt-1 text-sm text-[var(--text-primary)]">
-                              {prefillPackagingSku.trim() || normalizeDims3(boxLNum, boxWNum, boxDNum) || "—"}
+                              {prefillPackagingSku.trim() || boxSizeText || "—"}
                             </div>
                           </div>
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Style</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{boxStyle.toUpperCase()}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{styleInfo.label}</div>
                           </div>
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Printing</div>
@@ -1640,13 +1664,19 @@ export default function StartQuoteModal({
                           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                             <DimInput label="Length (in)" value={boxL} onChange={setBoxL} />
                             <DimInput label="Width (in)" value={boxW} onChange={setBoxW} />
-                            <DimInput label="Depth (in)" value={boxD} onChange={setBoxD} />
+                            {usesDepth ? (
+                              <DimInput label={`${quoteType === "boxes_only" ? styleInfo.depthLabel : "Depth"} (in)`} value={boxD} onChange={setBoxD} />
+                            ) : null}
                           </div>
 
                           {!boxOk ? (
                             <div className="mt-3 text-sm text-[var(--attention)]">
                               {quoteType === "boxes_only"
-                                ? "Enter the box inside length, width and depth."
+                                ? styleInfo.cells && boxLNum && boxWNum && boxDNum
+                                  ? "Enter the partition cells across and down (at least 2 cells)."
+                                  : usesDepth
+                                    ? `Enter the box inside length, width and ${styleInfo.depthLabel.toLowerCase()}.`
+                                    : "Enter the pad length and width."
                                 : `Box L/W/D are required, and L/W must be greater than ${FIT_ALLOW_IN}" (fit allowance).`}
                             </div>
                           ) : null}
@@ -1671,12 +1701,74 @@ export default function StartQuoteModal({
                           />
                         </div>
 
+                        {/* Step 27: boxes only offers every corrugated style. */}
+                        {quoteType === "boxes_only" ? (
+                          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4" data-more-styles>
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">MORE STYLES</div>
+                            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              {BOX_STYLES.filter((st) => st.key !== "rsc" && st.key !== "mailer").map((st) => (
+                                <button
+                                  key={st.key}
+                                  type="button"
+                                  data-style={st.key}
+                                  onClick={() => {
+                                    setBoxStyle(st.key);
+                                    // Stock sizes are RSCs and mailers only.
+                                    setBoxChoice("custom");
+                                    setPrefillPackagingSku("");
+                                  }}
+                                  className={[
+                                    "rounded-lg border px-3 py-2 text-left transition",
+                                    boxStyle === st.key
+                                      ? "border-[var(--action-primary)] bg-[var(--surface-subtle)]"
+                                      : "border-[var(--border)] bg-[var(--surface-card)] hover:bg-[var(--surface-subtle)]",
+                                  ].join(" ")}
+                                >
+                                  <div className="text-sm font-medium text-[var(--text-primary)]">
+                                    {st.label}
+                                    {boxStyle === st.key ? " ✓" : ""}
+                                  </div>
+                                  <div className="text-xs text-[var(--text-secondary)]">{st.desc}</div>
+                                </button>
+                              ))}
+                            </div>
+                            {styleInfo.cells ? (
+                              <div className="mt-3 grid grid-cols-2 gap-3">
+                                <label className="block">
+                                  <div className="mb-1 text-xs text-[var(--text-muted)]">Cells across (along the length)</div>
+                                  <input
+                                    aria-label="Cells across"
+                                    inputMode="numeric"
+                                    value={cellsAcross}
+                                    onChange={(e) => setCellsAcross(e.target.value.replace(/[^\d]/g, ""))}
+                                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <div className="mb-1 text-xs text-[var(--text-muted)]">Cells down (along the width)</div>
+                                  <input
+                                    aria-label="Cells down"
+                                    inputMode="numeric"
+                                    value={cellsDown}
+                                    onChange={(e) => setCellsDown(e.target.value.replace(/[^\d]/g, ""))}
+                                    className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                  />
+                                </label>
+                                <div className="col-span-2 text-xs text-[var(--text-muted)]">
+                                  Length and width are the inside of the box the partitions go in; height is the
+                                  partition height. Partitions are quoted unprinted.
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             BOX SIZE
                           </div>
 
-                          {!boxLNum || !boxWNum || !boxDNum ? (
+                          {!boxSizeText ? (
                             <div className="mt-2 text-xs text-[var(--text-muted)]">
                               Enter the box size above.
                             </div>
@@ -1691,7 +1783,7 @@ export default function StartQuoteModal({
                                   <>
                                     We&apos;ll quote your size:{" "}
                                     <span className="font-medium text-[var(--text-primary)]">
-                                      {normalizeDims3(boxLNum, boxWNum, boxDNum)} in
+                                      {boxSizeText} in
                                     </span>
                                     .
                                   </>
@@ -1844,8 +1936,8 @@ export default function StartQuoteModal({
                             size1Summary={
                               prefillPackagingSku.trim()
                                 ? `stock box ${prefillPackagingSku.trim()}${qtyNum ? `, qty ${qtyNum}` : ""}`
-                                : normalizeDims3(boxLNum, boxWNum, boxDNum)
-                                  ? `${normalizeDims3(boxLNum, boxWNum, boxDNum)} in ${boxStyle.toUpperCase()}${qtyNum ? `, qty ${qtyNum}` : ""}`
+                                : boxSizeText
+                                  ? `${boxSizeText} in ${styleInfo.label}${partitionCells ? `, ${partitionCells.across} x ${partitionCells.down} cells` : ""}${qtyNum ? `, qty ${qtyNum}` : ""}`
                                   : undefined
                             }
                           />
@@ -2259,8 +2351,9 @@ export default function StartQuoteModal({
                               <Row k="Stock box" v={prefillPackagingSku.trim()} />
                             ) : (
                               <>
-                                <Row k="Box ID" v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "(missing)"} />
-                                <Row k="Style" v={boxStyle.toUpperCase()} />
+                                <Row k="Box ID" v={boxSizeText || "(missing)"} />
+                                <Row k="Style" v={styleInfo.label} />
+                                {partitionCells ? <Row k="Cells" v={`${partitionCells.across} across x ${partitionCells.down} down`} /> : null}
                                 {customRscBox && boxGrades.length > 0 ? (
                                   <Row
                                     k="Board grade"
@@ -2474,7 +2567,7 @@ export default function StartQuoteModal({
                                   k="Box ID"
                                   v={normalizeDims3(boxLNum, boxWNum, boxDNum) || "(missing)"}
                                 />
-                                <Row k="Style" v={boxStyle.toUpperCase()} />
+                                <Row k="Style" v={styleInfo.label} />
                                 {customRscBox && boxGrades.length > 0 ? (
                                   <Row
                                     k="Board grade"

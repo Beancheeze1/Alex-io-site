@@ -9,6 +9,7 @@
 "use client";
 
 import * as React from "react";
+import { BOX_STYLES, boxStyleInfo, boxStyleOrRsc, parseCells, type BoxStyle } from "@/lib/box-styles";
 
 export type BoxGradeOption = { id: number; name: string; flute?: string; ect_label?: string; is_default?: boolean };
 
@@ -17,7 +18,9 @@ export type ExtraBoxSize = {
   L: string;
   W: string;
   D: string;
-  style: "rsc" | "mailer";
+  style: BoxStyle; // Step 27: any style
+  cellsA: string; // partitions
+  cellsD: string;
   gradeId: string; // "" = shop default / recommend one
   colors: ("spot" | "flood")[];
   sides: 1 | 2;
@@ -35,6 +38,8 @@ export function newExtraBoxSize(seed?: Partial<Omit<ExtraBoxSize, "key">>): Extr
     W: "",
     D: "",
     style: "rsc",
+    cellsA: "2",
+    cellsD: "2",
     gradeId: "",
     colors: [],
     sides: 1,
@@ -53,9 +58,15 @@ function num(s: string): number | null {
 
 /** Problem with one extra size, or null when it is complete. `n` is its size number (2, 3, ...). */
 export function extraSizeProblem(s: ExtraBoxSize, n: number): string | null {
-  const dims = [num(s.L), num(s.W), num(s.D)];
+  const info = boxStyleInfo(s.style);
+  const dims = info.usesDepth ? [num(s.L), num(s.W), num(s.D)] : [num(s.L), num(s.W)];
   if (!dims.every((v) => v != null && v > 0 && v <= 1000)) {
-    return `Size ${n}: enter the box inside length, width and depth.`;
+    return info.usesDepth
+      ? `Size ${n}: enter the inside length, width and ${info.depthLabel.toLowerCase()}.`
+      : `Size ${n}: enter the length and width.`;
+  }
+  if (info.cells && !parseCells(num(s.cellsA), num(s.cellsD))) {
+    return `Size ${n}: enter the partition cells across and down (at least 2 cells).`;
   }
   const q = num(s.qty);
   if (q == null || !Number.isInteger(q) || q < 1 || q > 10_000_000) {
@@ -79,9 +90,10 @@ export function extraSizePayload(s: ExtraBoxSize) {
     qty: num(s.qty),
     L: num(s.L),
     W: num(s.W),
-    D: num(s.D),
+    D: boxStyleInfo(s.style).usesDepth ? num(s.D) : 0,
     style: s.style,
-    grade_id: s.style === "rsc" && /^\d+$/.test(s.gradeId) ? Number(s.gradeId) : null,
+    ...(boxStyleInfo(s.style).cells ? { cells_across: num(s.cellsA), cells_down: num(s.cellsD) } : {}),
+    grade_id: /^\d+$/.test(s.gradeId) ? Number(s.gradeId) : null,
     print_spec: { colors: s.colors, sides: s.sides },
     qty_breaks: s.breaks.map((b) => Number(String(b).trim())).filter((n) => Number.isInteger(n) && n > 0),
   };
@@ -90,8 +102,12 @@ export function extraSizePayload(s: ExtraBoxSize) {
 /** One-line summary for review screens. */
 export function describeExtraSize(s: ExtraBoxSize, grades: BoxGradeOption[], gradeDefaultLabel: string): string {
   const parts: string[] = [];
-  parts.push(`${s.L || "?"} x ${s.W || "?"} x ${s.D || "?"} in ${s.style.toUpperCase()}`);
-  if (s.style === "rsc" && grades.length > 0) {
+  const info = boxStyleInfo(s.style);
+  parts.push(
+    `${s.L || "?"} x ${s.W || "?"}${info.usesDepth ? ` x ${s.D || "?"}` : ""} in ${info.label}` +
+      (info.cells ? `, ${s.cellsA || "?"} x ${s.cellsD || "?"} cells` : ""),
+  );
+  if (grades.length > 0) {
     parts.push(grades.find((g) => String(g.id) === s.gradeId)?.name || gradeDefaultLabel);
   }
   parts.push(
@@ -174,13 +190,17 @@ export default function BoxSizesEditor({
             </div>
 
             <div className="mt-3 grid grid-cols-3 gap-3">
-              {(["L", "W", "D"] as const).map((k) => (
+              {(["L", "W", "D"] as const)
+                .filter((k) => k !== "D" || boxStyleInfo(s.style).usesDepth)
+                .map((k) => (
                 <label key={k} className="block">
-                  <div className={labelCls}>{k === "L" ? "LENGTH (IN)" : k === "W" ? "WIDTH (IN)" : "DEPTH (IN)"}</div>
+                  <div className={labelCls}>
+                    {k === "L" ? "LENGTH (IN)" : k === "W" ? "WIDTH (IN)" : `${boxStyleInfo(s.style).depthLabel.toUpperCase()} (IN)`}
+                  </div>
                   <input
                     value={s[k]}
                     inputMode="decimal"
-                    aria-label={`Size ${n} ${k === "L" ? "length" : k === "W" ? "width" : "depth"}`}
+                    aria-label={`Size ${n} ${k === "L" ? "length" : k === "W" ? "width" : boxStyleInfo(s.style).depthLabel.toLowerCase()}`}
                     onChange={(e) => update(i, { [k]: decimal(e.target.value) } as Partial<ExtraBoxSize>)}
                     className={inputCls}
                   />
@@ -194,14 +214,41 @@ export default function BoxSizesEditor({
                 <select
                   value={s.style}
                   aria-label={`Size ${n} style`}
-                  onChange={(e) => update(i, { style: e.target.value === "mailer" ? "mailer" : "rsc" })}
+                  onChange={(e) => update(i, { style: boxStyleOrRsc(e.target.value) })}
                   className={inputCls}
                 >
-                  <option value="rsc" style={optStyle}>RSC / Shipper</option>
-                  <option value="mailer" style={optStyle}>Mailer box</option>
+                  {BOX_STYLES.map((st) => (
+                    <option key={st.key} value={st.key} style={optStyle}>
+                      {st.label}
+                    </option>
+                  ))}
                 </select>
               </label>
-              {s.style === "rsc" && grades.length > 0 ? (
+              {boxStyleInfo(s.style).cells ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <div className={labelCls}>CELLS ACROSS</div>
+                    <input
+                      value={s.cellsA}
+                      inputMode="numeric"
+                      aria-label={`Size ${n} cells across`}
+                      onChange={(e) => update(i, { cellsA: e.target.value.replace(/[^\d]/g, "") })}
+                      className={inputCls}
+                    />
+                  </label>
+                  <label className="block">
+                    <div className={labelCls}>CELLS DOWN</div>
+                    <input
+                      value={s.cellsD}
+                      inputMode="numeric"
+                      aria-label={`Size ${n} cells down`}
+                      onChange={(e) => update(i, { cellsD: e.target.value.replace(/[^\d]/g, "") })}
+                      className={inputCls}
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {grades.length > 0 ? (
                 <label className="block">
                   <div className={labelCls}>BOARD GRADE</div>
                   <select

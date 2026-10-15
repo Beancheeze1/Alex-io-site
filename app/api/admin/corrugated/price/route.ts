@@ -6,13 +6,15 @@
 //
 // POST { L, W, D, quantities: number[], grade_id?: number|null,
 //        colors?: ("spot"|"flood")[], sides?: 1|2,
-//        method?: "plates"|"digital"|null }   // Step 15: null = auto by quantity
+//        method?: "plates"|"digital"|null,    // Step 15: null = auto by quantity
+//        style?: BoxStyle, cells_across?, cells_down? }   // Step 27: missing = rsc
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { priceCustomRsc } from "@/lib/corrugated";
 import { parseRunMethod, type Coverage } from "@/lib/corrugated-price";
+import { boxStyleOrRsc, parseCells } from "@/lib/box-styles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +50,9 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: "invalid_grade", message: "Invalid board grade." }, 400);
   }
   const sides: 1 | 2 = Number(b.sides) === 2 ? 2 : 1;
+  // Step 27: style (missing = RSC) and partition cells.
+  const style = boxStyleOrRsc(b.style);
+  const cells = style === "partition" ? parseCells(b.cells_across, b.cells_down) : null;
 
   try {
     const result = await priceCustomRsc(tenantId, {
@@ -57,6 +62,8 @@ export async function POST(req: NextRequest) {
       colors,
       sides,
       method: parseRunMethod(b.method),
+      style,
+      cells,
     });
     return json(result, result.ok ? 200 : 400);
   } catch (e: any) {

@@ -28,6 +28,7 @@ import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
+import { parseBoxStyle } from "@/lib/box-styles";
 
 
 type QuoteRow = {
@@ -1216,9 +1217,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [gradeSaving, setGradeSaving] = React.useState<boolean>(false);
   const [gradeMsg, setGradeMsg] = React.useState<string | null>(null);
 
-  const hasCustomRsc = !!boxSelections?.some(
-    (s) => s.kind === "custom" && String(s.style || "").toLowerCase() === "rsc",
-  );
+  // Step 27: any custom style priced from board grades (not just RSC).
+  const hasCustomRsc = !!boxSelections?.some((s) => s.kind === "custom" && !!parseBoxStyle(s.style));
 
   React.useEffect(() => {
     if (!quoteNoValue || !hasCustomRsc) return;
@@ -2837,7 +2837,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                           <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                             {metaParts.join(" • ")} — Qty {sel.qty.toLocaleString()}
                           </div>
-                          {sel.kind === "custom" && String(sel.style || "").toLowerCase() === "rsc" ? (
+                          {sel.kind === "custom" && !!parseBoxStyle(sel.style) ? (
                             <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11 }}>
                               <span style={{ color: "var(--text-muted)" }}>Board grade:</span>
                               {gradeOptions.length > 0 ? (

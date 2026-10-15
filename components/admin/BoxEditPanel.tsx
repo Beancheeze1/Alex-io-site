@@ -9,6 +9,7 @@
 "use client";
 
 import * as React from "react";
+import { BOX_STYLES, boxStyleInfo, boxStyleOrRsc, type BoxStyle } from "@/lib/box-styles";
 
 type Coverage = "spot" | "flood";
 
@@ -20,7 +21,9 @@ type Row = {
   L: number | null;
   W: number | null;
   D: number | null;
-  style: "rsc" | "mailer";
+  style: BoxStyle; // Step 27: any style
+  cells_across?: number | null;
+  cells_down?: number | null;
   grade_id: number | null;
   qty: number;
   colors: Coverage[];
@@ -33,7 +36,9 @@ type Draft = {
   L: string;
   W: string;
   D: string;
-  style: "rsc" | "mailer";
+  style: BoxStyle;
+  cellsA: string;
+  cellsD: string;
   gradeId: string;
   qty: string;
   colors: Coverage[];
@@ -45,7 +50,9 @@ function toDraft(r: Row): Draft {
     L: r.L == null ? "" : String(r.L),
     W: r.W == null ? "" : String(r.W),
     D: r.D == null ? "" : String(r.D),
-    style: r.style,
+    style: boxStyleOrRsc(r.style),
+    cellsA: r.cells_across == null ? "2" : String(r.cells_across),
+    cellsD: r.cells_down == null ? "2" : String(r.cells_down),
     gradeId: r.grade_id == null ? "" : String(r.grade_id),
     qty: String(r.qty),
     colors: [...r.colors],
@@ -128,9 +135,11 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
           box_id: editing,
           L: Number(draft.L),
           W: Number(draft.W),
-          D: Number(draft.D),
+          D: boxStyleInfo(draft.style).usesDepth ? Number(draft.D) : 0,
           style: draft.style,
-          grade_id: draft.style === "rsc" && /^\d+$/.test(draft.gradeId) ? Number(draft.gradeId) : null,
+          cells_across: Number(draft.cellsA),
+          cells_down: Number(draft.cellsD),
+          grade_id: /^\d+$/.test(draft.gradeId) ? Number(draft.gradeId) : null,
           qty: Number(draft.qty),
           colors: draft.colors,
           sides: draft.sides,
@@ -182,7 +191,9 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
             <div style={{ fontSize: 12, color: "var(--text-primary)" }}>
               <div style={{ fontWeight: 500 }}>
                 {rows.length > 1 ? `Size ${i + 1}: ` : ""}
-                {r.L ?? "?"} × {r.W ?? "?"} × {r.D ?? "?"} in {r.style.toUpperCase()}
+                {r.L ?? "?"} × {r.W ?? "?"}
+                {boxStyleInfo(boxStyleOrRsc(r.style)).usesDepth ? ` × ${r.D ?? "?"}` : ""} in {boxStyleInfo(boxStyleOrRsc(r.style)).label}
+                {r.cells_across && r.cells_down ? `, ${r.cells_across} × ${r.cells_down} cells` : ""}
                 {r.kind === "stock" && r.sku ? ` (stock ${r.sku})` : ""} · qty {r.qty.toLocaleString("en-US")}
               </div>
               {r.description ? <div style={{ color: "var(--text-muted)", marginTop: 2 }}>{r.description}</div> : null}
@@ -197,9 +208,13 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
           {editing === r.id && draft && editRow ? (
             <div style={{ marginTop: 10 }} data-box-editor={r.id}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-                {(["L", "W", "D"] as const).map((k) => (
+                {(["L", "W", "D"] as const)
+                  .filter((k) => k !== "D" || boxStyleInfo(draft.style).usesDepth)
+                  .map((k) => (
                   <label key={k}>
-                    <div style={label}>{k === "L" ? "Length (in)" : k === "W" ? "Width (in)" : "Depth (in)"}</div>
+                    <div style={label}>
+                      {k === "L" ? "Length (in)" : k === "W" ? "Width (in)" : `${boxStyleInfo(draft.style).depthLabel} (in)`}
+                    </div>
                     <input
                       style={input}
                       inputMode="decimal"
@@ -228,13 +243,28 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
                     style={input}
                     aria-label="Style"
                     value={draft.style}
-                    onChange={(e) => set({ style: e.target.value === "mailer" ? "mailer" : "rsc" })}
+                    onChange={(e) => set({ style: boxStyleOrRsc(e.target.value) })}
                   >
-                    <option value="rsc">RSC / Shipper</option>
-                    <option value="mailer">Mailer box</option>
+                    {BOX_STYLES.map((st) => (
+                      <option key={st.key} value={st.key}>
+                        {st.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                {draft.style === "rsc" && grades.length > 0 ? (
+                {boxStyleInfo(draft.style).cells ? (
+                  <>
+                    <label>
+                      <div style={label}>Cells across</div>
+                      <input style={input} inputMode="numeric" aria-label="Cells across" value={draft.cellsA} onChange={(e) => set({ cellsA: digits(e.target.value) })} />
+                    </label>
+                    <label>
+                      <div style={label}>Cells down</div>
+                      <input style={input} inputMode="numeric" aria-label="Cells down" value={draft.cellsD} onChange={(e) => set({ cellsD: digits(e.target.value) })} />
+                    </label>
+                  </>
+                ) : null}
+                {grades.length > 0 ? (
                   <label>
                     <div style={label}>Board grade</div>
                     <select

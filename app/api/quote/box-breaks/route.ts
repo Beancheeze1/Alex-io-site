@@ -71,9 +71,10 @@ async function withStoredCurrent(
   currentQty: number | null,
   onlyRowId: number | null,
 ): Promise<(BoxBreakPrice & { stored?: boolean })[]> {
-  if (!currentQty) return prices;
-  const rows = await q<{ unit: string | null; ext: string | null; plates: string | null }>(
-    `SELECT unit_price_usd AS unit, extended_price_usd AS ext, (to_jsonb(qbs) ->> 'plates_usd') AS plates
+  if (!currentQty) return oneTimeShown(prices);
+  const rows = await q<{ unit: string | null; ext: string | null; plates: string | null; tooling: string | null }>(
+    `SELECT unit_price_usd AS unit, extended_price_usd AS ext, (to_jsonb(qbs) ->> 'plates_usd') AS plates,
+            (to_jsonb(qbs) ->> 'tooling_usd') AS tooling
        FROM public.quote_box_selections qbs
       WHERE quote_id = $1 AND ($2::bigint IS NULL OR id = $2::bigint)`,
     [quoteId, onlyRowId],
@@ -81,11 +82,33 @@ async function withStoredCurrent(
   if (!rows.length || rows.some((r) => r.ext == null)) return prices;
   const boxes = Math.round(rows.reduce((s, r) => s + Number(r.ext || 0), 0) * 100) / 100;
   const plates = Math.round(rows.reduce((s, r) => s + Number(r.plates || 0), 0) * 100) / 100;
+  const tooling = Math.round(rows.reduce((s, r) => s + Number(r.tooling || 0), 0) * 100) / 100;
   const unit = rows.length === 1 && rows[0].unit != null ? Number(rows[0].unit) : null;
-  return prices.map((p) =>
-    p.qty === currentQty
-      ? { qty: p.qty, boxes_usd: boxes, plates_usd: plates, total_usd: Math.round((boxes + plates) * 100) / 100, unit_usd: unit, stored: true }
-      : p,
+  return oneTimeShown(
+    prices.map((p) =>
+      p.qty === currentQty
+        ? {
+            qty: p.qty,
+            boxes_usd: boxes,
+            plates_usd: plates,
+            tooling_usd: tooling,
+            total_usd: Math.round((boxes + plates + tooling) * 100) / 100,
+            unit_usd: unit,
+            stored: true,
+          }
+        : p,
+    ),
+  );
+}
+
+/**
+ * Step 27: the table's one-time column shows plates + cutting dies together
+ * (plates_usd), and tooling_usd says how much of it is dies. Totals already
+ * include both.
+ */
+function oneTimeShown<T extends BoxBreakPrice>(list: T[]): T[] {
+  return list.map((p) =>
+    p.tooling_usd > 0 ? { ...p, plates_usd: Math.round((p.plates_usd + p.tooling_usd) * 100) / 100 } : p,
   );
 }
 

@@ -723,6 +723,8 @@ export async function GET(req: NextRequest) {
         qbs.extended_price_usd,
         -- via to_jsonb so this keeps working before migration 027 adds the column
         (to_jsonb(qbs) ->> 'plates_usd')::numeric as plates_usd,
+        -- Step 27: one-time cutting die (die-cut styles)
+        (to_jsonb(qbs) ->> 'tooling_usd')::numeric as tooling_usd,
         -- Step 15: "digital" (short run) or "plates"
         (to_jsonb(qbs) -> 'pricing_detail' ->> 'run_method') as run_method,
         b.vendor,
@@ -789,9 +791,18 @@ export async function GET(req: NextRequest) {
       facts: facts as Record<string, unknown>,
     });
     const dieCutTriggerQty = Number(settings.die_cut_trigger_qty) || 0;
-    // Kept for older screens: the whole cutting / lamination total.
-    const dieCuttingCharge = proc.total;
-    const dieCuttingTriggered = proc.lines.length > 0;
+    // Step 27: one-time cutting dies for die-cut boxes, as their own line.
+    const boxToolingTotal =
+      Math.round(packagingLinesForDisplay.reduce((s, l) => s + (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0), 0) * 100) / 100;
+    const processLines = [
+      ...proc.lines,
+      ...(boxToolingTotal > 0
+        ? [{ key: "box_die", label: "Box cutting die (one time)", amount: boxToolingTotal, note: null }]
+        : []),
+    ];
+    // Kept for older screens: the whole cutting / lamination (+ box die) total.
+    const dieCuttingCharge = proc.total + boxToolingTotal;
+    const dieCuttingTriggered = processLines.length > 0;
 
     // Step 25: things the shop should check (never change the price).
     const reviewFlags = itemsRaw.length > 0 ? await quoteReviewFlags(quote.id, String(quoteNo), tenantId) : [];
@@ -838,8 +849,9 @@ export async function GET(req: NextRequest) {
       dieCuttingTriggered,
       dieCuttingCharge,
       // Step 23: each cutting / lamination line, and how the foam is cut.
-      processLines: proc.lines,
+      processLines,
       foamMethod: proc.method,
+      boxToolingTotal,
       reviewFlags,
       // Staff only: how the cutting charges were worked out.
       ...(isStaffCaller ? { foamProcessDetail: proc.detail, priceModel: proc.model } : {}),

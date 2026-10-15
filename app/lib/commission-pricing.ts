@@ -148,13 +148,18 @@ export async function getCommissionableTotal(
   // Box totals include one-time printing plates (Chuck, Oct 2026). On
   // per-color quotes, print run + setup are already inside extended_price_usd.
   // plates_usd is read via to_jsonb so this works on any schema version.
-  const boxes = await q<{ extended_price_usd: string | null; plates_usd: string | null }>(
-    `SELECT qbs.extended_price_usd, (to_jsonb(qbs) ->> 'plates_usd') AS plates_usd
+  // Step 27: plus one-time cutting dies (tooling_usd).
+  const boxes = await q<{ extended_price_usd: string | null; plates_usd: string | null; tooling_usd: string | null }>(
+    `SELECT qbs.extended_price_usd, (to_jsonb(qbs) ->> 'plates_usd') AS plates_usd,
+            (to_jsonb(qbs) ->> 'tooling_usd') AS tooling_usd
        FROM public.quote_box_selections qbs
       WHERE qbs.quote_id = $1`,
     [quoteId],
   );
-  let boxTotal = boxes.reduce((s, b) => s + safeNum(b.extended_price_usd) + safeNum(b.plates_usd), 0);
+  let boxTotal = boxes.reduce(
+    (s, b) => s + safeNum(b.extended_price_usd) + safeNum(b.plates_usd) + safeNum(b.tooling_usd),
+    0,
+  );
 
   let foamTotal = 0;
 

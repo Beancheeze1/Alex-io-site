@@ -18,8 +18,9 @@ import {
   ROUND_TO_OPTIONS,
   SHEET_KEYS,
   SHORT_RUN_KEYS,
-  computeRscBlank,
+  STYLE_RATE_KEYS,
   computeSheet,
+  computeStyleBlank,
   formatInches,
   parseInches,
   type BoardMethod,
@@ -27,6 +28,7 @@ import {
   type JointType,
   type RateKey,
 } from "@/lib/corrugated-blank";
+import { BOX_STYLES, boxStyleInfo, parseCells, type BoxStyle } from "@/lib/box-styles";
 
 type FluteRow = {
   key: string;
@@ -173,6 +175,7 @@ type PriceCheckRow = {
   sheets?: number; // Step 26
   msf?: number;
   min_msf_applied?: boolean;
+  die_line_usd?: number; // Step 27
 };
 
 type SheetInfo = {
@@ -191,7 +194,6 @@ type PriceCheckResponse = {
   error?: string;
   message?: string;
   grade?: { id: number; name: string; flute: string };
-  blank?: { length_in: number; width_in: number; sqft_each_with_waste: number };
   colors?: number;
   sides?: number;
   plates_line_usd?: number;
@@ -199,6 +201,9 @@ type PriceCheckResponse = {
   quantities?: PriceCheckRow[];
   board_method?: BoardMethod; // Step 26
   sheet?: SheetInfo | null;
+  style?: BoxStyle; // Step 27
+  die_line_usd?: number;
+  blank?: { length_in: number; width_in: number; sqft_each_with_waste: number; rule_in?: number; pieces?: { label: string; length_in: number; width_in: number; count: number }[] };
 };
 
 const BOARD_METHOD_LABELS: Record<BoardMethod, string> = {
@@ -226,7 +231,7 @@ export default function CorrugatedSettingsPage() {
   const [flutes, setFlutes] = React.useState<FluteRow[]>([]);
   const [grades, setGrades] = React.useState<GradeRow[]>([]);
   const [boardMethod, setBoardMethod] = React.useState<BoardMethod>("blank"); // Step 26
-  const [pv, setPv] = React.useState({ L: "12", W: "10", D: "8", gradeKey: "" });
+  const [pv, setPv] = React.useState({ L: "12", W: "10", D: "8", gradeKey: "", style: "rsc" as BoxStyle, cellsA: "3", cellsD: "4" });
 
   // Price check (uses SAVED settings via /api/admin/corrugated/price)
   const [pcQty, setPcQty] = React.useState("1000 5000");
@@ -460,9 +465,10 @@ export default function CorrugatedSettingsPage() {
   }
 
   async function runPriceCheck() {
+    const usesDepth = boxStyleInfo(pv.style).usesDepth;
     const L = parseInches(pv.L);
     const W = parseInches(pv.W);
-    const D = parseInches(pv.D);
+    const D = usesDepth ? parseInches(pv.D) : 0;
     if (L === null || W === null || D === null) {
       setPcResult({ ok: false, message: "Enter the inside length, width and depth in the blank preview." });
       return;
@@ -488,6 +494,9 @@ export default function CorrugatedSettingsPage() {
           colors: pcColors,
           sides: pcSides,
           method: pcMethod === "auto" ? null : pcMethod,
+          style: pv.style,
+          cells_across: Number(pv.cellsA),
+          cells_down: Number(pv.cellsD),
         }),
       });
       const body = (await res.json().catch(() => null)) as PriceCheckResponse | null;
@@ -502,12 +511,15 @@ export default function CorrugatedSettingsPage() {
   const fluteCodes = Array.from(new Set(flutes.map((f) => f.flute.trim().toUpperCase()).filter(Boolean)));
 
   const preview = React.useMemo(() => {
+    const styleInfo = boxStyleInfo(pv.style);
     const L = parseInches(pv.L);
     const W = parseInches(pv.W);
-    const D = parseInches(pv.D);
-    if (L === null || W === null || D === null || L <= 0 || W <= 0 || D <= 0) {
-      return { error: "Enter an inside length, width and depth." };
+    const D = styleInfo.usesDepth ? parseInches(pv.D) : 0;
+    if (L === null || W === null || D === null || L <= 0 || W <= 0 || (styleInfo.usesDepth && D <= 0)) {
+      return { error: styleInfo.usesDepth ? `Enter an inside length, width and ${styleInfo.depthLabel.toLowerCase()}.` : "Enter a length and width." };
     }
+    const cells = styleInfo.cells ? parseCells(Number(pv.cellsA), Number(pv.cellsD)) : null;
+    if (styleInfo.cells && !cells) return { error: "Enter partition cells across and down (at least 2 cells)." };
     const active = grades.filter((g) => g.active);
     const grade = active.find((g) => g.key === pv.gradeKey) || active.find((g) => g.isDefault) || active[0];
     if (!grade) return { error: "Add an active board grade to preview a blank." };
@@ -522,13 +534,20 @@ export default function CorrugatedSettingsPage() {
     if (waste === null || flap === null || trim === null) {
       return { error: "Fix the waste %, flap size or edge trim to see the preview." };
     }
-    const blank = computeRscBlank({ L, W, D }, flute, {
-      joint_type: layout.joint_type,
-      flap_pct: flap,
-      round_to_in: layout.round_to_in,
-      edge_trim_in: trim,
-      waste_pct: waste,
-    });
+    // Step 27: the blank for the chosen style (partitions: the strips).
+    const blank = computeStyleBlank(
+      pv.style,
+      { L, W, D },
+      flute,
+      {
+        joint_type: layout.joint_type,
+        flap_pct: flap,
+        round_to_in: layout.round_to_in,
+        edge_trim_in: trim,
+        waste_pct: waste,
+      },
+      cells,
+    );
     const cost = grade.cost.trim() === "" ? null : parseNum(grade.cost);
     const jointVal = layout.joint_type === "taped" ? 0 : flute.glue_joint_in;
     // Step 26: the sheet bought for this blank (sheet method only).
@@ -546,7 +565,7 @@ export default function CorrugatedSettingsPage() {
       }
       sheet = computeSheet(blank, sv as Record<keyof typeof sv, number>);
     }
-    return { blank, gradeName: grade.name || "unnamed grade", flute, L, W, D, flap, trim, waste, cost, jointVal, sheet };
+    return { blank, gradeName: grade.name || "unnamed grade", flute, L, W, D, flap, trim, waste, cost, jointVal, sheet, styleInfo };
   }, [pv, grades, flutes, rates, layout, boardMethod]);
 
   const saveBar = (
@@ -752,7 +771,7 @@ export default function CorrugatedSettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key) && !SHEET_KEYS.has(f.key)).map((f) => (
+                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key) && !SHEET_KEYS.has(f.key) && !STYLE_RATE_KEYS.has(f.key)).map((f) => (
                   <tr key={f.key} className="border-t border-[var(--border)]">
                     <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
                     <td className={`${TD} w-36`}>
@@ -794,6 +813,47 @@ export default function CorrugatedSettingsPage() {
               </thead>
               <tbody>
                 {RATE_FIELDS.filter((f) => SHORT_RUN_KEYS.has(f.key)).map((f) => (
+                  <tr key={f.key} className="border-t border-[var(--border)]">
+                    <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
+                    <td className={`${TD} w-36`}>
+                      <input
+                        className={INPUT}
+                        inputMode="decimal"
+                        value={rates[f.key]}
+                        aria-label={f.label}
+                        onChange={(e) => setRate(f.key, e.target.value)}
+                      />
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>{f.unit}</td>
+                    <td className={`${TD} text-[var(--text-muted)]`}>{f.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Step 27: other box styles */}
+        <section className={`${CARD} mb-6`} data-style-rates>
+          <div className={SECTION_LABEL}>Other box styles</div>
+          <p className="mb-3 mt-1 text-xs">
+            HSC and FOL use the converting cost above. Die-cut mailers and trays use die-cut converting plus a
+            one-time cutting die (base + inches of rule), shown as its own line like plates; digital short runs are
+            CAD cut, so they have no die. Pads and partition sets have their own converting cost. Board, setup,
+            printing, markup and the minimum order work the same for every style.
+          </p>
+          <div className={TABLE_WRAP}>
+            <table className="min-w-full text-left text-xs">
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TH}>Setting</th>
+                  <th className={TH}>Value</th>
+                  <th className={TH}>Unit</th>
+                  <th className={TH}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {RATE_FIELDS.filter((f) => STYLE_RATE_KEYS.has(f.key)).map((f) => (
                   <tr key={f.key} className="border-t border-[var(--border)]">
                     <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
                     <td className={`${TD} w-36`}>
@@ -1031,19 +1091,52 @@ export default function CorrugatedSettingsPage() {
             Enter a box you already make and compare this blank with yours. It uses the values on this page,
             saved or not.
           </p>
-          <div className="grid gap-3 sm:grid-cols-4">
-            {(["L", "W", "D"] as const).map((k) => (
-              <label key={k} className={FIELD_LABEL}>
-                <span className="text-[var(--text-primary)]">
-                  {k === "L" ? "Inside length (in)" : k === "W" ? "Inside width (in)" : "Inside depth (in)"}
-                </span>
-                <input
-                  className={INPUT}
-                  value={pv[k]}
-                  onChange={(e) => setPv((p) => ({ ...p, [k]: e.target.value }))}
-                />
-              </label>
-            ))}
+          <div className="grid gap-3 sm:grid-cols-5">
+            <label className={FIELD_LABEL}>
+              <span className="text-[var(--text-primary)]">Style</span>
+              <select
+                className={INPUT}
+                value={pv.style}
+                data-preview-style
+                onChange={(e) => setPv((p) => ({ ...p, style: e.target.value as BoxStyle }))}
+              >
+                {BOX_STYLES.map((st) => (
+                  <option key={st.key} value={st.key}>
+                    {st.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {(["L", "W", "D"] as const)
+              .filter((k) => k !== "D" || boxStyleInfo(pv.style).usesDepth)
+              .map((k) => (
+                <label key={k} className={FIELD_LABEL}>
+                  <span className="text-[var(--text-primary)]">
+                    {k === "L"
+                      ? "Inside length (in)"
+                      : k === "W"
+                        ? "Inside width (in)"
+                        : `Inside ${boxStyleInfo(pv.style).depthLabel.toLowerCase()} (in)`}
+                  </span>
+                  <input
+                    className={INPUT}
+                    value={pv[k]}
+                    onChange={(e) => setPv((p) => ({ ...p, [k]: e.target.value }))}
+                  />
+                </label>
+              ))}
+            {boxStyleInfo(pv.style).cells ? (
+              <>
+                <label className={FIELD_LABEL}>
+                  <span className="text-[var(--text-primary)]">Cells across (along length)</span>
+                  <input className={INPUT} inputMode="numeric" value={pv.cellsA} onChange={(e) => setPv((p) => ({ ...p, cellsA: e.target.value }))} />
+                </label>
+                <label className={FIELD_LABEL}>
+                  <span className="text-[var(--text-primary)]">Cells down (along width)</span>
+                  <input className={INPUT} inputMode="numeric" value={pv.cellsD} onChange={(e) => setPv((p) => ({ ...p, cellsD: e.target.value }))} />
+                </label>
+              </>
+            ) : null}
             <label className={FIELD_LABEL}>
               <span className="text-[var(--text-primary)]">Board grade</span>
               <select
@@ -1069,7 +1162,8 @@ export default function CorrugatedSettingsPage() {
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-page)] p-4">
                 <div className="text-[11px] text-[var(--text-muted)]">
-                  RSC blank: {preview.gradeName}, {preview.flute.flute} flute
+                  {preview.styleInfo.label} {preview.blank.pieces.length > 1 || preview.styleInfo.cells ? "strips" : "blank"}:{" "}
+                  {preview.gradeName}, {preview.flute.flute} flute
                 </div>
                 <div className="mt-1 text-lg font-medium text-[var(--text-primary)]" data-testid="blank-size">
                   {fi(preview.blank.length_in)} × {fi(preview.blank.width_in)} in
@@ -1077,6 +1171,16 @@ export default function CorrugatedSettingsPage() {
                 <div className="text-[11px] text-[var(--text-secondary)]">
                   {preview.blank.length_in.toFixed(4)} × {preview.blank.width_in.toFixed(4)} in
                 </div>
+                {preview.styleInfo.cells ? (
+                  <div className="mt-1 text-[11px] text-[var(--text-secondary)]" data-preview-pieces>
+                    {preview.blank.pieces.map((pc) => `${pc.count} × ${fi(pc.length_in)} × ${fi(pc.width_in)} in (${pc.label.toLowerCase()})`).join(" · ")}
+                  </div>
+                ) : null}
+                {preview.blank.rule_in > 0 ? (
+                  <div className="mt-1 text-[11px] text-[var(--text-secondary)]" data-preview-rule>
+                    Cutting die rule ≈ {preview.blank.rule_in.toFixed(1)} in
+                  </div>
+                ) : null}
                 <dl className="mt-3 grid grid-cols-2 gap-y-1 text-[11px]">
                   <dt>Board per box</dt>
                   <dd className="text-right text-[var(--text-primary)]">{preview.blank.sqft_each.toFixed(3)} sq ft</dd>
@@ -1116,6 +1220,27 @@ export default function CorrugatedSettingsPage() {
                   </div>
                 ) : null}
               </div>
+              {pv.style !== "rsc" ? (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-page)] p-4 text-[11px] leading-relaxed">
+                  <div className="text-[var(--text-muted)]">How it was worked out (inches)</div>
+                  <p className="mt-2">
+                    {pv.style === "hsc"
+                      ? "As RSC, with one set of flaps: width = depth + depth allowance + (flap % × width + flap allowance) + trim."
+                      : pv.style === "fol"
+                        ? "As RSC, with full-width flaps: width = depth + depth allowance + 2 × (width + flap allowance) + trim."
+                        : pv.style === "pad"
+                          ? "Length + trim by width + trim."
+                          : pv.style === "tray"
+                            ? "(Length + 2 × depth + 2 × panel allowance + trim) by (width + 2 × depth + 2 × panel allowance + trim); the corners become the lock ears."
+                            : pv.style === "mailer"
+                              ? "Roll-end tuck front: length = L + 4 × depth + 4 × panel allowance + trim; width = 2 × W + 3 × depth + tuck (depth, at most 2) + 6 × panel allowance + trim."
+                              : "Partition set: (cells down − 1) strips of length × height and (cells across − 1) strips of width × height, plus trim."}
+                  </p>
+                  <p className="mt-2 text-[var(--text-faint)]">
+                    Estimating formulas. Compare with a box you run. Sizes round up to the nearest {fi(layout.round_to_in)} in.
+                  </p>
+                </div>
+              ) : (
               <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-page)] p-4 text-[11px] leading-relaxed">
                 <div className="text-[var(--text-muted)]">How it was worked out (inches)</div>
                 <p className="mt-2">
@@ -1134,6 +1259,7 @@ export default function CorrugatedSettingsPage() {
                   Both rounded up to the nearest {fi(layout.round_to_in)} in.
                 </p>
               </div>
+              )}
             </div>
           )}
         </section>
@@ -1235,6 +1361,7 @@ export default function CorrugatedSettingsPage() {
             ) : (
               <div className="mt-4" data-testid="price-check-result">
                 <div className="mb-2 text-[11px] text-[var(--text-muted)]">
+                  {pcResult.style ? `${boxStyleInfo(pcResult.style).label} · ` : ""}
                   {pcResult.grade?.name} ({pcResult.grade?.flute} flute)
                   {pcResult.blank
                     ? ` · blank ${fi(pcResult.blank.length_in)} × ${fi(pcResult.blank.width_in)} in · ${pcResult.blank.sqft_each_with_waste.toFixed(3)} sq ft per box with waste`
@@ -1260,6 +1387,7 @@ export default function CorrugatedSettingsPage() {
                         <th className={`${TH} text-right`}>Box total</th>
                         <th className={`${TH} text-right`}>Unit price</th>
                         <th className={`${TH} text-right`}>Plates (one time)</th>
+                        {(pcResult.die_line_usd ?? 0) > 0 ? <th className={`${TH} text-right`}>Cutting die (one time)</th> : null}
                       </tr>
                     </thead>
                     <tbody>
@@ -1287,6 +1415,9 @@ export default function CorrugatedSettingsPage() {
                           <td className={`${TD} text-right`}>
                             {pcResult.colors && qr.method !== "digital" ? usd(qr.plates_line_usd ?? 0) : "—"}
                           </td>
+                          {(pcResult.die_line_usd ?? 0) > 0 ? (
+                            <td className={`${TD} text-right`}>{(qr.die_line_usd ?? 0) > 0 ? usd(qr.die_line_usd ?? 0) : "—"}</td>
+                          ) : null}
                         </tr>
                       ))}
                     </tbody>

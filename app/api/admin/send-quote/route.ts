@@ -257,6 +257,7 @@ export async function POST(req: NextRequest) {
         `SELECT qbs.id, qbs.sku, qbs.qty,
                 qbs.unit_price_usd, qbs.extended_price_usd,
                 (to_jsonb(qbs) ->> 'plates_usd')::numeric as plates_usd,
+                (to_jsonb(qbs) ->> 'tooling_usd')::numeric as tooling_usd,
                 (to_jsonb(qbs) -> 'pricing_detail' ->> 'run_method') as run_method,
                 b.vendor,
                 coalesce(b.style, qbs.custom_style) as style,
@@ -318,7 +319,16 @@ export async function POST(req: NextRequest) {
       facts,
     });
     const dieCutTriggerQty = Number(settings.die_cut_trigger_qty) || 0;
-    const dieCuttingCharge = proc.total;
+    // Step 27: one-time cutting dies for die-cut boxes (same as /api/quote/print).
+    const boxToolingTotal =
+      Math.round(packagingLines.reduce((s, l) => s + (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0), 0) * 100) / 100;
+    const processLines = [
+      ...proc.lines,
+      ...(boxToolingTotal > 0
+        ? [{ key: "box_die", label: "Box cutting die (one time)", amount: boxToolingTotal, note: null }]
+        : []),
+    ];
+    const dieCuttingCharge = proc.total + boxToolingTotal;
 
     const grandTotal = foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge;
 
@@ -477,7 +487,7 @@ export async function POST(req: NextRequest) {
       printSublabel: pc.printModel === "per_color" ? pc.printSummary : null,
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
-      processLines: proc.lines.length > 0 ? proc.lines : null,
+      processLines: processLines.length > 0 ? processLines : null,
       grandTotal,
       shippingEstimate: shippingEstimate > 0 ? shippingEstimate : null,
       shippingIsCapped,

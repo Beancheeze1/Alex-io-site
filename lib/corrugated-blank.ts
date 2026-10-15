@@ -5,6 +5,8 @@
 // seeding) and, in Step 2, the box pricing engine.
 // Spec: "Custom Corrugated Box Pricing - Spec v1".
 
+import type { BoxStyle, PartitionCells } from "./box-styles";
+
 export type JointType = "glued" | "stitched" | "taped";
 
 export const JOINT_TYPES: JointType[] = ["glued", "stitched", "taped"];
@@ -83,7 +85,22 @@ export const RATE_FIELDS = [
   { key: "sheet_max_width_in", label: "Largest sheet: width", unit: "in", max: 1000, note: "Along the blank's width. 0 = one blank per sheet" },
   { key: "sheet_max_up", label: "Most blanks per sheet", unit: "blanks", max: 50, note: "1 = one blank per sheet" },
   { key: "sheet_min_msf", label: "Corrugator minimum", unit: "MSF per order", max: 1000000, note: "Smaller orders are charged as this much board. 0 = none" },
+  // Step 27: other styles (HSC and FOL use the RSC converting cost).
+  { key: "diecut_per_m", label: "Die-cut converting", unit: "$ per 1,000 boxes", max: 1000000, note: "Mailers and trays: press, stripping, folding/gluing" },
+  { key: "die_base_usd", label: "Cutting die: base", unit: "$ per die", max: 1000000, note: "One-time; shown as its own line. Not charged on digital short runs" },
+  { key: "die_per_in_usd", label: "Cutting die: rule", unit: "$ per inch of rule", max: 10000, note: "Rule length is estimated from the blank (cuts + scores)" },
+  { key: "pad_per_m", label: "Pad cutting", unit: "$ per 1,000 pads", max: 1000000, note: "Pads / sheets" },
+  { key: "partition_per_m", label: "Partition slotting + assembly", unit: "$ per 1,000 sets", max: 1000000, note: "Partition sets" },
 ] as const;
+
+/** Step 27: the rate fields shown under "Other box styles" on the admin page. */
+export const STYLE_RATE_KEYS: ReadonlySet<string> = new Set([
+  "diecut_per_m",
+  "die_base_usd",
+  "die_per_in_usd",
+  "pad_per_m",
+  "partition_per_m",
+]);
 
 /** Step 26: the rate fields shown under "Board bought as sheets" on the admin page. */
 export const SHEET_KEYS: ReadonlySet<string> = new Set([
@@ -160,6 +177,111 @@ export function computeRscBlank(
   const sqft_each_with_waste = sqft_each * (1 + layout.waste_pct / 100);
 
   return { raw_length_in, raw_width_in, length_in, width_in, sqft_each, sqft_each_with_waste };
+}
+
+export type BlankPiece = { label: string; length_in: number; width_in: number; count: number };
+
+export type StyleBlank = BlankResult & {
+  style: BoxStyle;
+  pieces: BlankPiece[]; // one per box, except partitions (strips per set)
+  pieces_per_box: number; // total pieces in one box / set
+  rule_in: number; // cutting-die rule estimate (die-cut styles), 0 otherwise
+};
+
+/**
+ * Step 27: the blank (or, for partitions, the strips) for any style, from
+ * inside dims in inches. a = the flute's panel allowance, t = edge trim, s =
+ * flap %. Every size is rounded up to the shop's increment.
+ *   rsc        computeRscBlank
+ *   hsc        as RSC, one set of flaps: width = D + d + (sW + f) + t
+ *   fol        as RSC, full-width flaps: width = D + d + 2(W + f) + t
+ *   pad        L + t by W + t (no depth)
+ *   tray       (L + 2D + 2a + t) by (W + 2D + 2a + t); corners become the lock ears
+ *   mailer     roll-end tuck front (FEFCO 0427 style):
+ *                length = L + 4D + 4a + t      (double side walls)
+ *                width  = 2W + 3D + tuck + 6a + t, tuck = min(D, 2)
+ *   partition  (down - 1) strips L x D and (across - 1) strips W x D
+ * Die rule (estimate, for the cutting-die charge):
+ *   tray   = blank perimeter + 2(L + W) base scores + 4D corner slits
+ *   mailer = blank perimeter + 5L + 4W + 8D (fold scores + dust-flap cuts)
+ * These are estimating formulas: check the blank preview against a box you run.
+ */
+export function computeStyleBlank(
+  style: BoxStyle,
+  dims: { L: number; W: number; D: number },
+  flute: FluteSpec,
+  layout: LayoutSettings,
+  cells?: PartitionCells | null,
+): StyleBlank {
+  const { L, W, D } = dims;
+  const a = flute.panel_allow_in;
+  const t = layout.edge_trim_in;
+  const inc = layout.round_to_in;
+  const waste = 1 + layout.waste_pct / 100;
+  const one = (rawL: number, rawW: number, rule: number, label = "Blank"): StyleBlank => {
+    const length_in = roundUp(rawL, inc);
+    const width_in = roundUp(rawW, inc);
+    const sqft_each = (length_in * width_in) / 144;
+    return {
+      style,
+      raw_length_in: rawL,
+      raw_width_in: rawW,
+      length_in,
+      width_in,
+      sqft_each,
+      sqft_each_with_waste: sqft_each * waste,
+      pieces: [{ label, length_in, width_in, count: 1 }],
+      pieces_per_box: 1,
+      rule_in: rule,
+    };
+  };
+
+  if (style === "rsc" || style === "hsc" || style === "fol") {
+    const rsc = computeRscBlank(dims, flute, layout);
+    if (style === "rsc") {
+      return { ...rsc, style, pieces: [{ label: "Blank", length_in: rsc.length_in, width_in: rsc.width_in, count: 1 }], pieces_per_box: 1, rule_in: 0 };
+    }
+    const s = layout.flap_pct / 100;
+    const rawW =
+      style === "hsc"
+        ? D + flute.depth_allow_in + (s * W + flute.flap_allow_in) + t
+        : D + flute.depth_allow_in + 2 * (W + flute.flap_allow_in) + t;
+    return one(rsc.raw_length_in, rawW, 0);
+  }
+  if (style === "pad") return one(L + t, W + t, 0, "Pad");
+  if (style === "tray") {
+    const bl = roundUp(L + 2 * D + 2 * a + t, inc);
+    const bw = roundUp(W + 2 * D + 2 * a + t, inc);
+    return one(L + 2 * D + 2 * a + t, W + 2 * D + 2 * a + t, 2 * (bl + bw) + 2 * (L + W) + 4 * D);
+  }
+  if (style === "mailer") {
+    const tuck = Math.min(D, 2);
+    const rawL = L + 4 * D + 4 * a + t;
+    const rawW = 2 * W + 3 * D + tuck + 6 * a + t;
+    const bl = roundUp(rawL, inc);
+    const bw = roundUp(rawW, inc);
+    return one(rawL, rawW, 2 * (bl + bw) + 5 * L + 4 * W + 8 * D);
+  }
+
+  // partition
+  const c = cells ?? { across: 1, down: 1 };
+  const pieces: BlankPiece[] = [];
+  if (c.down > 1) pieces.push({ label: "Long strips", length_in: roundUp(L + t, inc), width_in: roundUp(D + t, inc), count: c.down - 1 });
+  if (c.across > 1) pieces.push({ label: "Short strips", length_in: roundUp(W + t, inc), width_in: roundUp(D + t, inc), count: c.across - 1 });
+  const sqft_each = pieces.reduce((sum, p) => sum + (p.length_in * p.width_in * p.count) / 144, 0);
+  const first = pieces[0] ?? { length_in: 0, width_in: 0 };
+  return {
+    style,
+    raw_length_in: L + t,
+    raw_width_in: D + t,
+    length_in: first.length_in,
+    width_in: first.width_in,
+    sqft_each,
+    sqft_each_with_waste: sqft_each * waste,
+    pieces,
+    pieces_per_box: pieces.reduce((n, p) => n + p.count, 0),
+    rule_in: 0,
+  };
 }
 
 export type SheetSettings = {

@@ -29,18 +29,29 @@
 // The sheet (size, blanks per sheet) comes from computeSheet. Everything
 // else is unchanged; "blank" (the default) is the Step 2 formula.
 //
-// Imports only ./corrugated-blank so it runs anywhere (server, browser, tsx).
+// Step 27, other styles (lib/box-styles.ts): the blank comes from
+// computeStyleBlank. Converting per style: RSC / HSC / FOL = converting $/M,
+// mailer / tray = die-cut $/M, pads = pad $/M, partitions = partition $/M
+// (per 1,000 sets). Die-cut styles run on the press carry a one-time cutting
+// die = (die base + rule inches x $/in) x (1 + markup%), its own line like
+// plates (and counted toward the minimum order). Digital short runs are CAD
+// cut: no die; CAD cut is per piece (a partition set has several).
+// Partitions are priced unprinted. Sheet costing works per piece type.
+//
+// Imports only ./corrugated-blank and ./box-styles so it runs anywhere.
 
 import {
-  computeRscBlank,
   computeSheet,
-  type BlankResult,
+  computeStyleBlank,
+  type BlankPiece,
+  type StyleBlank,
   type BoardMethod,
   type SheetResult,
   type CorrugatedRates,
   type FluteSpec,
   type JointType,
 } from "./corrugated-blank";
+import { boxStyleInfo, type BoxStyle, type PartitionCells } from "./box-styles";
 
 export type Coverage = "spot" | "flood";
 
@@ -86,6 +97,8 @@ export type PriceRscInput = {
   flute: FluteSpec;
   settings: BoxSettings;
   method?: RunMethod | null; // Step 15: null / missing = auto by quantity
+  style?: BoxStyle; // Step 27: missing = "rsc"
+  cells?: PartitionCells | null; // Step 27: partitions only
 };
 
 export type QtyPrice = {
@@ -104,11 +117,13 @@ export type QtyPrice = {
   sheets?: number; // Step 26 (sheet method): sheets bought, spoilage included
   msf?: number; // Step 26 (sheet method): MSF charged (at least the minimum)
   min_msf_applied?: boolean; // Step 26: the corrugator minimum was charged
+  die_line_usd: number; // Step 27: cutting die at this quantity (0 unless die-cut on the press)
 };
 
 export type BoxPriceOk = {
   ok: true;
-  blank: BlankResult;
+  style: BoxStyle; // Step 27
+  blank: StyleBlank;
   colors: number;
   sides: 1 | 2;
   plates_cost_usd: number; // before markup, when run with plates
@@ -116,7 +131,10 @@ export type BoxPriceOk = {
   quantities: QtyPrice[]; // ascending, de-duplicated
   warnings: string[]; // rates at $0 that probably shouldn't be
   board_method: BoardMethod; // Step 26
-  sheet: SheetResult | null; // Step 26: the sheet bought (sheet method only)
+  sheet: SheetResult | null; // Step 26: the sheet bought (sheet method only; first piece)
+  piece_sheets: SheetResult[]; // Step 27: one per piece type (partitions have two)
+  die_cost_usd: number; // Step 27: cutting die before markup (die-cut styles)
+  die_line_usd: number; // Step 27: marked up, one time, when run on the press
 };
 
 export type BoxPriceErr = { ok: false; error: string; message: string };
@@ -136,15 +154,25 @@ function fail(error: string, message: string): BoxPriceErr {
 }
 
 export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
-  const { L, W, D } = inp.dims;
+  const style: BoxStyle = inp.style ?? "rsc";
+  const info = boxStyleInfo(style);
+  const L = inp.dims.L;
+  const W = inp.dims.W;
+  const D = info.usesDepth ? inp.dims.D : 0;
   const dimChecks: [string, number][] = [
     ["length", L],
     ["width", W],
-    ["depth", D],
+    ...(info.usesDepth ? ([[info.depthLabel.toLowerCase(), D]] as [string, number][]) : []),
   ];
   for (const [name, v] of dimChecks) {
     if (!Number.isFinite(v) || v <= 0 || v > MAX_DIM_IN) {
       return fail("invalid_dims", `Inside ${name} must be more than 0 and at most ${MAX_DIM_IN} in.`);
+    }
+  }
+  if (info.cells) {
+    const c = inp.cells;
+    if (!c || !Number.isInteger(c.across) || !Number.isInteger(c.down) || c.across < 1 || c.down < 1 || c.across * c.down < 2) {
+      return fail("invalid_cells", "A partition set needs cells across and down (at least 2 cells).");
     }
   }
 
@@ -159,10 +187,12 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     }
   }
 
-  const colors = Array.isArray(inp.print?.colors) ? inp.print.colors : [];
-  if (colors.length > MAX_COLORS || colors.some((c) => c !== "spot" && c !== "flood")) {
+  const askedColors = Array.isArray(inp.print?.colors) ? inp.print.colors : [];
+  if (askedColors.length > MAX_COLORS || askedColors.some((c) => c !== "spot" && c !== "flood")) {
     return fail("invalid_print", `Printing must be 0 to ${MAX_COLORS} colors, each spot or flood.`);
   }
+  // Step 27: partitions are priced unprinted.
+  const colors = info.printable ? askedColors : [];
   const sides: 1 | 2 = colors.length === 0 ? 1 : inp.print.sides;
   if (sides !== 1 && sides !== 2) return fail("invalid_print", "Printing sides must be 1 or 2.");
 
@@ -175,18 +205,37 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
   }
 
   const s = inp.settings;
-  const blank = computeRscBlank(inp.dims, inp.flute, {
-    joint_type: s.joint_type,
-    flap_pct: s.flap_pct,
-    round_to_in: s.round_to_in,
-    edge_trim_in: s.edge_trim_in,
-    waste_pct: s.waste_pct,
-  });
+  const blank = computeStyleBlank(
+    style,
+    { L, W, D },
+    inp.flute,
+    {
+      joint_type: s.joint_type,
+      flap_pct: s.flap_pct,
+      round_to_in: s.round_to_in,
+      edge_trim_in: s.edge_trim_in,
+      waste_pct: s.waste_pct,
+    },
+    inp.cells ?? null,
+  );
 
-  // Step 26: board bought as sheets.
+  // Step 26: board bought as sheets (Step 27: one sheet per piece type).
   const boardMethod: BoardMethod = s.board_method === "sheet" ? "sheet" : "blank";
-  const sheet = boardMethod === "sheet" ? computeSheet(blank, s) : null;
+  const pieceSheets: SheetResult[] =
+    boardMethod === "sheet" ? blank.pieces.map((p: BlankPiece) => computeSheet(p, s)) : [];
+  const sheet = pieceSheets[0] ?? null;
   const minMsf = Math.max(0, Number(s.sheet_min_msf) || 0);
+
+  // Step 27: converting rate and cutting die by style.
+  const convertingPerM =
+    info.kind === "diecut"
+      ? Number(s.diecut_per_m) || 0
+      : info.kind === "flat"
+        ? Number(s.pad_per_m) || 0
+        : info.kind === "partition"
+          ? Number(s.partition_per_m) || 0
+          : s.converting_per_m;
+  const dieCost = info.kind === "diecut" ? (Number(s.die_base_usd) || 0) + blank.rule_in * (Number(s.die_per_in_usd) || 0) : 0;
 
   const spot = colors.filter((c) => c === "spot").length;
   const flood = colors.length - spot;
@@ -195,15 +244,22 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
   const printSetup = s.print_setup_per_color_usd * colors.length * sides;
   const mk = 1 + s.markup_pct / 100;
   const platesLineRaw = platesCost * mk;
+  const dieLineRaw = r2(dieCost * mk); // cents, so the line and the minimum add up exactly
 
   const printed = colors.length > 0;
   const quantities: QtyPrice[] = qtys.map((qty) => {
     const method = resolveRunMethod(inp.method, qty, s);
     let board = ((blank.sqft_each_with_waste * qty) / 1000) * cost;
     let sheetInfo: Pick<QtyPrice, "sheets" | "msf" | "min_msf_applied"> = {};
-    if (sheet) {
-      const sheets = Math.ceil((qty / sheet.up) * (1 + s.waste_pct / 100) - 1e-9);
-      const msfBought = (sheets * sheet.sqft) / 1000;
+    if (pieceSheets.length > 0) {
+      let sheets = 0;
+      let msfBought = 0;
+      blank.pieces.forEach((p, i) => {
+        const sh = pieceSheets[i];
+        const n = Math.ceil(((qty * p.count) / sh.up) * (1 + s.waste_pct / 100) - 1e-9);
+        sheets += n;
+        msfBought += (n * sh.sqft) / 1000;
+      });
       const msf = Math.max(msfBought, minMsf);
       board = msf * cost;
       sheetInfo = { sheets, msf: r4(msf), min_msf_applied: msf > msfBought + 1e-12 };
@@ -212,24 +268,27 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     let run: number;
     let setup: number;
     let platesLine: number;
+    let dieLine: number;
     if (method === "digital") {
-      // Step 15: short run, digitally printed and CAD cut. No plates, no press.
-      converting = qty * s.cad_cut_per_box_usd;
+      // Step 15: short run, digitally printed and CAD cut. No plates, no press, no die.
+      converting = qty * blank.pieces_per_box * s.cad_cut_per_box_usd;
       run = printed ? qty * blank.sqft_each * s.digital_per_sqft_usd * sides : 0;
       setup = s.cad_setup_usd + (printed ? s.digital_setup_usd : 0);
       platesLine = 0;
+      dieLine = 0;
     } else {
-      converting = (qty / 1000) * s.converting_per_m;
+      converting = (qty / 1000) * convertingPerM;
       run = (qty / 1000) * runPerMPerSide * sides;
       setup = s.order_setup_usd + printSetup;
       platesLine = platesLineRaw;
+      dieLine = dieLineRaw;
     }
     const costUsd = board + converting + run + setup;
 
     let boxTotal = costUsd * mk;
     let minApplied = false;
-    if (s.min_order_usd > 0 && boxTotal + platesLine < s.min_order_usd) {
-      boxTotal = s.min_order_usd - platesLine;
+    if (s.min_order_usd > 0 && boxTotal + platesLine + dieLine < s.min_order_usd) {
+      boxTotal = s.min_order_usd - platesLine - dieLine;
       minApplied = true;
     }
 
@@ -248,6 +307,7 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
       method,
       plates_line_usd: r2(platesLine),
       ...sheetInfo,
+      die_line_usd: r2(dieLine),
     };
   });
 
@@ -256,7 +316,18 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
   const warnings: string[] = [];
   if (s.markup_pct === 0) warnings.push("Markup is 0%.");
   if (anyPlates) {
-    if (s.converting_per_m === 0) warnings.push("Converting cost is $0.");
+    if (convertingPerM === 0) {
+      warnings.push(
+        info.kind === "diecut"
+          ? "Die-cut converting cost is $0."
+          : info.kind === "flat"
+            ? "Pad cutting cost is $0."
+            : info.kind === "partition"
+              ? "Partition cost is $0."
+              : "Converting cost is $0.",
+      );
+    }
+    if (info.kind === "diecut" && dieCost === 0) warnings.push("Cutting die cost is $0.");
     if (colors.length > 0 && s.print_setup_per_color_usd === 0) warnings.push("Print setup is $0.");
     if (spot > 0 && s.print_run_spot_per_m === 0) warnings.push("Spot print run rate is $0.");
     if (flood > 0 && s.print_run_flood_per_m === 0) warnings.push("Flood print run rate is $0.");
@@ -267,14 +338,18 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     if (s.cad_cut_per_box_usd === 0) warnings.push("CAD cut rate is $0.");
     if (printed && s.digital_per_sqft_usd === 0) warnings.push("Digital print rate is $0.");
   }
-  if (sheet?.oversize) {
+  if (!info.printable && askedColors.length > 0) warnings.push("Partitions are priced unprinted.");
+  pieceSheets.forEach((sh, i) => {
+    if (!sh.oversize) return;
+    const p = blank.pieces[i];
     warnings.push(
-      `The ${r4(blank.length_in)} x ${r4(blank.width_in)} in blank doesn't fit the largest sheet (${s.sheet_max_length_in} x ${s.sheet_max_width_in} in).`,
+      `The ${r4(p.length_in)} x ${r4(p.width_in)} in ${blank.pieces.length > 1 ? p.label.toLowerCase().replace(/s$/, "") : "blank"} doesn't fit the largest sheet (${s.sheet_max_length_in} x ${s.sheet_max_width_in} in).`,
     );
-  }
+  });
 
   return {
     ok: true,
+    style,
     blank,
     colors: colors.length,
     sides,
@@ -284,6 +359,9 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     warnings,
     board_method: boardMethod,
     sheet,
+    piece_sheets: pieceSheets,
+    die_cost_usd: r2(dieCost),
+    die_line_usd: r2(dieLineRaw),
   };
 }
 

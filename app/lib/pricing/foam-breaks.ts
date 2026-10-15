@@ -158,8 +158,9 @@ export async function foamBreaksForQuote(quoteNo: string): Promise<FoamBreaks | 
   const forceSkive = items.some((it) => isLayerRow(it.notes)) && items.some((it) => isLayerRow(it.notes) && nonWholeInch(it.height_in));
 
   // Boxes (complete packs): every box at each quantity.
-  const boxRows = await q<{ ext: string | null; plates: string | null }>(
-    `SELECT extended_price_usd AS ext, (to_jsonb(qbs) ->> 'plates_usd') AS plates
+  const boxRows = await q<{ ext: string | null; plates: string | null; tooling: string | null }>(
+    `SELECT extended_price_usd AS ext, (to_jsonb(qbs) ->> 'plates_usd') AS plates,
+            (to_jsonb(qbs) ->> 'tooling_usd') AS tooling
        FROM public.quote_box_selections qbs WHERE quote_id = $1`,
     [quote.id],
   );
@@ -169,7 +170,8 @@ export async function foamBreaksForQuote(quoteNo: string): Promise<FoamBreaks | 
     const printArg = facts.print_mode === "per_box" ? "per_box" : parsePrintSpec(facts.print_spec);
     try {
       const priced = await priceQuoteBoxesAtQtys(Number(quote.id), tenantId, printArg, list);
-      for (const p of priced) boxAt.set(p.qty, { boxes: p.boxes_usd, plates: Number(p.plates_usd) || 0 });
+      // Step 27: one-time cutting dies count with the plates.
+      for (const p of priced) boxAt.set(p.qty, { boxes: p.boxes_usd, plates: r2((Number(p.plates_usd) || 0) + (Number(p.tooling_usd) || 0)) });
     } catch (e) {
       console.warn("[foam-breaks] box prices unavailable", { quoteNo, err: String(e) });
     }
@@ -177,7 +179,7 @@ export async function foamBreaksForQuote(quoteNo: string): Promise<FoamBreaks | 
     if (!boxRows.some((r) => r.ext == null)) {
       boxAt.set(current, {
         boxes: r2(boxRows.reduce((s, r) => s + Number(r.ext || 0), 0)),
-        plates: r2(boxRows.reduce((s, r) => s + Number(r.plates || 0), 0)),
+        plates: r2(boxRows.reduce((s, r) => s + Number(r.plates || 0) + Number(r.tooling || 0), 0)),
       });
     }
   }

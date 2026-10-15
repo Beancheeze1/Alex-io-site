@@ -1291,7 +1291,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   // Boxes only (Corrugated Step 5): price at each buyer-picked quantity, with
   // a switch that makes a break the ordered quantity.
   const [boxBreaks, setBoxBreaks] = React.useState<
-    { qty: number; boxes_usd: number | null; plates_usd: number; total_usd: number | null; unit_usd: number | null }[]
+    { qty: number; boxes_usd: number | null; plates_usd: number; tooling_usd?: number; total_usd: number | null; unit_usd: number | null }[]
   >([]);
   const [boxBreaksCurrent, setBoxBreaksCurrent] = React.useState<number | null>(null);
   const [boxBreaksLocked, setBoxBreaksLocked] = React.useState<boolean>(false);
@@ -1303,7 +1303,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
       id: number;
       description: string | null;
       current_qty: number | null;
-      breaks: { qty: number; boxes_usd: number | null; plates_usd: number; total_usd: number | null; unit_usd: number | null }[];
+      breaks: { qty: number; boxes_usd: number | null; plates_usd: number; tooling_usd?: number; total_usd: number | null; unit_usd: number | null }[];
     }[]
   >([]);
 
@@ -3314,7 +3314,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 marginBottom: 2,
                               }}
                             >
-                              Machining – {l.label}
+                              {l.key === "box_die" ? "Packaging" : "Machining"} – {l.label}
                             </div>
                             {l.note ? <div style={{ fontWeight: 500 }}>{l.note}</div> : null}
                           </td>
@@ -3568,7 +3568,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Quantity</th>
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per box</th>
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Boxes</th>
-                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Plates (one time)</th>
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>
+                            {boxBreakGroups.some((g) => g.breaks.some((b) => (b.tooling_usd ?? 0) > 0)) ? "Plates + die (one time)" : "Plates (one time)"}
+                          </th>
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Total</th>
                           <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }} />
                         </tr>
@@ -3650,7 +3652,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per box</th>
                         )}
                         <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Boxes</th>
-                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Plates (one time)</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>
+                          {boxBreaks.some((b) => (b.tooling_usd ?? 0) > 0) ? "Plates + die (one time)" : "Plates (one time)"}
+                        </th>
                         <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Total</th>
                         <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }} />
                       </tr>

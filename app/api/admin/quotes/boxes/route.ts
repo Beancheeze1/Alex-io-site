@@ -5,7 +5,8 @@
 // this is where a revised quote's box size, style, board grade, printing and
 // quantity change.
 //   GET  ?quote_no=…  -> { ok, boxes_only, locked, per_box, rows: [...], grades: [...] }
-//   POST { quote_no, box_id, L, W, D, style, grade_id?, qty, colors, sides }
+//   POST { quote_no, box_id, L, W, D, style, grade_id?, qty, colors, sides,
+//          cells_across?, cells_down? }   // Step 27: any style; partitions need cells
 //        -> updates that box and reprices it
 // - Staff (admin / cs / sales) of the quote's shop, or the platform owner.
 // - Released (locked) quotes are refused: Revise first.
@@ -21,6 +22,7 @@ import { isPlatformOwner } from "@/lib/admin-auth";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { MAX_COLORS, parsePrintSpec, type PrintSpec } from "@/lib/corrugated-price";
 import { repriceQuoteBoxes, rowPrintSpec } from "@/app/lib/packaging-selection";
+import { boxStyleOrRsc, parseCustomBoxInput, type BoxStyle } from "@/lib/box-styles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +38,8 @@ type BoxRow = {
   custom_width_in: string | number | null;
   custom_height_in: string | number | null;
   custom_style: string | null;
+  custom_cells_across: number | string | null;
+  custom_cells_down: number | string | null;
   board_grade_id: string | number | null;
   print_colors: unknown;
   print_sides: number | string | null;
@@ -73,6 +77,7 @@ async function loadRows(quoteId: number): Promise<BoxRow[]> {
   return q<BoxRow>(
     `SELECT qbs.id, qbs.kind, qbs.qty, qbs.sku,
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
+            qbs.custom_cells_across, qbs.custom_cells_down,
             qbs.board_grade_id, qbs.print_colors, qbs.print_sides, qbs.qty_breaks, qbs.description,
             b.inside_length_in AS b_length, b.inside_width_in AS b_width, b.inside_height_in AS b_height,
             b.style AS b_style
@@ -84,8 +89,9 @@ async function loadRows(quoteId: number): Promise<BoxRow[]> {
   );
 }
 
-function styleOf(raw: unknown): "rsc" | "mailer" {
-  return String(raw || "").toLowerCase().includes("mailer") ? "mailer" : "rsc";
+/** Step 27: any style in lib/box-styles.ts; old or unknown values read as RSC (mailers stay mailers). */
+function styleOf(raw: unknown): BoxStyle {
+  return boxStyleOrRsc(raw);
 }
 
 /** Whole-number quantities, 1..10M, de-duplicated and ascending. */
@@ -153,6 +159,8 @@ export async function GET(req: NextRequest) {
           W: Number(custom ? row.custom_width_in : row.b_width) || null,
           D: Number(custom ? row.custom_height_in : row.b_height) || null,
           style: styleOf(custom ? row.custom_style : row.b_style),
+          cells_across: row.custom_cells_across == null ? null : Number(row.custom_cells_across),
+          cells_down: row.custom_cells_down == null ? null : Number(row.custom_cells_down),
           grade_id: row.board_grade_id == null ? null : Number(row.board_grade_id),
           qty: Number(row.qty) || 1,
           colors: print.colors,
@@ -191,20 +199,16 @@ export async function POST(req: NextRequest) {
     const row = rows.find((x) => Number(x.id) === boxId);
     if (!row) return json({ ok: false, error: "box_not_found", message: "That box isn't on this quote." }, 404);
 
-    // ---- Validate ----
-    const L = Number(b.L);
-    const W = Number(b.W);
-    const D = Number(b.D);
-    if (![L, W, D].every((n) => Number.isFinite(n) && n > 0 && n <= 1000)) {
-      return json({ ok: false, error: "invalid_dims", message: "Enter the inside length, width and depth." }, 400);
-    }
+    // ---- Validate (Step 27: any style; pads have no depth, partitions need cells) ----
+    const parsed = parseCustomBoxInput(b);
+    if (!parsed.ok) return json({ ok: false, error: "invalid_dims", message: parsed.message }, 400);
+    const { L, W, D, style, cells } = parsed.value;
     const qty = Number(b.qty);
     if (!Number.isInteger(qty) || qty < 1 || qty > 10_000_000) {
       return json({ ok: false, error: "invalid_qty", message: "Enter a whole-number quantity." }, 400);
     }
-    const style = styleOf(b.style);
     const g = Number(b.grade_id);
-    const gradeId = style === "rsc" && Number.isInteger(g) && g > 0 ? g : null;
+    const gradeId = Number.isInteger(g) && g > 0 ? g : null;
     if (gradeId !== null) {
       const ok = await one<{ id: number }>(
         `SELECT id FROM public.corrugated_board_grades WHERE id = $1 AND tenant_id = $2 AND active = true`,
@@ -235,9 +239,9 @@ export async function POST(req: NextRequest) {
         `UPDATE public.quote_box_selections
             SET kind = 'custom', box_id = NULL, sku = NULL,
                 custom_length_in = $2, custom_width_in = $3, custom_height_in = $4, custom_style = $5,
-                board_grade_id = $6, qty = $7
+                board_grade_id = $6, qty = $7, custom_cells_across = $8, custom_cells_down = $9
           WHERE id = $1`,
-        [row.id, L, W, D, style, gradeId, qty],
+        [row.id, L, W, D, style, gradeId, qty, cells?.across ?? null, cells?.down ?? null],
       );
     }
 

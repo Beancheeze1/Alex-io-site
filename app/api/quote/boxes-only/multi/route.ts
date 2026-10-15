@@ -13,7 +13,8 @@
 //     { qty,
 //       sku } |
 //     { qty,
-//       L, W, D, style: "rsc"|"mailer", grade_id? },
+//       L, W, D, style, grade_id?, cells_across?, cells_down? },
+//       style: rsc | hsc | fol | mailer | tray | pad | partition (Step 27)
 //     ...each may also have:
 //       print_spec?: { colors: ("spot"|"flood")[], sides: 1|2 },
 //       qty_breaks?: number[]                  // up to 3 compare quantities
@@ -37,6 +38,7 @@ import { findOrCreateCustomer } from "@/app/lib/customers";
 import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { tenantOffersQuoteType } from "@/lib/quote-types-server";
+import { parseCustomBoxInput, type CustomBoxInput } from "@/lib/box-styles";
 import {
   customSelectionInsert,
   repriceQuoteBoxes,
@@ -71,7 +73,7 @@ type QuoteRow = { id: number; quote_no: string; tenant_id: number };
 type SizeIn = {
   qty: number;
   sku: string | null;
-  custom: { L: number; W: number; D: number; style: "rsc" | "mailer"; gradeId: number | null } | null;
+  custom: (CustomBoxInput & { gradeId: number | null }) | null;
   print: PrintSpec;
   breaks: number[] | null; // qty + up to 3, ascending; null when no compare quantities
 };
@@ -88,15 +90,11 @@ function parseSize(raw: unknown, index: number): SizeIn | string {
   const sku = str(b.sku, 80);
   let custom: SizeIn["custom"] = null;
   if (!sku) {
-    const L = Number(b.L);
-    const W = Number(b.W);
-    const D = Number(b.D);
-    if (![L, W, D].every((v) => Number.isFinite(v) && v > 0 && v <= 1000)) {
-      return `Size ${n}: enter the box inside length, width and depth.`;
-    }
-    const style: "rsc" | "mailer" = String(b.style || "").toLowerCase() === "mailer" ? "mailer" : "rsc";
+    // Step 27: any style (pads have no depth; partitions need cells).
+    const parsed = parseCustomBoxInput(b);
+    if (!parsed.ok) return `Size ${n}: ${parsed.message.charAt(0).toLowerCase()}${parsed.message.slice(1)}`;
     const g = Number(b.grade_id);
-    custom = { L, W, D, style, gradeId: Number.isInteger(g) && g > 0 ? g : null };
+    custom = { ...parsed.value, gradeId: Number.isInteger(g) && g > 0 ? g : null };
   }
 
   const print: PrintSpec = parsePrintSpec(b.print_spec) ?? { colors: [], sides: 1 };
@@ -283,6 +281,7 @@ export async function POST(req: NextRequest) {
           gradeId: s.custom.gradeId,
           print: s.print,
           method: runMethod,
+          cells: s.custom.cells,
         });
         const ins = customSelectionInsert({
           quoteId: quote.id,
@@ -293,6 +292,7 @@ export async function POST(req: NextRequest) {
           style: s.custom.style,
           qty: s.qty,
           resolved,
+          cells: s.custom.cells,
         });
         const inserted = await q<{ id: number }>(ins.text, ins.values);
         rowId = inserted?.[0]?.id ?? null;

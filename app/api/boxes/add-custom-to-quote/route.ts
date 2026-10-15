@@ -23,7 +23,7 @@
 //   {
 //     "quote_no": "Q-A-...",
 //     "length_in": 10, "width_in": 10, "height_in": 3,
-//     "style": "mailer" | "rsc",
+//     "style": "rsc" | "hsc" | "fol" | "mailer" | "tray",   // Step 27: the styles that hold foam
 //     "qty": 10,            // optional, defaults to 1
 //     "grade_id": 2 | null  // optional, RSC only; null = shop default
 //   }
@@ -32,6 +32,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, withTxn } from "@/lib/db";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { boxEditGuard } from "@/lib/box-edit-guard";
+import { BOX_STYLES, boxStyleInfo, parseBoxStyle } from "@/lib/box-styles";
 import {
   customSelectionInsert,
   printSpecForQuote,
@@ -109,17 +110,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const style = (body.style || "").trim().toLowerCase();
-    if (style !== "mailer" && style !== "rsc") {
+    // Step 27: any style that can hold foam (RSC, HSC, FOL, mailer, tray).
+    const parsedStyle = parseBoxStyle(body.style);
+    if (!parsedStyle || !boxStyleInfo(parsedStyle).forFoam) {
       return bad(
         {
           ok: false,
           error: "INVALID_STYLE",
-          message: "style must be 'mailer' or 'rsc'.",
+          message: `style must be one of: ${BOX_STYLES.filter((x) => x.forFoam).map((x) => x.key).join(", ")}.`,
         },
         400,
       );
     }
+    const style: string = parsedStyle;
 
     const qty = parseQty(body.qty, 1);
 
