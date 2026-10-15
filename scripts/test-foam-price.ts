@@ -10,6 +10,7 @@ import { cavityVolumeCi, priceFoam, type FoamMaterial, type FoamSettings } from 
 import { foamGeometry } from "../app/lib/pricing/foam-geometry";
 import { pickFoamProcess, priceFoamProcess, resolveFoamMethod } from "../app/lib/pricing/foam-process";
 import { cleanQtyList, foamBreakList } from "../app/lib/pricing/qty-list";
+import { reviewFoam } from "../app/lib/pricing/foam-review";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -239,6 +240,103 @@ check("breaks: nothing to compare", foamBreakList(100, []).length, 1);
 // CNC → die switch by quantity (cutoff 500) on the same part
 check("price by qty: 100 is CNC", priceFoamProcess({ model: 2, geom: g, qty: 100, settings: proc, markup: 1.45, legacy }).method, "cnc");
 check("price by qty: 1,000 is die", priceFoamProcess({ model: 2, geom: g, qty: 1000, settings: proc, markup: 1.45, legacy }).method, "die");
+
+// ---------------------------------------------------------------------------
+// Step 25: review flags
+// ---------------------------------------------------------------------------
+const rs = { foam_min_wall_in: 0.25, foam_min_feature_in: 0.25 };
+const codes = (f: { code: string }[]) => f.map((x) => x.code).sort().join(",");
+const one = (cav: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+  block: { lengthIn: 12, widthIn: 10, thicknessIn: 2 },
+  stack: [{ thicknessIn: 2, cavities: [cav] }],
+  ...extra,
+});
+const base = { fallback: { L: 12, W: 10, H: 2 }, settings: rs };
+check("review: clean 2-layer layout has no flags", reviewFoam({ ...base, layout: twoLayer }).length, 0);
+check(
+  "review: cavity 0.12\" from the edge = thin wall",
+  codes(reviewFoam({ ...base, layout: one({ lengthIn: 4, widthIn: 3, depthIn: 1, x: 0.01, y: 0.3 }) })),
+  "thin_wall",
+);
+check(
+  "review: cavity past the edge",
+  codes(reviewFoam({ ...base, layout: one({ lengthIn: 4, widthIn: 3, depthIn: 1, x: 0.9, y: 0.3 }) })),
+  "cavity_outside",
+);
+check(
+  "review: cavity deeper than its layer",
+  codes(reviewFoam({ ...base, layout: one({ lengthIn: 4, widthIn: 3, depthIn: 2.5, x: 0.3, y: 0.3 }) })),
+  "cavity_too_deep",
+);
+check(
+  "review: tiny cavity",
+  codes(reviewFoam({ ...base, layout: one({ lengthIn: 0.2, widthIn: 2, depthIn: 1, x: 0.3, y: 0.3 }) })),
+  "tiny_cavity",
+);
+check(
+  "review: overlapping cavities",
+  codes(
+    reviewFoam({
+      ...base,
+      layout: {
+        block: { lengthIn: 12, widthIn: 10, thicknessIn: 2 },
+        stack: [{ thicknessIn: 2, cavities: [
+          { lengthIn: 4, widthIn: 3, depthIn: 1, x: 0.2, y: 0.2 },
+          { lengthIn: 4, widthIn: 3, depthIn: 1, x: 0.3, y: 0.25 },
+        ] }],
+      },
+    }),
+  ),
+  "cavity_overlap",
+);
+check(
+  "review: cavities 0.1\" apart = thin wall",
+  codes(
+    reviewFoam({
+      ...base,
+      layout: {
+        block: { lengthIn: 12, widthIn: 10, thicknessIn: 2 },
+        stack: [{ thicknessIn: 2, cavities: [
+          { lengthIn: 3, widthIn: 3, depthIn: 1, x: 0.1, y: 0.2 },
+          { lengthIn: 3, widthIn: 3, depthIn: 1, x: (1.2 + 3 + 0.1) / 12, y: 0.2 },
+        ] }],
+      },
+    }),
+  ),
+  "thin_wall",
+);
+check(
+  "review: part bigger than the largest block",
+  codes(reviewFoam({ ...base, layout: twoLayer, settings: { ...rs, foam_max_block_l_in: 10, foam_max_block_w_in: 8 } })),
+  "oversize",
+);
+check(
+  "review: block either way round is fine",
+  reviewFoam({ ...base, layout: twoLayer, settings: { ...rs, foam_max_block_l_in: 10, foam_max_block_w_in: 12 } }).length,
+  0,
+);
+check(
+  "review: layer thicker than the thickest block",
+  codes(reviewFoam({ ...base, layout: one({ lengthIn: 4, widthIn: 3, depthIn: 1, x: 0.3, y: 0.3 }), settings: { ...rs, foam_max_block_t_in: 1.5 } })),
+  "oversize",
+);
+check(
+  "review: foam doesn't fit the box",
+  codes(reviewFoam({ ...base, layout: twoLayer, completePack: true, boxes: [{ L: 11.5, W: 9.5, H: 3 }] })),
+  "box_too_small",
+);
+check(
+  "review: foam fits rotated",
+  reviewFoam({ ...base, layout: twoLayer, completePack: true, boxes: [{ L: 10.125, W: 12.125, H: 3 }] }).length,
+  0,
+);
+check(
+  "review: stack taller than the box",
+  codes(reviewFoam({ ...base, layout: twoLayer, completePack: true, boxes: [{ L: 12.125, W: 10.125, H: 1.5 }] })),
+  "box_too_shallow",
+);
+check("review: unpriced material", codes(reviewFoam({ ...base, layout: twoLayer, materialUnpriced: true })), "material_unpriced");
+check("review: walls off when minimum is 0", reviewFoam({ ...base, layout: one({ lengthIn: 4, widthIn: 3, depthIn: 1, x: 0, y: 0 }), settings: {} }).length, 0);
 
 if (failed) {
   console.log(`\n${failed} FAILED`);

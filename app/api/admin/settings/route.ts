@@ -8,6 +8,7 @@ import {
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { adminOnly } from "@/lib/admin-auth";
 import { FOAM_PROCESS_KEYS } from "@/app/lib/pricing/foam-process";
+import { REVIEW_SETTING_KEYS } from "@/app/lib/pricing/foam-review";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,6 +90,8 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       "cushion_family_order",
       // Step 23: foam cutting + lamination rates
       ...FOAM_PROCESS_KEYS,
+      // Step 25: review flag limits
+      ...REVIEW_SETTING_KEYS,
     ];
 
     const filtered: Partial<PricingSettings> = {};

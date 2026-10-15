@@ -114,6 +114,8 @@ type ApiOk = {
   dieCutTriggerQty?: number;
   // Step 23: cutting / lamination lines (dieCuttingCharge = their total)
   processLines?: { key: string; label: string; amount: number; note: string | null }[];
+  // Step 25: review flags
+  reviewFlags?: { code: string; message: string }[];
   grandTotal?: number;
   customerBoxDims?: { L: number; W: number; H: number } | null;
   customerBoxMatch?: {
@@ -1188,6 +1190,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [processLines, setProcessLines] = React.useState<
     { key: string; label: string; amount: number; note: string | null }[]
   >([]);
+  const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
   const [customerBoxDims, setCustomerBoxDims] = React.useState<{ L: number; W: number; H: number } | null>(null);
   const [customerBoxMatch, setCustomerBoxMatch] = React.useState<ApiOk["customerBoxMatch"]>(null);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
@@ -1409,6 +1412,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 : 0,
             );
             setProcessLines(Array.isArray((json as ApiOk)?.processLines) ? ((json as ApiOk).processLines ?? []) : []);
+            setReviewFlags(Array.isArray((json as ApiOk)?.reviewFlags) ? ((json as ApiOk).reviewFlags ?? []) : []);
             setGrandTotal(
               Number.isFinite((json as ApiOk)?.grandTotal as any)
                 ? Number((json as ApiOk).grandTotal)
@@ -2519,6 +2523,30 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 {quoteNoValue && (boxSelections?.length ?? 0) > 0 ? <RunMethodControl quoteNo={quoteNoValue} /> : null}
                 {/* Step 23: how the foam is cut (hides itself on quotes with no foam) */}
                 {quoteNoValue ? <FoamMethodControl quoteNo={quoteNoValue} /> : null}
+                {/* Step 25: review flags (Release for manufacturing asks to confirm these) */}
+                {reviewFlags.length > 0 ? (
+                  <div
+                    data-review-flags
+                    style={{
+                      marginBottom: 10,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--attention)",
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      Review before release ({reviewFlags.length})
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {reviewFlags.map((f, i) => (
+                        <li key={`rf-${i}`}>{f.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {items.length === 0 ? (
                   <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
                     No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.

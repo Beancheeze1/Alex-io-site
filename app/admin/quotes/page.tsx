@@ -251,12 +251,26 @@ export default function AdminQuotesPage() {
   async function setQuoteLock(quoteNo: string, lock: boolean) {
     setRowBusy((m) => ({ ...m, [quoteNo]: true }));
     try {
-      const res = await fetch("/api/admin/quotes/lock", {
+      let res = await fetch("/api/admin/quotes/lock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ quoteNo, lock }),
       });
-      const data = await res.json().catch(() => null);
+      let data = await res.json().catch(() => null);
+      // Step 25: review flags — show them and release only if staff confirm.
+      if (lock && res.status === 409 && data?.error === "REVIEW_FLAGS") {
+        const list = Array.isArray(data.flags)
+          ? data.flags.map((f: { message?: string }) => `• ${f?.message ?? ""}`).join("\n")
+          : "";
+        const go = window.confirm(`${data.message}\n\n${list}\n\nRelease for manufacturing anyway?`);
+        if (!go) return null;
+        res = await fetch("/api/admin/quotes/lock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quoteNo, lock, ack_flags: true }),
+        });
+        data = await res.json().catch(() => null);
+      }
       if (!res.ok || !data?.ok) {
         throw new Error(data?.message || "Lock action failed");
       }

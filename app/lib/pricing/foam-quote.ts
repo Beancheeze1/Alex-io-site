@@ -6,7 +6,10 @@
 //   - foamChargeLines(...): cutting (CNC or die + press), lamination, or the
 //     old flat die-cut fee, from the quote's locked charge settings
 
-import { one } from "@/lib/db";
+import { one, q } from "@/lib/db";
+import { loadFacts } from "@/app/lib/memory";
+import { getPricingSettings } from "@/app/lib/pricing/settings";
+import { reviewFoam, type ReviewFlag } from "@/app/lib/pricing/foam-review";
 import type { ChargeSettings } from "@/app/lib/pricing/foam-lock";
 import { foamGeometry, type FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { parseFoamRunChoice, priceFoamProcess, type FoamProcessResult } from "@/app/lib/pricing/foam-process";
@@ -69,4 +72,72 @@ export function foamChargeLines(args: {
       qty: args.legacyQty,
     },
   });
+}
+
+/**
+ * Step 25: review flags for a quote (cavities, thin walls, oversize, foam vs.
+ * box fit, unpriced material) from its saved layout, its billable foam line,
+ * its boxes and the shop's current review settings. [] for quotes with no foam.
+ */
+export async function quoteReviewFlags(quoteId: number, quoteNo: string, tenantId: number): Promise<ReviewFlag[]> {
+  try {
+    const items = await q<{
+      length_in: string;
+      width_in: string;
+      height_in: string;
+      qty: number;
+      notes: string | null;
+      calc_snapshot: unknown;
+    }>(
+      `SELECT length_in, width_in, height_in, qty, notes, calc_snapshot
+         FROM public.quote_items WHERE quote_id = $1 ORDER BY id ASC`,
+      [quoteId],
+    );
+    const primary = items.find((it) => {
+      const n = String(it.notes || "");
+      return (
+        !n.startsWith("[LAYOUT-LAYER]") &&
+        !n.startsWith("[PACKAGING]") &&
+        !/^requested shipping carton:/i.test(n) &&
+        Number(it.length_in) > 0 &&
+        Number(it.width_in) > 0
+      );
+    });
+    if (!primary) return [];
+
+    const facts = ((await loadFacts(quoteNo)) || {}) as Record<string, unknown>;
+    const settings = await getPricingSettings(tenantId);
+    const layout = await latestLayoutJson(quoteId);
+    const boxes = await q<{ l: string | null; w: string | null; h: string | null; label: string | null }>(
+      `SELECT coalesce(b.inside_length_in, qbs.custom_length_in) AS l,
+              coalesce(b.inside_width_in, qbs.custom_width_in) AS w,
+              coalesce(b.inside_height_in, qbs.custom_height_in) AS h,
+              coalesce(qbs.sku, qbs.description, b.description) AS label
+         FROM public.quote_box_selections qbs
+         LEFT JOIN public.boxes b ON b.id = qbs.box_id
+        WHERE qbs.quote_id = $1`,
+      [quoteId],
+    );
+    let snap: unknown = primary.calc_snapshot;
+    if (typeof snap === "string") {
+      try {
+        snap = JSON.parse(snap);
+      } catch {
+        snap = null;
+      }
+    }
+    const detail = snap && typeof snap === "object" ? (snap as { detail?: { needs_review?: unknown } }).detail : null;
+
+    return reviewFoam({
+      layout,
+      fallback: { L: Number(primary.length_in), W: Number(primary.width_in), H: Number(primary.height_in) },
+      settings,
+      boxes: boxes.map((b) => ({ L: Number(b.l), W: Number(b.w), H: Number(b.h), label: b.label })),
+      completePack: boxes.length > 0 && facts.pack_type !== "boxes_only",
+      materialUnpriced: detail?.needs_review === true,
+    });
+  } catch (e) {
+    console.warn("[foam-quote] review flags unavailable", { quoteNo, err: String(e) });
+    return [];
+  }
 }

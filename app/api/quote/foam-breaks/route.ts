@@ -94,7 +94,9 @@ export async function POST(req: NextRequest) {
       const printArg = facts.print_mode === "per_box" ? "per_box" : parsePrintSpec(facts.print_spec);
       await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), printArg);
     }
-    await saveFacts(quote.quote_no, { ...facts, qty });
+    // Step 25: keep the quantity we switched away from, so the buyer can switch back.
+    const kept = [...new Set([...info.list.filter((n) => n !== qty)])].slice(0, 3);
+    await saveFacts(quote.quote_no, { ...facts, qty, foam_qty_breaks: kept });
 
     await addAdminAlert({
       req,

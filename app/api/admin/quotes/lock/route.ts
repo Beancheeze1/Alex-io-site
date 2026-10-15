@@ -11,6 +11,7 @@ import { getCurrentUserFromRequest } from "@/lib/auth";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
+import { quoteReviewFlags } from "@/app/lib/pricing/foam-quote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -170,6 +171,23 @@ export async function POST(req: NextRequest) {
     // Step 16: boxes-only quotes have no layout editor; the caller opens the quote page.
     const info = await boxesOnlyInfo(quote.id, quote.quote_no);
     return json({ ok: true, locked: false, boxes_only: info.boxesOnly });
+  }
+
+  // Step 25: release only once staff have seen the review flags. The caller
+  // shows them and, if staff confirm, sends the release again with ack_flags.
+  if (!quote.locked && body?.ack_flags !== true) {
+    const flags = await quoteReviewFlags(quote.id, quote.quote_no, Number(user.tenant_id));
+    if (flags.length > 0) {
+      return json(
+        {
+          ok: false,
+          error: "REVIEW_FLAGS",
+          message: `This quote has ${flags.length} thing${flags.length > 1 ? "s" : ""} to check before release.`,
+          flags,
+        },
+        409,
+      );
+    }
   }
 
   // Load the latest package as the staging source we are about to freeze.

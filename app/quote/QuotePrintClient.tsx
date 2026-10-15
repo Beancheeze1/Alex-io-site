@@ -135,6 +135,8 @@ type ApiOk = {
   dieCutTriggerQty?: number;
   // Step 23: cutting / lamination lines (dieCuttingCharge = their total)
   processLines?: ProcessLine[];
+  // Step 25: things the shop will check before confirming
+  reviewFlags?: { code: string; message: string }[];
   grandTotal: number;
   isPrinted?: boolean;
   printModel?: "per_color" | "legacy";
@@ -841,6 +843,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [dieCuttingTriggered, setDieCuttingTriggered] = React.useState<boolean>(false);
   const [dieCutTriggerQty, setDieCutTriggerQty] = React.useState<number>(0);
   const [processLines, setProcessLines] = React.useState<ProcessLine[]>([]);
+  const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
   const [grandTotal, setGrandTotal] = React.useState<number>(0);
   const [salesRepEmail, setSalesRepEmail] = React.useState<string | null>(null);
 
@@ -1083,6 +1086,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
           typeof asOk.dieCutTriggerQty === "number" ? asOk.dieCutTriggerQty : 0,
         );
         setProcessLines(Array.isArray(asOk.processLines) ? asOk.processLines : []);
+        setReviewFlags(Array.isArray(asOk.reviewFlags) ? asOk.reviewFlags : []);
         setGrandTotal(typeof asOk.grandTotal === "number" ? asOk.grandTotal : 0);
         setIsPrinted(!!(asOk.isPrinted));
         setPrintModel(asOk.printModel === "per_color" ? "per_color" : "legacy");
@@ -3716,6 +3720,23 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     Switching updates the line items above.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Step 25: things the shop will check before confirming */}
+            {reviewFlags.length > 0 && (
+              <div style={{ ...cardBase, background: "var(--surface-card)", marginTop: 4 }} data-review-flags>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>
+                  Things the shop will check
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                  {reviewFlags.map((f, i) => (
+                    <li key={`rf-${i}`}>{f.message}</li>
+                  ))}
+                </ul>
+                <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 6, marginBottom: 0 }}>
+                  Your price is an estimate until the shop confirms it. You can adjust the layout to clear these.
+                </p>
               </div>
             )}
 

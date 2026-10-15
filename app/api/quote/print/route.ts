@@ -34,7 +34,7 @@ import { isDemoQuoteNo } from "@/lib/quote-no";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { lockedChargeSettings, lockedFoamPrice, quotePriceModel } from "@/app/lib/pricing/foam-lock";
-import { foamChargeLines, latestLayoutJson, quoteFoamGeometry } from "@/app/lib/pricing/foam-quote";
+import { foamChargeLines, latestLayoutJson, quoteFoamGeometry, quoteReviewFlags } from "@/app/lib/pricing/foam-quote";
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { addAdminAlert } from "@/lib/admin-alerts";
@@ -793,6 +793,9 @@ export async function GET(req: NextRequest) {
     const dieCuttingCharge = proc.total;
     const dieCuttingTriggered = proc.lines.length > 0;
 
+    // Step 25: things the shop should check (never change the price).
+    const reviewFlags = itemsRaw.length > 0 ? await quoteReviewFlags(quote.id, String(quoteNo), tenantId) : [];
+
     // Step 19: buyers (and anyone with the quote number) get only the facts
     // the quote page and editor use. Staff get everything.
     const PUBLIC_FACT_KEYS = [
@@ -837,6 +840,7 @@ export async function GET(req: NextRequest) {
       // Step 23: each cutting / lamination line, and how the foam is cut.
       processLines: proc.lines,
       foamMethod: proc.method,
+      reviewFlags,
       // Staff only: how the cutting charges were worked out.
       ...(isStaffCaller ? { foamProcessDetail: proc.detail, priceModel: proc.model } : {}),
       grandTotal: foamSubtotal + packagingSubtotal + printingUpcharge + dieCuttingCharge,

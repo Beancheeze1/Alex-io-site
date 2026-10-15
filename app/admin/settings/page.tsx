@@ -38,6 +38,16 @@ const FOAM_FIELDS = [
 ] as const;
 type FoamKey = (typeof FOAM_FIELDS)[number]["key"];
 
+// Step 25: review flag limits (warnings on the quote; never change a price).
+const REVIEW_FIELDS = [
+  { key: "foam_min_wall_in", label: "Minimum foam wall (in) — edge or between cavities", step: "0.01", dflt: 0.25 },
+  { key: "foam_min_feature_in", label: "Narrowest cavity (in)", step: "0.01", dflt: 0.25 },
+  { key: "foam_max_block_l_in", label: "Largest block length (in, 0 = don't check)", step: "0.1", dflt: 0 },
+  { key: "foam_max_block_w_in", label: "Largest block width (in)", step: "0.1", dflt: 0 },
+  { key: "foam_max_block_t_in", label: "Thickest block / layer (in, 0 = don't check)", step: "0.1", dflt: 0 },
+] as const;
+type ReviewKey = (typeof REVIEW_FIELDS)[number]["key"];
+
 type PricingSettings = {
   skive_upcharge_each: number;
   printing_upcharge_usd: number;   // flat "Art Setup" fee
@@ -56,7 +66,8 @@ type PricingSettings = {
   die_cut_upcharge_usd: number;
 
   cushion_family_order: string[];
-} & Record<FoamKey, number>;
+} & Record<FoamKey, number> &
+  Record<ReviewKey, number>;
 
 type SettingsResponse = {
   ok: boolean;
@@ -87,6 +98,7 @@ export default function AdminSettingsPage() {
     die_cut_trigger_qty: 500,
     die_cut_upcharge_usd: 0,
     ...(Object.fromEntries(FOAM_FIELDS.map((f) => [f.key, f.key === "press_parts_per_hit" ? 1 : 0])) as Record<FoamKey, number>),
+    ...(Object.fromEntries(REVIEW_FIELDS.map((f) => [f.key, f.dflt])) as Record<ReviewKey, number>),
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -170,6 +182,9 @@ export default function AdminSettingsPage() {
           ...(Object.fromEntries(
             FOAM_FIELDS.map((f) => [f.key, numberOr((s as Record<string, unknown>)[f.key], prev[f.key])]),
           ) as Record<FoamKey, number>),
+          ...(Object.fromEntries(
+            REVIEW_FIELDS.map((f) => [f.key, numberOr((s as Record<string, unknown>)[f.key], prev[f.key])]),
+          ) as Record<ReviewKey, number>),
         }));
       } catch (e: any) {
         console.error("Admin settings load error:", e);
@@ -551,6 +566,34 @@ export default function AdminSettingsPage() {
                   per hour × $/hour. Lamination = setup + glue lines × qty ×
                   $/glue line. Leave CNC and die at 0 to keep the flat
                   die-cutting charge above.
+                </p>
+              </div>
+
+              {/* Step 25: review flags */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-review-settings>
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
+                  Foam review checks
+                </h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {REVIEW_FIELDS.map((f) => (
+                    <label key={f.key} className="flex flex-col gap-1 text-xs">
+                      <span className="text-[var(--text-secondary)]">{f.label}</span>
+                      <input
+                        type="number"
+                        step={f.step}
+                        min="0"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                        value={settings[f.key]}
+                        onChange={(e) => setNum(f.key)(e.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
+                  Quotes that break these (plus cavities past the edge, deeper than
+                  their layer or overlapping, and foam that doesn&apos;t fit its box)
+                  show &quot;Things to check&quot; on the quote, and Release for
+                  manufacturing asks you to confirm. They never change a price.
                 </p>
               </div>
 

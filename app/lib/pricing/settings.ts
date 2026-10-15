@@ -46,6 +46,13 @@ export type PricingSettings = {
   lam_setup_usd: number;
   lam_per_glue_line_usd: number;
 
+  // Step 25: review flags (app/lib/pricing/foam-review.ts) — warnings only.
+  foam_min_wall_in: number; // thinnest foam wall at an edge / between cavities
+  foam_min_feature_in: number; // narrowest cavity
+  foam_max_block_l_in: number; // largest block / bun (0 = don't check)
+  foam_max_block_w_in: number;
+  foam_max_block_t_in: number;
+
   cushion_family_order: string[];
 };
 
@@ -77,6 +84,12 @@ const DEFAULTS: PricingSettings = {
   press_parts_per_hit: 1,
   lam_setup_usd: 0,
   lam_per_glue_line_usd: 0,
+
+  foam_min_wall_in: 0.25,
+  foam_min_feature_in: 0.25,
+  foam_max_block_l_in: 0,
+  foam_max_block_w_in: 0,
+  foam_max_block_t_in: 0,
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };
