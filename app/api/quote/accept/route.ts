@@ -13,6 +13,7 @@
 // - Step 29A: the buyer gets an "approval received" email (shop setting).
 // - Step 30: when the shop has freight set up, a ship-to ZIP is needed first
 //   (unless it's customer pickup), so the accepted total includes freight.
+// - Step 30B: the freight accepted is kept with the quote (freight_lock).
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -20,7 +21,8 @@ import { buyerEditGuard } from "@/lib/quote-edit";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { approvalForQuote } from "@/app/lib/quote-approval";
 import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
-import { effectiveTerms, loadShipTo, shopFreightSettings } from "@/app/lib/freight";
+import { effectiveTerms, loadShipTo, saveFreightLock, shopFreightSettings } from "@/app/lib/freight";
+import { quoteFreightNow } from "@/app/lib/quote-approval";
 import { cleanZip } from "@/app/lib/freight-core";
 import { MAX_NAME_LEN, MAX_PO_LEN, buyerCanAccept, cleanText } from "@/app/lib/quote-approval-core";
 
@@ -103,6 +105,10 @@ export async function POST(req: NextRequest) {
         maximumFractionDigits: 2,
       })}. Confirm it on the quote page.`,
     });
+
+    // Step 30B: keep the freight this total includes.
+    const fNow = await quoteFreightNow(quote.quote_no);
+    if (fNow) await saveFreightLock(quote.id, fNow.preFreightTotal, fNow.freight);
 
     // Step 29A: "we received your approval" (never fails the acceptance).
     const email = await sendQuoteStatusEmail({ quoteId: quote.id, kind: "accepted", by: name, reapproval });

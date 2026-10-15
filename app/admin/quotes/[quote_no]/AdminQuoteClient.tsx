@@ -2630,7 +2630,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         {effectiveGrandTotal > 0 && (
                           <div>
                             <div style={labelStyle}>
-                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""})
+                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""}
+                              {shipData?.freight?.in_total && (shipData.freight.cost > 0 || shipData.freight.status === "free") ? " + freight" : ""})
                             </div>
                             <div style={{ fontSize: 16, fontWeight: 600 }}>
                               {formatUsd(effectiveGrandTotal)}

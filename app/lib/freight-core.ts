@@ -288,7 +288,22 @@ export type FreightResult = {
   actual_lb: number;
   billable_lb: number;
   note: string;
+  locked?: boolean; // Step 30B: kept from when the quote was accepted / confirmed
 };
+
+/**
+ * Step 30B: what a saved freight depends on besides the shop's freight table:
+ * terms, ship-to ZIP, staff override, and the quote's other charges (to the
+ * cent; a change to the items or prices changes it).
+ */
+export function freightLockKey(terms: FreightTerms, zip: string | null | undefined, overrideUsd: number | null | undefined, subtotal: number): string {
+  return [terms, cleanZip(zip) || "", overrideUsd == null ? "" : Math.round(Number(overrideUsd) * 100), Math.round((Number(subtotal) || 0) * 100)].join("|");
+}
+
+/** Freight results worth keeping (pickup / not set up / no ZIP aren't). */
+export function lockableFreight(f: FreightResult | null | undefined): boolean {
+  return !!f && (f.status === "estimated" || f.status === "free" || f.status === "override");
+}
 
 export function estimateFreight(args: {
   s: FreightSettings;

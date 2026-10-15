@@ -23,7 +23,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
-import { approvalForQuote } from "@/app/lib/quote-approval";
+import { approvalForQuote, quoteFreightNow } from "@/app/lib/quote-approval";
+import { saveFreightLock } from "@/app/lib/freight";
 import { MAX_LEAD_TIME_LEN, MAX_NAME_LEN, MAX_PO_LEN, cleanText } from "@/app/lib/quote-approval-core";
 import { recentQuoteEmails, sendQuoteStatusEmail, type MailOutcome } from "@/app/lib/quote-mail";
 import { isEmail } from "@/app/lib/quote-mail-core";
@@ -124,6 +125,9 @@ export async function POST(req: NextRequest) {
           WHERE id = $1`,
         [quote.id, who, a.current_total],
       );
+      // Step 30B: keep the freight the confirmed total includes.
+      const fNow = await quoteFreightNow(quote.quote_no);
+      if (fNow) await saveFreightLock(quote.id, fNow.preFreightTotal, fNow.freight);
       // Step 29A: "your order is confirmed" (staff can untick it).
       if (b.notify_buyer !== false) email = await sendQuoteStatusEmail({ quoteId: quote.id, kind: "confirmed", by: who });
     } else if (action === "email_reapprove") {

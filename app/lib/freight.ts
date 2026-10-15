@@ -8,6 +8,11 @@
 //   - quoteLoad(quoteId, tenantId, facts): foam pieces and boxes to ship
 //   - freightForQuote(...): all of it -> FreightResult, for /api/quote/print
 //     and /api/admin/send-quote (so the quote page and the email agree)
+//   - Step 30B: saveFreightLock() keeps the freight a quote was accepted /
+//     confirmed with (quotes.freight_lock, migration 042); freightForQuote()
+//     uses it while the ship-to, terms, override and other charges are
+//     unchanged, so later changes to the shop's freight table don't move
+//     accepted quotes. clearFreightLock() for "Reprice at today's rates".
 
 import { one, q } from "@/lib/db";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
@@ -15,6 +20,8 @@ import {
   cleanFreightSettings,
   cleanZip,
   estimateFreight,
+  freightLockKey,
+  lockableFreight,
   isFreightTerms,
   type BoxPiece,
   type FoamPiece,
@@ -163,14 +170,57 @@ export async function quoteLoad(
   return { foam, boxes };
 }
 
+type FreightLock = { key: string; result: FreightResult };
+
+async function loadFreightLock(quoteId: number): Promise<FreightLock | null> {
+  const row = await one<{ l: unknown }>(
+    `SELECT to_jsonb(q) -> 'freight_lock' AS l FROM public.quotes q WHERE q.id = $1`,
+    [quoteId],
+  ).catch(() => null);
+  const l = row?.l as FreightLock | null | undefined;
+  return l && typeof l === "object" && typeof l.key === "string" && l.result && typeof l.result === "object" ? l : null;
+}
+
+/** Save (or drop) the freight the quote has right now as its kept freight. */
+export async function saveFreightLock(quoteId: number, subtotal: number, freight: FreightResult | null): Promise<void> {
+  try {
+    if (!lockableFreight(freight) || !freight) {
+      await q(`UPDATE public.quotes SET freight_lock = NULL WHERE id = $1`, [quoteId]);
+      return;
+    }
+    const shipTo = await loadShipTo(quoteId);
+    const result: FreightResult = { ...freight, locked: false };
+    const lock: FreightLock = { key: freightLockKey(freight.terms, shipTo.zip, shipTo.override_usd, subtotal), result };
+    await q(`UPDATE public.quotes SET freight_lock = $2::jsonb WHERE id = $1`, [quoteId, JSON.stringify(lock)]);
+  } catch (e) {
+    console.error("[freight] lock not saved (migration 042?)", { quoteId, err: String(e) });
+  }
+}
+
+export async function clearFreightLock(quoteId: number): Promise<void> {
+  try {
+    await q(`UPDATE public.quotes SET freight_lock = NULL WHERE id = $1`, [quoteId]);
+  } catch {
+    // before migration 042: nothing to clear
+  }
+}
+
 export async function freightForQuote(args: {
   quoteId: number;
   tenantId: number;
   subtotal: number;
   facts?: Record<string, unknown> | null;
 }): Promise<{ freight: FreightResult; shipTo: ShipTo; settings: FreightSettings }> {
-  const [shipTo, settings] = await Promise.all([loadShipTo(args.quoteId), shopFreightSettings(args.tenantId)]);
+  const [shipTo, settings, lock] = await Promise.all([
+    loadShipTo(args.quoteId),
+    shopFreightSettings(args.tenantId),
+    loadFreightLock(args.quoteId),
+  ]);
   const terms = effectiveTerms(shipTo, settings);
+  // Step 30B: the kept freight, while nothing it depends on has changed.
+  if (lock && lock.key === freightLockKey(terms, shipTo.zip, shipTo.override_usd, args.subtotal)) {
+    return { freight: { ...lock.result, terms, locked: true }, shipTo, settings };
+  }
   const load = settings.ship_from_zip || shipTo.override_usd != null
     ? await quoteLoad(args.quoteId, args.tenantId, args.facts ?? null)
     : { foam: [], boxes: [] };

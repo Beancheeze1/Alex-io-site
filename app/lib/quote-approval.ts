@@ -8,11 +8,14 @@
 //   - currentQuoteTotal(quoteNo): the quote's grand total exactly as the quote
 //     page shows it (internal call to /api/quote/print)
 //   - approvalForQuote(...): all three together
+//   - Step 30B: quoteFreightNow(quoteNo): the freight and pre-freight total
+//     the quote page shows, for keeping the freight on accept / confirm
 
 import { one } from "@/lib/db";
 import { internalHeaders } from "@/lib/internal-call";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { computeApproval, type ApprovalRow, type ApprovalTerms, type QuoteApproval } from "@/app/lib/quote-approval-core";
+import type { FreightResult } from "@/app/lib/freight-core";
 
 export async function loadApprovalRow(quoteId: number): Promise<ApprovalRow> {
   const row = await one<{ j: Record<string, unknown> | null }>(
@@ -62,6 +65,24 @@ export async function currentQuoteTotal(quoteNo: string): Promise<number | null>
     return j?.ok && Number.isFinite(n) ? n : null;
   } catch (e) {
     console.error("[quote-approval] current total unavailable", { quoteNo, err: String(e) });
+    return null;
+  }
+}
+
+/** Step 30B: the quote's freight and its total before freight, as the quote page shows them. */
+export async function quoteFreightNow(
+  quoteNo: string,
+): Promise<{ preFreightTotal: number; freight: FreightResult | null } | null> {
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+  try {
+    const r = await fetch(`${base}/api/quote/print?quote_no=${encodeURIComponent(quoteNo)}&t=${Date.now()}`, {
+      headers: { ...internalHeaders() },
+      cache: "no-store",
+    });
+    const j = (await r.json().catch(() => null)) as { ok?: boolean; preFreightTotal?: unknown; freight?: FreightResult | null } | null;
+    const n = Number(j?.preFreightTotal);
+    return j?.ok && Number.isFinite(n) ? { preFreightTotal: n, freight: j.freight ?? null } : null;
+  } catch {
     return null;
   }
 }

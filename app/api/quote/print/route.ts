@@ -880,6 +880,8 @@ export async function GET(req: NextRequest) {
       // Staff only: how the cutting charges were worked out.
       ...(isStaffCaller ? { foamProcessDetail: proc.detail, priceModel: proc.model } : {}),
       grandTotal,
+      // Step 30B: the total before freight (what a kept freight is tied to)
+      preFreightTotal: Math.round(preFreightTotal * 100) / 100,
       // Step 30: freight (in grandTotal when prepaid & add), the shop's
       // options, and the ship-to address (buyer with the edit link / staff).
       freight: fr ? fr.freight : null,

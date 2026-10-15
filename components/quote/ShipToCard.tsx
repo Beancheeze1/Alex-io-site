@@ -23,6 +23,7 @@ export type FreightView = {
   actual_lb: number;
   billable_lb: number;
   note: string;
+  locked?: boolean;
 };
 
 export type FreightOptionsView = {
@@ -163,6 +164,11 @@ export default function ShipToCard({
         {freightSummary(freight)}
         {freight && (freight.status === "estimated" || freight.status === "free") && freight.note ? (
           <div style={muted}>{freight.note}</div>
+        ) : null}
+        {freight?.locked ? (
+          <div style={muted} data-freight-locked>
+            Kept at the freight from when this quote was accepted.
+          </div>
         ) : null}
         {!canEdit && st == null && freight?.status !== "not_set_up" ? (
           <div style={muted}>To change shipping, open this quote from the link in your quote email.</div>

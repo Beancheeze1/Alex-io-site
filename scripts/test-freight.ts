@@ -12,6 +12,8 @@ import {
   cleanFreightSettings,
   cleanZip,
   estimateFreight,
+  freightLockKey,
+  lockableFreight,
   milesBetweenZips,
   packLoad,
   zoneFor,
@@ -105,6 +107,19 @@ const mix = estimateFreight({ s: S, terms: "prepaid_add", toZip: "10001", foam: 
 check("foam + boxes cartons add up", mix.cartons, 11);
 check("mixed goes LTL", mix.mode, "ltl");
 check("New York = zone 3", mix.zone, 3);
+
+// Step 30B: kept freight key
+const k = freightLockKey("prepaid_add", "60601-1234", null, 857.94);
+check("lock key", k, "prepaid_add|60601||85794");
+check("same inputs -> same key", freightLockKey("prepaid_add", "60601", null, 857.94), k);
+check("ZIP change -> new key", freightLockKey("prepaid_add", "10001", null, 857.94) === k, false);
+check("terms change -> new key", freightLockKey("fob_origin", "60601", null, 857.94) === k, false);
+check("charges change -> new key", freightLockKey("prepaid_add", "60601", null, 857.95) === k, false);
+check("override in key", freightLockKey("prepaid_add", "60601", 150, 857.94), "prepaid_add|60601|15000|85794");
+check("estimated is kept", lockableFreight(ltl), true);
+check("free is kept", lockableFreight(free), true);
+check("pickup not kept", lockableFreight(pick), false);
+check("needs ZIP not kept", lockableFreight(estimateFreight({ s: S, terms: "prepaid_add", toZip: "", foam: foam250, boxes: [], subtotal: 1 })), false);
 
 // Settings check
 check("defaults clean", cleanFreightSettings(null).zone_miles.join(","), "150,300,600,1000,1400,1800");

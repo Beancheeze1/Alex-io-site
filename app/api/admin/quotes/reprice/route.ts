@@ -19,6 +19,7 @@ import { isPlatformOwner } from "@/lib/admin-auth";
 import { loadFacts } from "@/app/lib/memory";
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import { repriceQuoteBoxes } from "@/app/lib/packaging-selection";
+import { clearFreightLock } from "@/app/lib/freight";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +66,9 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.warn("[admin/quotes/reprice] expiry not reset (migration 038 not run?)", String(e));
     }
+
+    // Step 30B: freight at today's freight table too.
+    await clearFreightLock(quote.id);
 
     // Charges: today's printing / die-cut settings are saved on the next view.
     try {
