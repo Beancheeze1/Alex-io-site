@@ -14,6 +14,8 @@ import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { quoteReviewFlags } from "@/app/lib/pricing/foam-quote";
 import { approvalForQuote } from "@/app/lib/quote-approval";
 import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
+import { proofSummary } from "@/app/lib/proofs";
+import { proofReleaseOk } from "@/app/lib/proofs-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -220,6 +222,28 @@ export async function POST(req: NextRequest) {
                 ? "The price changed since the buyer accepted: it needs their re-approval and your confirmation."
                 : "This quote hasn't been accepted by the buyer or confirmed by the shop.",
           stage: approval.stage,
+        },
+        409,
+      );
+    }
+  }
+
+  // Step 31: a printed quote normally has an approved proof first. Refused
+  // until staff say to release it anyway (ack_proof).
+  if (!quote.locked && body?.ack_proof !== true) {
+    const proofs = await proofSummary({ id: quote.id, quote_no: quote.quote_no });
+    if (!proofReleaseOk(proofs.required, proofs.stage)) {
+      return json(
+        {
+          ok: false,
+          error: "PROOF_NOT_APPROVED",
+          message:
+            proofs.stage === "none"
+              ? "This quote prints, and no proof has been sent to the buyer."
+              : proofs.stage === "changes"
+                ? `The buyer asked for changes to proof v${proofs.latest_version}.`
+                : `Proof v${proofs.latest_version} hasn't been approved by the buyer yet.`,
+          stage: proofs.stage,
         },
         409,
       );

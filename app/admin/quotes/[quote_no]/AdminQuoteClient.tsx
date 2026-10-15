@@ -28,6 +28,7 @@ import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
 import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
+import ProofCard from "@/components/quote/ProofCard";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
@@ -2536,6 +2537,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 <div style={cardTitleStyle}>Pricing snapshot</div>
                 {/* Step 28: estimate -> accepted -> confirmed, expiry, lead time */}
                 {quoteNoValue ? <QuoteApprovalPanel quoteNo={quoteNoValue} /> : null}
+                {/* Step 31: artwork proofs (send, record approval, history) */}
+                {quoteNoValue ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <ProofCard quoteNo={quoteNoValue} canEdit staff />
+                  </div>
+                ) : null}
                 {/* Step 30: ship-to, freight terms and freight (staff can override) */}
                 {quoteNoValue && shipData ? (
                   <div style={{ marginBottom: 10 }}>

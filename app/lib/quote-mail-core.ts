@@ -12,8 +12,8 @@
 
 import { escapeHtml } from "../../lib/email/send-html";
 
-export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup";
-export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup"];
+export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup" | "proof";
+export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup", "proof"];
 
 export function isStatusKind(v: unknown): v is StatusKind {
   return typeof v === "string" && (STATUS_KINDS as readonly string[]).includes(v);
@@ -64,6 +64,8 @@ export type StatusEmailData = {
   revision?: string | null;
   reapproval?: boolean; // "accepted" sent for a re-approval
   sentAt?: string | null; // Step 29B: when the quote was emailed (follow-up)
+  proofVersion?: number | null; // Step 31: proof ready
+  proofNote?: string | null;
   primaryColor?: string | null;
   onPrimary?: string | null;
   logoUrl?: string | null;
@@ -149,6 +151,24 @@ export function statusEmail(kind: StatusKind, d: StatusEmailData): { subject: st
           ["Lead time", d.leadTime || ""],
         ],
         "View your quote",
+      ),
+    };
+  }
+  if (kind === "proof") {
+    const v = d.proofVersion ? ` (version ${d.proofVersion})` : "";
+    return {
+      subject: `${d.brand}: proof ready for quote ${qn}${d.proofVersion && d.proofVersion > 1 ? `, version ${d.proofVersion}` : ""}`,
+      html: render(
+        d,
+        "Your proof is ready",
+        [
+          hi,
+          `The proof${v} for quote ${qn} is ready.`,
+          ...(d.proofNote ? [`From ${d.brand}: ${d.proofNote}`] : []),
+          "Please check the spelling, colors, sizes and layout, then approve it or tell us what to change.",
+        ],
+        [["Quote total", usd(d.total)]],
+        "Review the proof",
       ),
     };
   }

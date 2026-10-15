@@ -44,6 +44,7 @@ const EMAIL_KIND: Record<string, string> = {
   released: "In production",
   expiring: "Expires soon (reminder)",
   followup: "Follow-up (reminder)",
+  proof: "Proof ready",
 };
 
 const STAGE: Record<Approval["stage"], string> = {

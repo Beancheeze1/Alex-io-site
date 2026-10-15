@@ -257,10 +257,11 @@ export default function AdminQuotesPage() {
         body: JSON.stringify({ quoteNo, lock }),
       });
       let data = await res.json().catch(() => null);
-      // Step 25: review flags, Step 28: not confirmed — show each and release
-      // only if staff confirm (the acks add up across the retries).
+      // Step 25: review flags, Step 28: not confirmed, Step 31: proof not
+      // approved — show each and release only if staff confirm (the acks add
+      // up across the retries).
       const acks: Record<string, boolean> = {};
-      for (let i = 0; i < 2 && lock && res.status === 409; i++) {
+      for (let i = 0; i < 3 && lock && res.status === 409; i++) {
         let text: string;
         if (data?.error === "REVIEW_FLAGS" && !acks.ack_flags) {
           const list = Array.isArray(data.flags)
@@ -271,6 +272,9 @@ export default function AdminQuotesPage() {
         } else if (data?.error === "NOT_CONFIRMED" && !acks.ack_unconfirmed) {
           text = `${data.message}\n\nRelease for manufacturing anyway?`;
           acks.ack_unconfirmed = true;
+        } else if (data?.error === "PROOF_NOT_APPROVED" && !acks.ack_proof) {
+          text = `${data.message}\n\nRelease for manufacturing without an approved proof?`;
+          acks.ack_proof = true;
         } else {
           break;
         }

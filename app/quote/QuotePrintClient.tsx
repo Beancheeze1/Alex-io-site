@@ -32,6 +32,7 @@ import { isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, uploadArtwork } from "@/lib/artwork";
 import QuoteApprovalCard, { type QuoteApprovalView } from "@/components/quote/QuoteApprovalCard";
 import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
+import ProofCard from "@/components/quote/ProofCard";
 
 type QuoteRow = {
   id: number;
@@ -3757,6 +3758,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             )}
 
             {/* Step 28: estimate / accepted / confirmed, with Accept for the buyer */}
+            {/* Step 31: artwork proof (approve / request changes) */}
+            {quoteNo ? <ProofCard quoteNo={quoteNo} canEdit={!!approval?.buyer_can_edit && !quote?.locked} /> : null}
+
             {/* Step 30: shipping (freight terms, ship-to, freight) */}
             {quoteNo ? (
               <ShipToCard

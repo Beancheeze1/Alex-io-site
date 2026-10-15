@@ -139,6 +139,9 @@ export async function sendQuoteStatusEmail(opts: {
   sentAt?: string | null;
   /** Step 29B: stored as the log row's detail when sent (reminders use it to send once). */
   logDetail?: string | null;
+  /** Step 31: proof ready email. */
+  proofVersion?: number | null;
+  proofNote?: string | null;
 }): Promise<MailOutcome> {
   const by = opts.by ?? null;
   try {
@@ -191,6 +194,8 @@ export async function sendQuoteStatusEmail(opts: {
       revision: typeof facts.revision === "string" && facts.revision.trim() ? facts.revision.trim() : null,
       reapproval: !!opts.reapproval,
       sentAt: opts.sentAt ?? null,
+      proofVersion: opts.proofVersion ?? null,
+      proofNote: opts.proofNote ?? null,
       primaryColor: sender.primaryColor,
       onPrimary: sender.onPrimary,
       logoUrl: sender.logoUrl,
