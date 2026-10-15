@@ -9,6 +9,7 @@ import { getCurrentUserFromRequest } from "@/lib/auth";
 import { adminOnly } from "@/lib/admin-auth";
 import { FOAM_PROCESS_KEYS } from "@/app/lib/pricing/foam-process";
 import { REVIEW_SETTING_KEYS } from "@/app/lib/pricing/foam-review";
+import { isEmail } from "@/app/lib/quote-mail-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,6 +96,11 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       // Step 28: quote terms
       "quote_valid_days",
       "lead_time_text",
+      // Step 29A: buyer status emails
+      "buyer_email_accepted",
+      "buyer_email_confirmed",
+      "buyer_email_released",
+      "reply_to_email",
     ];
 
     const filtered: Partial<PricingSettings> = {};
@@ -120,6 +126,15 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
           typeof value === "string" && value.length <= 120
             ? null
             : { field: k, message: "Lead time must be text of at most 120 characters." };
+      } else if (k === "buyer_email_accepted" || k === "buyer_email_confirmed" || k === "buyer_email_released") {
+        error = typeof value === "boolean" ? null : { field: k, message: `${k} must be true or false.` };
+      } else if (k === "reply_to_email") {
+        // Step 29A: blank, or one email address.
+        error =
+          typeof value === "string" && (value.trim() === "" || isEmail(value))
+            ? null
+            : { field: k, message: "Reply-to must be one email address (or blank)." };
+        if (!error) (filtered as Record<string, unknown>)[k] = String(value).trim();
       } else if (k === "quote_valid_days") {
         error =
           typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 3650

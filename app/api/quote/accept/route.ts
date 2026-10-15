@@ -10,12 +10,14 @@
 // - Records the name, PO and the total being accepted; a re-approval clears
 //   any earlier shop confirmation (it was for another price). The shop gets
 //   an "Accepted" alert.
+// - Step 29A: the buyer gets an "approval received" email (shop setting).
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { buyerEditGuard } from "@/lib/quote-edit";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { approvalForQuote } from "@/app/lib/quote-approval";
+import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
 import { MAX_NAME_LEN, MAX_PO_LEN, buyerCanAccept, cleanText } from "@/app/lib/quote-approval-core";
 
 export const runtime = "nodejs";
@@ -90,8 +92,11 @@ export async function POST(req: NextRequest) {
       })}. Confirm it on the quote page.`,
     });
 
+    // Step 29A: "we received your approval" (never fails the acceptance).
+    const email = await sendQuoteStatusEmail({ quoteId: quote.id, kind: "accepted", by: name, reapproval });
+
     const after = await approvalForQuote({ id: quote.id, quote_no: quote.quote_no, tenant_id: Number(quote.tenant_id) });
-    return json({ ok: true, approval: after });
+    return json({ ok: true, approval: after, email: { status: email.status } });
   } catch (e) {
     console.error("[quote/accept] failed:", e);
     return bad("server_error", "We couldn't record your acceptance. Please try again.", 500);

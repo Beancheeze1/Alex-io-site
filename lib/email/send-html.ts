@@ -21,6 +21,9 @@ export async function sendHtmlEmail(opts: {
   subject: string;
   html: string;
   replyTo?: string | null;
+  /** Step 29A: display name for the sender (the shop) and the reply-to. */
+  fromName?: string | null;
+  replyToName?: string | null;
 }): Promise<SendResult> {
   try {
     const tenant = process.env.MS_TENANT_ID;
@@ -52,7 +55,16 @@ export async function sendHtmlEmail(opts: {
       body: { contentType: "HTML", content: opts.html },
       toRecipients: [{ emailAddress: { address: opts.to } }],
     };
-    if (opts.replyTo) message.replyTo = [{ emailAddress: { address: opts.replyTo } }];
+    if (opts.fromName) message.from = { emailAddress: { address: from, name: opts.fromName.slice(0, 120) } };
+    if (opts.replyTo) {
+      message.replyTo = [
+        {
+          emailAddress: opts.replyToName
+            ? { address: opts.replyTo, name: opts.replyToName.slice(0, 120) }
+            : { address: opts.replyTo },
+        },
+      ];
+    }
 
     const sendRes = await fetch(
       `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`,

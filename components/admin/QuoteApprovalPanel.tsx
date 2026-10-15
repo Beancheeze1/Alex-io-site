@@ -7,6 +7,8 @@
 //     buyer's approval for them and confirm (PO by email, phone, ...)
 //   - Undo confirmation
 //   - Expiry date and lead time for this quote (blank = shop default)
+//   - Step 29A: "Email the buyer" on confirm, "Email buyer to re-approve"
+//     when the price changed, and the list of emails sent for this quote
 
 "use client";
 
@@ -24,6 +26,24 @@ type Approval = {
   lead_time_override: boolean;
 };
 
+type EmailRow = {
+  id: number;
+  kind: string;
+  to_email: string | null;
+  status: string;
+  detail: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+const EMAIL_KIND: Record<string, string> = {
+  quote: "Quote",
+  accepted: "Approval received",
+  confirmed: "Order confirmed",
+  reapprove: "Please re-approve",
+  released: "In production",
+};
+
 const STAGE: Record<Approval["stage"], string> = {
   estimate: "Estimate (not accepted yet)",
   accepted: "Accepted by the buyer: ready to confirm",
@@ -37,6 +57,13 @@ const day = (iso: string | null | undefined) => {
   if (!iso) return "";
   const d = new Date(iso);
   return Number.isFinite(d.getTime()) ? d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "";
+};
+const when = (iso: string | null | undefined) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime())
+    ? d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : "";
 };
 const ymd = (iso: string | null | undefined) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
 
@@ -62,10 +89,20 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
   const [a, setA] = React.useState<Approval | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<string | null>(null);
+  const [noteOk, setNoteOk] = React.useState(false);
+  const [emails, setEmails] = React.useState<EmailRow[]>([]);
+  const [buyerEmail, setBuyerEmail] = React.useState<string | null>(null);
+  const [notify, setNotify] = React.useState(true);
   const [buyerName, setBuyerName] = React.useState("");
   const [po, setPo] = React.useState("");
   const [expiry, setExpiry] = React.useState("");
   const [lead, setLead] = React.useState("");
+
+  const mail = (j: { emails?: EmailRow[]; buyer_email?: string | null } | null) => {
+    const list = j?.emails;
+    setEmails(Array.isArray(list) ? list : []);
+    setBuyerEmail(j?.buyer_email || null);
+  };
 
   const apply = (next: Approval | null) => {
     setA(next);
@@ -78,7 +115,10 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
     fetch(`/api/admin/quotes/approval?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
-        if (alive && j?.ok) apply(j.approval);
+        if (alive && j?.ok) {
+          apply(j.approval);
+          mail(j);
+        }
       })
       .catch(() => {});
     return () => {
@@ -89,6 +129,7 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
   const post = async (body: Record<string, unknown>, reload = false) => {
     setBusy(true);
     setNote(null);
+    setNoteOk(false);
     try {
       const res = await fetch("/api/admin/quotes/approval", {
         method: "POST",
@@ -105,7 +146,9 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
         return;
       }
       apply(j.approval);
-      setNote("Saved.");
+      mail(j);
+      setNoteOk(true);
+      setNote(body.action === "email_reapprove" ? `Email sent to ${j.email?.to || "the buyer"}.` : "Saved.");
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
     } finally {
@@ -115,6 +158,7 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
 
   if (!a) return null;
   const needsBuyer = a.stage === "estimate" || a.stage === "needs_reapproval";
+  const canConfirm = a.stage === "accepted" || (needsBuyer && a.current_total > 0);
 
   return (
     <div
@@ -144,7 +188,7 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
         {a.stage === "accepted" ? (
-          <button type="button" style={btn} disabled={busy} data-confirm-quote onClick={() => post({ action: "confirm" }, true)}>
+          <button type="button" style={btn} disabled={busy} data-confirm-quote onClick={() => post({ action: "confirm", notify_buyer: notify }, true)}>
             Confirm order at {usd(a.current_total)}
           </button>
         ) : null}
@@ -157,11 +201,16 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
               style={btn}
               disabled={busy || !buyerName.trim()}
               data-record-and-confirm
-              onClick={() => post({ action: "confirm", buyer_name: buyerName, po }, true)}
+              onClick={() => post({ action: "confirm", buyer_name: buyerName, po, notify_buyer: notify }, true)}
             >
               Record buyer approval + confirm
             </button>
           </>
+        ) : null}
+        {a.stage === "needs_reapproval" && buyerEmail ? (
+          <button type="button" style={btn} disabled={busy} data-email-reapprove onClick={() => post({ action: "email_reapprove" })}>
+            Email buyer to re-approve
+          </button>
         ) : null}
         {a.confirmed ? (
           <button type="button" style={btn} disabled={busy} data-unconfirm onClick={() => post({ action: "unconfirm" }, true)}>
@@ -169,6 +218,19 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
           </button>
         ) : null}
       </div>
+
+      {canConfirm ? (
+        <div style={{ marginTop: 6 }} data-notify-buyer>
+          {buyerEmail ? (
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" aria-label="Email the buyer" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+              Email the buyer ({buyerEmail}) when I confirm
+            </label>
+          ) : (
+            <span>No buyer email on this quote, so no emails are sent.</span>
+          )}
+        </div>
+      ) : null}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
         <label>
@@ -193,7 +255,23 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
           Save lead time
         </button>
       </div>
-      {note ? <div style={{ marginTop: 6, color: note === "Saved." ? "var(--status-success-text)" : "var(--attention)" }}>{note}</div> : null}
+      {note ? <div style={{ marginTop: 6, color: noteOk ? "var(--status-success-text)" : "var(--attention)" }}>{note}</div> : null}
+
+      {emails.length ? (
+        <div style={{ marginTop: 8 }} data-quote-emails>
+          <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>Emails to the buyer</div>
+          {emails.map((m) => (
+            <div key={m.id} data-quote-email={m.kind} data-email-status={m.status}>
+              {when(m.created_at)} · {EMAIL_KIND[m.kind] || m.kind}
+              {m.to_email ? ` to ${m.to_email}` : ""} ·{" "}
+              <span style={{ color: m.status === "sent" ? "var(--status-success-text)" : m.status === "failed" ? "var(--attention)" : undefined }}>
+                {m.status === "sent" ? "sent" : m.status === "failed" ? "failed" : "not sent"}
+              </span>
+              {m.detail ? ` (${m.detail})` : ""}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -70,6 +70,12 @@ type PricingSettings = {
   // Step 28: quote terms
   quote_valid_days: number;
   lead_time_text: string;
+
+  // Step 29A: buyer status emails
+  buyer_email_accepted: boolean;
+  buyer_email_confirmed: boolean;
+  buyer_email_released: boolean;
+  reply_to_email: string;
 } & Record<FoamKey, number> &
   Record<ReviewKey, number>;
 
@@ -80,6 +86,14 @@ type SettingsResponse = {
 
 const numberOr = (v: any, fallback: number) =>
   typeof v === "number" && Number.isFinite(v) ? v : fallback;
+
+// Step 29A: buyer status emails (on/off per shop).
+type BuyerEmailKey = "buyer_email_accepted" | "buyer_email_confirmed" | "buyer_email_released";
+const BUYER_EMAIL_FIELDS: { key: BuyerEmailKey; label: string; hint: string }[] = [
+  { key: "buyer_email_accepted", label: "Approval received", hint: "When a buyer accepts (or re-approves) a quote." },
+  { key: "buyer_email_confirmed", label: "Order confirmed", hint: "When staff confirm the order." },
+  { key: "buyer_email_released", label: "In production", hint: "When staff release the quote for manufacturing." },
+];
 
 export default function AdminSettingsPage() {
   const [loading, setLoading] = React.useState(true);
@@ -106,6 +120,11 @@ export default function AdminSettingsPage() {
 
     quote_valid_days: 30,
     lead_time_text: "",
+
+    buyer_email_accepted: true,
+    buyer_email_confirmed: true,
+    buyer_email_released: true,
+    reply_to_email: "",
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -197,6 +216,16 @@ export default function AdminSettingsPage() {
             typeof (s as Record<string, unknown>).lead_time_text === "string"
               ? String((s as Record<string, unknown>).lead_time_text)
               : prev.lead_time_text,
+          ...(Object.fromEntries(
+            BUYER_EMAIL_FIELDS.map((f) => {
+              const v = (s as Record<string, unknown>)[f.key];
+              return [f.key, typeof v === "boolean" ? v : prev[f.key]];
+            }),
+          ) as Record<BuyerEmailKey, boolean>),
+          reply_to_email:
+            typeof (s as Record<string, unknown>).reply_to_email === "string"
+              ? String((s as Record<string, unknown>).reply_to_email)
+              : prev.reply_to_email,
         }));
       } catch (e: any) {
         console.error("Admin settings load error:", e);
@@ -643,6 +672,46 @@ export default function AdminSettingsPage() {
                 <p className="mt-3 text-[11px] text-[var(--text-faint)]">
                   Buyers can accept a quote until it expires; &quot;Reprice at today&apos;s rates&quot; restarts the
                   clock. Staff can change the expiry date or lead time on any quote.
+                </p>
+              </div>
+
+              {/* Step 29A: buyer status emails */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-buyer-emails>
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">Buyer emails</h2>
+                <div className="grid gap-2">
+                  {BUYER_EMAIL_FIELDS.map((f) => (
+                    <label key={f.key} className="flex items-start gap-2 text-xs text-[var(--text-primary)]">
+                      <input
+                        type="checkbox"
+                        data-buyer-email={f.key}
+                        aria-label={f.label}
+                        className="mt-0.5"
+                        checked={settings[f.key]}
+                        onChange={(e) => setSettings((s) => ({ ...s, [f.key]: e.target.checked }))}
+                      />
+                      <span>
+                        {f.label}
+                        <span className="block text-[11px] text-[var(--text-faint)]">{f.hint}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <label className="mt-4 flex flex-col gap-1 text-xs md:w-1/2">
+                  <span className="text-[var(--text-secondary)]">Replies go to (blank = the quote&apos;s sales rep, else your page email)</span>
+                  <input
+                    type="email"
+                    maxLength={200}
+                    placeholder="e.g. sales@yourshop.com"
+                    aria-label="Reply-to email"
+                    className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                    value={settings.reply_to_email}
+                    onChange={(e) => setSettings((s) => ({ ...s, reply_to_email: e.target.value }))}
+                  />
+                </label>
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
+                  Emails go to the quote&apos;s buyer email, show your shop name and link to the quote. Staff can
+                  untick &quot;Email the buyer&quot; when confirming, and send &quot;please re-approve&quot; from the
+                  quote page when a price changes. Every email is listed on the quote page.
                 </p>
               </div>
 

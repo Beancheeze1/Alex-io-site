@@ -13,6 +13,7 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { quoteReviewFlags } from "@/app/lib/pricing/foam-quote";
 import { approvalForQuote } from "@/app/lib/quote-approval";
+import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,6 +74,18 @@ function stripLeadingRevTags(raw: string | null): string | null {
 
 function json(body: any, status = 200) {
   return NextResponse.json(body, { status });
+}
+
+/**
+ * Step 29A: "your order is in production" to the buyer, once per release
+ * (not on a re-lock of an already released quote). Staff can send
+ * notify_buyer: false; the shop can turn it off in Settings. Never fails the release.
+ */
+async function emailReleased(quoteId: number, user: unknown, notify: unknown): Promise<string | null> {
+  if (notify === false) return null;
+  const u = (user || {}) as { name?: string | null; email?: string | null };
+  const r = await sendQuoteStatusEmail({ quoteId, kind: "released", by: String(u.name || u.email || "staff") });
+  return r.status;
 }
 
 /**
@@ -252,6 +265,8 @@ export async function POST(req: NextRequest) {
           [quote.id, user.id, user.tenant_id],
         );
         await mintReleasedRev(quoteNo);
+        const email = await emailReleased(quote.id, user, body?.notify_buyer);
+        return json({ ok: true, locked: true, boxes_only: true, geometry_hash: null, release_pkg_id: null, email });
       }
       return json({ ok: true, locked: true, boxes_only: true, geometry_hash: null, release_pkg_id: null });
     }
@@ -396,5 +411,8 @@ export async function POST(req: NextRequest) {
   await mintReleasedRev(quoteNo);
   // --- END RELEASED REV MINT ---
 
-  return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id });
+  // Step 29A: the buyer hears it's in production (first release only).
+  const email = quote.locked ? null : await emailReleased(quote.id, user, body?.notify_buyer);
+
+  return json({ ok: true, locked: true, geometry_hash: hash, release_pkg_id: result.release_pkg_id, email });
 }

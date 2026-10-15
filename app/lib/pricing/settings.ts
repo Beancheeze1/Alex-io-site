@@ -57,6 +57,12 @@ export type PricingSettings = {
   quote_valid_days: number; // estimates expire after this many days (0 = never)
   lead_time_text: string; // e.g. "3-4 weeks after approval" ("" = not shown)
 
+  // Step 29A: buyer status emails (app/lib/quote-mail.ts).
+  buyer_email_accepted: boolean; // "we received your approval"
+  buyer_email_confirmed: boolean; // "your order is confirmed"
+  buyer_email_released: boolean; // "your order is in production"
+  reply_to_email: string; // replies go here ("" = the quote's sales rep, else the shop page email)
+
   cushion_family_order: string[];
 };
 
@@ -97,6 +103,11 @@ const DEFAULTS: PricingSettings = {
 
   quote_valid_days: 30,
   lead_time_text: "",
+
+  buyer_email_accepted: true,
+  buyer_email_confirmed: true,
+  buyer_email_released: true,
+  reply_to_email: "",
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };

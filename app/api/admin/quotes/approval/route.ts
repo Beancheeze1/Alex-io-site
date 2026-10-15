@@ -2,15 +2,21 @@
 //
 // Step 28: the shop's side of estimate -> accepted -> confirmed (admin quote
 // page, "Approval" card).
-//   GET  ?quote_no=…  -> { ok, locked, approval }
+//   GET  ?quote_no=…  -> { ok, locked, approval, buyer_email, emails }
 //   POST { quote_no, action, ... }
 //     action "confirm"   { buyer_name?, po? }  confirm the current price. If
 //                        the buyer hasn't accepted it (or the price changed
 //                        since), buyer_name records their acceptance for them
 //                        (e.g. a PO by email); without it the call is refused.
+//                        Step 29A: emails the buyer "order confirmed" unless
+//                        notify_buyer is false (or the shop turned it off).
 //     action "unconfirm"                       take the confirmation back
 //     action "expiry"    { expires_on: "YYYY-MM-DD" | null }  null = shop default
 //     action "lead_time" { lead_time: string | null }         null = shop default
+//     action "email_reapprove"   Step 29A: email the buyer "your quote was
+//                        updated, please re-approve" (only when the price
+//                        changed since they accepted)
+//   POST -> { ok, locked, approval, buyer_email, emails, email? }
 // Staff (admin / cs / sales) of the quote's shop, or the platform owner.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -19,11 +25,13 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
 import { approvalForQuote } from "@/app/lib/quote-approval";
 import { MAX_LEAD_TIME_LEN, MAX_NAME_LEN, MAX_PO_LEN, cleanText } from "@/app/lib/quote-approval-core";
+import { recentQuoteEmails, sendQuoteStatusEmail, type MailOutcome } from "@/app/lib/quote-mail";
+import { isEmail } from "@/app/lib/quote-mail-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type QuoteRow = { id: number; quote_no: string; tenant_id: number; locked: boolean | null };
+type QuoteRow = { id: number; quote_no: string; tenant_id: number; locked: boolean | null; email: string | null };
 
 function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -42,7 +50,7 @@ async function staffQuote(
   const quoteNo = typeof quoteNoRaw === "string" ? quoteNoRaw.trim().slice(0, 40) : "";
   if (!quoteNo) return { res: bad("missing_quote_no", "quote_no is required.") };
   const quote = await one<QuoteRow>(
-    `SELECT id, quote_no, tenant_id, locked FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+    `SELECT id, quote_no, tenant_id, locked, email FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
     [quoteNo],
   );
   if (!quote || (Number(quote.tenant_id) !== Number(user.tenant_id) && !isPlatformOwner(user))) {
@@ -52,13 +60,21 @@ async function staffQuote(
   return { quote, who: String(u.name || u.email || "staff").slice(0, 120) };
 }
 
+/** Step 29A: the buyer email (if any) and the quote's recent emails, for the panel. */
+async function mailInfo(quote: QuoteRow) {
+  return {
+    buyer_email: isEmail(quote.email) ? String(quote.email).trim() : null,
+    emails: await recentQuoteEmails(quote.id),
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const r = await staffQuote(req, req.nextUrl.searchParams.get("quote_no"));
     if ("res" in r) return r.res;
     const approval = await approvalForQuote({ id: r.quote.id, quote_no: r.quote.quote_no, tenant_id: Number(r.quote.tenant_id) });
     if (!approval) return bad("no_total", "Couldn't work out the quote total.", 503);
-    return json({ ok: true, locked: !!r.quote.locked, approval });
+    return json({ ok: true, locked: !!r.quote.locked, approval, ...(await mailInfo(r.quote)) });
   } catch (e) {
     console.error("[admin/quotes/approval] GET failed:", e);
     return bad("server_error", "Couldn't load the approval.", 500);
@@ -74,6 +90,7 @@ export async function POST(req: NextRequest) {
     const { quote, who } = r;
     const ref = { id: quote.id, quote_no: quote.quote_no, tenant_id: Number(quote.tenant_id) };
     const action = String(b.action || "");
+    let email: MailOutcome | null = null;
 
     if (action === "confirm") {
       const a = await approvalForQuote(ref);
@@ -107,6 +124,19 @@ export async function POST(req: NextRequest) {
           WHERE id = $1`,
         [quote.id, who, a.current_total],
       );
+      // Step 29A: "your order is confirmed" (staff can untick it).
+      if (b.notify_buyer !== false) email = await sendQuoteStatusEmail({ quoteId: quote.id, kind: "confirmed", by: who });
+    } else if (action === "email_reapprove") {
+      const a = await approvalForQuote(ref);
+      if (!a) return bad("no_total", "Couldn't work out the quote total.", 503);
+      if (a.stage !== "needs_reapproval") {
+        return bad("not_changed", "The price hasn't changed since the buyer accepted, so there's nothing to re-approve.", 409);
+      }
+      if (!isEmail(quote.email)) return bad("no_buyer_email", "This quote has no buyer email.", 409);
+      email = await sendQuoteStatusEmail({ quoteId: quote.id, kind: "reapprove", by: who });
+      if (email.status !== "sent") {
+        return bad("email_failed", `The email wasn't sent (${email.detail || email.status}).`, 502);
+      }
     } else if (action === "unconfirm") {
       await q(
         `UPDATE public.quotes
@@ -131,11 +161,17 @@ export async function POST(req: NextRequest) {
       const text = b.lead_time === null ? null : cleanText(b.lead_time, MAX_LEAD_TIME_LEN);
       await q(`UPDATE public.quotes SET lead_time_text = $2, updated_at = now() WHERE id = $1`, [quote.id, text]);
     } else {
-      return bad("invalid_action", "action must be confirm, unconfirm, expiry or lead_time.");
+      return bad("invalid_action", "action must be confirm, unconfirm, expiry, lead_time or email_reapprove.");
     }
 
     const approval = await approvalForQuote(ref);
-    return json({ ok: true, locked: !!quote.locked, approval });
+    return json({
+      ok: true,
+      locked: !!quote.locked,
+      approval,
+      ...(await mailInfo(quote)),
+      ...(email ? { email: { status: email.status, to: email.to, detail: email.detail } } : {}),
+    });
   } catch (e) {
     console.error("[admin/quotes/approval] POST failed:", e);
     return bad("server_error", "Couldn't save. Please try again.", 500);

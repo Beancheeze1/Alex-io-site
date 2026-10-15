@@ -5,6 +5,11 @@
 // Data is loaded DIRECTLY from the DB (not via HTTP to /api/quote/print)
 // so there are no auth/cookie forwarding issues and packaging + printing
 // totals are always correct.
+//
+// Step 29A: sent with the shop's name as the sender name, replies to the
+// shop (Settings reply-to, else the quote's sales rep, else the shop page
+// email), links on the shop's own address, the shop's name in the subject,
+// and logged in the quote's email list.
 
 import { NextRequest, NextResponse } from "next/server";
 import { loadShippingSettings } from "@/lib/shipping-settings";
@@ -21,6 +26,7 @@ import { foamChargeLines, latestLayoutJson, quoteFoamGeometry } from "@/app/lib/
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { computeApproval } from "@/app/lib/quote-approval-core";
+import { logQuoteEmail, shopSender } from "@/app/lib/quote-mail";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -433,8 +439,9 @@ export async function POST(req: NextRequest) {
       } catch { /* skip */ }
     }
 
-    // 10) Build URLs
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    // 10) Build URLs (Step 29A: on the shop's own address)
+    const sender = await shopSender(Number(user.tenant_id), quote.id);
+    const baseUrl = sender.baseUrl;
     const quotePageUrl = `${baseUrl}/quote?quote_no=${encodeURIComponent(quoteNo)}`;
     const layoutUrl: string | null = facts.layout_editor_url || facts.layoutEditorUrl || (() => {
       if (!primaryItem) return null;
@@ -449,7 +456,7 @@ export async function POST(req: NextRequest) {
     const rev = revisionRaw || null;
     const subject = (typeof body.subject === "string" && body.subject.trim())
       ? body.subject.trim()
-      : `Quote ${quoteNo}${rev ? ` ${rev}` : ""} — Alex-IO`;
+      : `Quote ${quoteNo}${rev ? ` ${rev}` : ""} — ${sender.brand}`;
 
     // 12) Render HTML
     const density_pcf = primaryItem?.density_lb_ft3 != null ? Number(primaryItem.density_lb_ft3) : null;
@@ -554,9 +561,9 @@ export async function POST(req: NextRequest) {
           message: {
             subject,
             toRecipients: [{ emailAddress: { address: to } }],
-            from: { emailAddress: { address: FROM } },
-            replyTo: [process.env.MS_MAILBOX_FROM || ""].filter(Boolean)
-              .map(a => ({ emailAddress: { address: a } })),
+            from: { emailAddress: { address: FROM, name: sender.brand } },
+            replyTo: [sender.replyTo || process.env.MS_MAILBOX_FROM || ""].filter(Boolean)
+              .map(a => ({ emailAddress: { address: a, name: sender.brand } })),
             body: { contentType: "HTML", content: html },
           },
           saveToSentItems: true,
@@ -566,6 +573,18 @@ export async function POST(req: NextRequest) {
 
     const graphText = await graphRes.text().catch(() => "");
     console.log(`[send-quote] graph status=${graphRes.status} to=${to}`);
+    const sentOk = graphRes.status === 202 || graphRes.ok;
+    await logQuoteEmail({
+      quoteId: quote.id,
+      tenantId: Number(user.tenant_id),
+      kind: "quote",
+      to,
+      subject,
+      status: sentOk ? "sent" : "failed",
+      detail: sentOk ? null : `graph_send_${graphRes.status}: ${graphText.slice(0, 300)}`,
+      total: grandTotal,
+      by: String((user as { name?: string | null }).name || user.email || "staff"),
+    });
 
     if (graphRes.status === 202 || graphRes.ok) {
       // Flip quote status -> sent
