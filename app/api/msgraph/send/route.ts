@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import logger from "@/lib/logger";
 import { handleApiError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { isInternalCall } from "@/lib/internal-call";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -189,6 +190,13 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    // Step 21: server-to-server only. This sends from the shop's mailbox, so
+    // a public caller could otherwise email anyone, anything, as the shop.
+    if (!isInternalCall(req)) {
+      console.warn("[msgraph/send] refused a call without the internal header");
+      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    }
+
     // Rate limiting: 20 requests per minute per IP (internal send endpoint)
     const rate = await rateLimit(req, 20, "msgraph-send");
     if (!rate.success) {

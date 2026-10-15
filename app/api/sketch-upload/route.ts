@@ -29,6 +29,7 @@ import { one } from "@/lib/db";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { internalHeaders } from "@/lib/internal-call";
 import { findOrCreateUploadDraft } from "@/lib/quote-draft";
+import { addEditGrant, buyerEditGuard } from "@/lib/quote-edit";
 import { stlToFacesJson } from "@/lib/stl/processor";
 
 export const dynamic = "force-dynamic";
@@ -417,7 +418,16 @@ if (units !== "in" && units !== "mm") {
   );
 }
 
+// Step 21: a draft created by this upload belongs to this browser — the
+// response carries its edit grant (lib/quote-edit.ts).
 export async function POST(req: NextRequest) {
+  const grant: { quoteNo: string | null } = { quoteNo: null };
+  const res = await sketchUploadPost(req, grant);
+  if (grant.quoteNo && res.status === 200) addEditGrant(res, req, grant.quoteNo);
+  return res;
+}
+
+async function sketchUploadPost(req: NextRequest, grant: { quoteNo: string | null }): Promise<NextResponse> {
   try {
     // Public route (layout editor + /sketch-upload page). Each upload can run
     // Forge / vision processing, so limit per IP.
@@ -458,9 +468,9 @@ export async function POST(req: NextRequest) {
     let quoteId: number | null = null;
 
     if (quoteNo) {
-      const row = await one<{ id: number; email: string | null }>(
+      const row = await one<{ id: number; email: string | null; tenant_id: number; locked: boolean | null }>(
         `
-        SELECT id, email
+        SELECT id, email, tenant_id, locked
         FROM quotes
         WHERE quote_no = $1
         LIMIT 1;
@@ -469,6 +479,15 @@ export async function POST(req: NextRequest) {
       );
 
       if (row) {
+        // Step 21: uploading to an existing quote (which re-quotes it) needs
+        // staff of its shop or the buyer's edit link, and not on a released quote.
+        const guard = await buyerEditGuard(
+          req,
+          { quote_no: quoteNo, tenant_id: row.tenant_id, locked: row.locked },
+          { lockedMessage: "This quote has been released. Email the file to the shop instead." },
+        );
+        if (guard) return guard;
+
         quoteId = row.id;
 
         // If user provided an email and the quote doesn't have one yet, store it
@@ -499,6 +518,21 @@ export async function POST(req: NextRequest) {
       });
       if (!draft) {
         return err("quote_not_found", { quoteNo }, 404);
+      }
+      if (!draft.created) {
+        // Lost a race with another request that created it: same rule as above.
+        const row = await one<{ tenant_id: number; locked: boolean | null }>(
+          `SELECT tenant_id, locked FROM quotes WHERE id = $1`,
+          [draft.id],
+        );
+        const guard = await buyerEditGuard(req, {
+          quote_no: draft.quote_no,
+          tenant_id: row?.tenant_id ?? null,
+          locked: row?.locked ?? null,
+        });
+        if (guard) return guard;
+      } else {
+        grant.quoteNo = draft.quote_no;
       }
       quoteId = draft.id;
     }

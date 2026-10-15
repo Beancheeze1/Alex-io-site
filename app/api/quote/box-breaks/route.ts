@@ -22,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { EDIT_LINK_MESSAGE, EDIT_LINK_REQUIRED, buyerMayEdit, isQuoteStaff } from "@/lib/quote-edit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
@@ -191,6 +192,10 @@ export async function POST(req: NextRequest) {
       [quoteNo],
     );
     if (!quote) return bad("not_found", "Quote not found.", 404);
+    // Step 21: buyers need the quote's edit link (staff of the quote's shop don't).
+    if (!(await isQuoteStaff(req, quote.tenant_id)) && !buyerMayEdit(req, quoteNo)) {
+      return bad(EDIT_LINK_REQUIRED, EDIT_LINK_MESSAGE, 403);
+    }
     if (quote.locked) {
       return bad("locked", "This quote is locked. Contact us to change the quantity.", 409);
     }

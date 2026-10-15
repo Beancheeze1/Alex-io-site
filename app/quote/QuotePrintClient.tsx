@@ -1129,7 +1129,15 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         });
 
         if (!res.ok) {
-          console.error("Failed to remove carton selection:", await res.text().catch(() => ""));
+          const t = await res.text().catch(() => "");
+          console.error("Failed to remove carton selection:", t);
+          // Step 21: tell the buyer why (no edit link / released quote).
+          if (res.status === 403 || res.status === 409) {
+            try {
+              const j = JSON.parse(t);
+              if (typeof j?.message === "string") alert(j.message);
+            } catch {}
+          }
           return;
         }
 

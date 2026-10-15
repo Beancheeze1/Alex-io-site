@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { findOrCreateUploadDraft } from "@/lib/quote-draft";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { addEditGrant, buyerEditGuard } from "@/lib/quote-edit";
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
@@ -69,6 +70,22 @@ export async function POST(req: NextRequest) {
       return err("quote_not_found", { quoteNo }, 404);
     }
 
+    // Step 21: adding a file to an existing quote needs staff of its shop or
+    // the buyer's edit link, and not on a released quote. A draft this
+    // request just created belongs to this browser (granted below).
+    if (!quote.created) {
+      const row = await one<{ tenant_id: number; locked: boolean | null }>(
+        `SELECT tenant_id, locked FROM public."quotes" WHERE id = $1`,
+        [quote.id],
+      );
+      const guard = await buyerEditGuard(
+        req,
+        { quote_no: quote.quote_no, tenant_id: row?.tenant_id ?? null, locked: row?.locked ?? null },
+        { lockedMessage: "This quote has been released. Email the file to the shop instead." },
+      );
+      if (guard) return guard;
+    }
+
     // Read file data
     const arrayBuf = await file.arrayBuffer();
     const buf = Buffer.from(arrayBuf);
@@ -90,7 +107,7 @@ export async function POST(req: NextRequest) {
       return err("insert_failed", "Could not save PDF to database", 500);
     }
 
-    return NextResponse.json(
+    const res = NextResponse.json(
       {
         ok: true,
         id: inserted.id,
@@ -101,6 +118,9 @@ export async function POST(req: NextRequest) {
       },
       { status: 200 }
     );
+    // Step 21: the browser that started this draft may keep editing it.
+    if (quote.created) addEditGrant(res, req, quote.quote_no);
+    return res;
   } catch (e: any) {
     console.error("save-pdf exception:", e);
     return err("save_pdf_exception", String(e?.message || e), 500);

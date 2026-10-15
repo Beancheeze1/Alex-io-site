@@ -514,7 +514,7 @@ export async function POST(req: NextRequest) {
 
     const sendResp = await fetch(sendUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...internalHeaders() },
       body: JSON.stringify({
         toEmail,
         subject: `Updated foam quote ${quote.quote_no} (from sketch)`,

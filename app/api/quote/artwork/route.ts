@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { EDIT_LINK_MESSAGE, EDIT_LINK_REQUIRED, buyerMayEdit } from "@/lib/quote-edit";
 import { ARTWORK_CONTENT_TYPES, ARTWORK_MAX_FILES, artworkExt, artworkProblem } from "@/lib/artwork";
 import { addAdminAlert } from "@/lib/admin-alerts";
 
@@ -133,6 +134,8 @@ export async function POST(req: NextRequest) {
     if (!staff) {
       const rate = await rateLimit(req, 10, "artwork-post");
       if (!rate.success) return rateLimitResponse(rate.reset);
+      // Step 21: buyers need the quote's edit link.
+      if (!buyerMayEdit(req, quote.quote_no)) return bad(EDIT_LINK_REQUIRED, EDIT_LINK_MESSAGE, 403);
       if (quote.locked) return bad("locked", "This quote is locked. Email your artwork to us instead.", 409);
     }
 
@@ -195,6 +198,8 @@ export async function DELETE(req: NextRequest) {
     if (!(await isShopStaff(req, quote.tenant_id))) {
       const rate = await rateLimit(req, 10, "artwork-delete");
       if (!rate.success) return rateLimitResponse(rate.reset);
+      // Step 21: buyers need the quote's edit link.
+      if (!buyerMayEdit(req, quote.quote_no)) return bad(EDIT_LINK_REQUIRED, EDIT_LINK_MESSAGE, 403);
       if (quote.locked) return bad("locked", "This quote is locked. Contact us to change the artwork.", 409);
     }
 

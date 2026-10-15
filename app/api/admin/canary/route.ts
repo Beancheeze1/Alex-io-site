@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { makeKv } from "@/app/lib/kv";
 import { requireAdmin } from "@/lib/admin-auth";
+import { internalHeaders } from "@/lib/internal-call";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ function requireEnv(name: string) {
 async function postJson(url: string, body: unknown) {
   return fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...internalHeaders() },
     body: JSON.stringify(body),
     cache: "no-store",
   });

@@ -43,6 +43,20 @@
 //   - NEW (Path A, widget-safe): If the quote header does NOT exist yet (common for
 //     widget/form → editor direct links), we auto-create a draft quote header
 //     so Apply works without needing the email flow.
+//
+// Step 21 (quote integrity):
+//   - Who may Apply: signed-in staff; or a buyer whose browser holds the
+//     quote's edit grant (the link from the quote email, or the browser that
+//     started the quote: a brand-new Q-A- quote created here is granted in
+//     this response); or anyone on a demo quote. With just the quote number,
+//     Apply is refused (403 EDIT_LINK_REQUIRED). Logged-out callers are
+//     rate-limited.
+//   - A released (locked) quote refuses every Apply (409 QUOTE_LOCKED):
+//     staff Revise it first. action "lock" is gone (release is the admin
+//     "Release for manufacturing" button).
+//   - A logged-out Apply on an existing quote only fills in blank contact
+//     details; it never changes a name, email, phone or company already there.
+//   - Status: draft -> applied, sent -> revised; every other status is left alone.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -57,6 +71,9 @@ import {
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { getCurrentUserFromRequest, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { addEditGrant, editLinkRequired, hasEditGrant } from "@/lib/quote-edit";
+import { DRAFT_CUSTOMER_NAME } from "@/lib/quote-draft";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { buildStepFromLayout } from "@/lib/cad/step";
@@ -1221,7 +1238,23 @@ function buildSvgWithAnnotations(
 
 /* ===================== POST: save layout (+ optional qty/material/customer) ===================== */
 
+// Step 21: brand-new customer quote numbers (Q-A-YYMMDD-NNNNN from
+// /api/public/quote-number) are the only ones a logged-out Apply may create.
+const NEW_CUSTOMER_QUOTE_RE = /^Q-A-\d{6}-\d{5}$/;
+
+// Placeholder names a logged-out Apply may replace with the buyer's real name.
+const PLACEHOLDER_CUSTOMER_NAMES = new Set(["", "web lead", DRAFT_CUSTOMER_NAME.toLowerCase()]);
+
+// Step 21: a quote created by a logged-out Apply belongs to that browser, so
+// the successful response carries its edit grant.
 export async function POST(req: NextRequest) {
+  const grant: { quoteNo: string | null } = { quoteNo: null };
+  const res = await applyPost(req, grant);
+  if (grant.quoteNo && res.status === 200) addEditGrant(res, req, grant.quoteNo);
+  return res;
+}
+
+async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): Promise<NextResponse> {
   const body = (await req.json().catch(() => null)) as any;
 
   if (!body || !body.layout || !body.quoteNo) {
@@ -1323,6 +1356,9 @@ export async function POST(req: NextRequest) {
 
   let currentUserId: number | null = null;
   let tenantId: number;
+  // Step 21: a logged-out Apply on a quote that already exists (contact
+  // details may only be filled in, never changed).
+  let anonExisting = false;
 
   if (isDemoQuote) {
     // Demo flow: no auth, use default tenant
@@ -1346,6 +1382,10 @@ export async function POST(req: NextRequest) {
       currentUserId = user.id;
       tenantId = user.tenant_id;
     } else {
+      // Step 21: logged-out Apply is rate-limited.
+      const rate = await rateLimit(req, 30, "layout-apply");
+      if (!rate.success) return rateLimitResponse(rate.reset);
+
       // Public tenant widget flow: no valid session, or session is for a different
       // tenant (e.g. admin cookie sent to mline.api.alex-io.com).
       // Resolution priority:
@@ -1358,8 +1398,18 @@ export async function POST(req: NextRequest) {
         [quoteNo],
       );
       if (existingQuote) {
+        // Step 21: changing an existing quote needs its edit link.
+        if (!hasEditGrant(req, quoteNo)) return editLinkRequired();
         tenantId = existingQuote.tenant_id;
+        anonExisting = true;
       } else {
+        // Step 21: only a brand-new customer quote number may be created here.
+        if (!NEW_CUSTOMER_QUOTE_RE.test(quoteNo)) {
+          return bad(
+            { ok: false, error: "invalid_quote_no", message: "Invalid quote number. Please start a new quote." },
+            400,
+          );
+        }
         const slugFromHeader = req.headers.get("x-tenant-slug");
         // Core host (api.alex-io.com, tagged "default" by middleware) serves
         // every tenant's /t/<slug> quote center, so a brand-new public quote
@@ -1381,6 +1431,8 @@ export async function POST(req: NextRequest) {
           return bad({ ok: false, error: "UNAUTHORIZED", message: "Login required." }, 401);
         }
         tenantId = tenantRow.id;
+        // Granted in the response once Apply succeeds (see POST above).
+        grant.quoteNo = quoteNo;
       }
       currentUserId = null;
     }
@@ -1464,6 +1516,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Step 21: a released quote is frozen for everyone, staff included —
+    // staff Revise it first (that unlocks it). Nothing below may run.
+    if (quote.locked) {
+      return bad(
+        {
+          ok: false,
+          error: "QUOTE_LOCKED",
+          message: currentUserId
+            ? "This quote has been released for manufacturing. Revise it first, then apply your changes."
+            : "This quote has been released for manufacturing. Contact the shop to change it.",
+        },
+        409,
+      );
+    }
+
+    // Step 21: a logged-out Apply on an existing quote may fill in blank
+    // contact details, but never change ones already on the quote.
+    if (anonExisting && (customerName || customerEmail || customerPhone || customerCompany)) {
+      const cur = await one<{
+        customer_name: string | null;
+        email: string | null;
+        phone: string | null;
+        company: string | null;
+      }>(`select customer_name, email, phone, company from quotes where id = $1 and tenant_id = $2`, [
+        quote.id,
+        tenantId,
+      ]);
+      const blank = (v: string | null | undefined) => !v || !String(v).trim();
+      if (cur) {
+        if (!PLACEHOLDER_CUSTOMER_NAMES.has(String(cur.customer_name ?? "").trim().toLowerCase())) customerName = null;
+        if (!blank(cur.email)) customerEmail = null;
+        if (!blank(cur.phone)) customerPhone = null;
+        if (!blank(cur.company)) customerCompany = null;
+      } else {
+        customerName = customerEmail = customerPhone = customerCompany = null;
+      }
+    }
+
     // Optional sales credit (Path A):
     // If a sales rep slug was provided, set quotes.sales_rep_id only if it is currently NULL.
     // Never overwrite an existing assignment. Do not touch locked quotes.
@@ -1490,63 +1580,17 @@ export async function POST(req: NextRequest) {
 
     const geometryHash = computeGeometryHash(layoutForSave);
 
-    if (quote.locked) {
-      const storedHash = typeof quote.geometry_hash === "string" ? quote.geometry_hash : "";
-      if (!storedHash || geometryHash !== storedHash) {
-        return bad(
-          {
-            ok: false,
-            error: "LockedGeometryError",
-            message: "Geometry is locked and cannot be modified.",
-          },
-          409,
-        );
-      }
-    }
-
+    // Step 21: locking through Apply is gone (anyone could call it, and it
+    // skipped the released-revision mint). Release is the admin quote page's
+    // "Release for manufacturing" (/api/admin/quotes/lock).
     if (action === "lock") {
-      if (quote.locked) {
-        return bad(
-          {
-            ok: false,
-            error: "LOCKED",
-            message: "Job is already locked.",
-          },
-          409,
-        );
-      }
-      if (quote.geometry_hash && quote.geometry_hash !== geometryHash) {
-        return bad(
-          {
-            ok: false,
-            error: "HASH_MISMATCH",
-            message: "Existing geometry hash does not match current layout.",
-          },
-          409,
-        );
-      }
-
-      await q(
-        `
-        update quotes
-        set
-          locked = true,
-          geometry_hash = $2,
-          locked_at = now(),
-          updated_by_user_id = coalesce($3, updated_by_user_id)
-        where id = $1 and tenant_id = $4
-        `,
-        [quote.id, geometryHash, currentUserId, tenantId],
-      );
-
-      return ok(
+      return bad(
         {
-          ok: true,
-          locked: true,
-          geometry_hash: geometryHash,
-          locked_at: new Date().toISOString(),
+          ok: false,
+          error: "LOCK_MOVED",
+          message: "Release the quote for manufacturing from the admin quote page.",
         },
-        200,
+        410,
       );
     }
 
@@ -1945,17 +1989,18 @@ export async function POST(req: NextRequest) {
       [quote.id, layoutForSave, notesWithRevision, svgAnnotated, dxf, step, currentUserId],
     );
 
-    // ===================== NEW: status progression =====================
-    // Draft -> Applied
-    // Applied/Revised -> Revised (re-apply means we revised the quote)
+    // ===================== Status (Step 21: one rule) =====================
+    // draft -> applied; sent -> revised (changed after it went to the buyer);
+    // every other status (applied, revised, accepted, lost, ...) is left alone.
     try {
       await q(
         `
         update quotes
         set
           status = case
-            when status in ('applied', 'revised') then 'revised'
-            else 'applied'
+            when status = 'draft' then 'applied'
+            when status = 'sent' then 'revised'
+            else status
           end,
           updated_by_user_id = coalesce($2, updated_by_user_id)
         where id = $1 and tenant_id = $3
@@ -1965,24 +2010,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("[layout/apply] Failed to update quote status for", quoteNo, e);
     }
-    // =================== END status progression ===================
-
-    // NEW (Path A): Clicking "Apply to quote" should advance the quote status.
-    // Keep it conservative: only promote draft → applied; never overwrite later statuses.
-    try {
-      await q(
-        `
-        update quotes
-        set
-          status = case when status = 'draft' then 'applied' else status end,
-          updated_by_user_id = coalesce($2, updated_by_user_id)
-        where id = $1 and tenant_id = $3
-        `,
-        [quote.id, currentUserId, tenantId],
-      );
-    } catch (e) {
-      console.error("[layout/apply] Failed to promote quote status to applied for", quoteNo, e);
-    }
+    // =================== END status ===================
 
     let updatedQty: number | null = null;
 
@@ -2273,41 +2301,6 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("Error syncing layout facts for quote", quoteNo, e);
     }
-
-    // ===================== NEW (Path A): status transitions =====================
-    // Rule:
-    //  - If already SENT and we Apply again => REVISED
-    //  - If DRAFT and we Apply the first time => APPLIED
-    try {
-      const prevStatus = (quote?.status ?? "").toLowerCase();
-
-      if (prevStatus === "sent") {
-        await q(
-          `
-          update quotes
-          set
-            status = 'revised',
-            updated_by_user_id = coalesce($2, updated_by_user_id)
-          where id = $1 and tenant_id = $3
-          `,
-          [quote.id, currentUserId, tenantId],
-        );
-      } else if (prevStatus === "draft") {
-        await q(
-          `
-          update quotes
-          set
-            status = 'applied',
-            updated_by_user_id = coalesce($2, updated_by_user_id)
-          where id = $1 and tenant_id = $3
-          `,
-          [quote.id, currentUserId, tenantId],
-        );
-      }
-    } catch (e) {
-      console.error("[layout/apply] status transition failed for", quoteNo, e);
-    }
-    // =================== END NEW status transitions ===================
 
     // ---- selectedCarton: upsert quote_box_selections + quote_items ----
     // The layout editor sends body.selectedCarton when a carton has been chosen

@@ -25,6 +25,7 @@ import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
 import RunMethodControl from "@/components/admin/RunMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
+import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 
 
@@ -2336,6 +2337,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   >
                     {sendBusy ? "Sending..." : "Send to customer"}
                   </button>
+
+                  {/* Step 21: the buyer's private edit link */}
+                  {quoteNoValue ? <BuyerLinkButton quoteNo={quoteNoValue} /> : null}
 
 
                   {/* REV (auto) + Revise button (Path A) */}

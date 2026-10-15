@@ -2869,13 +2869,21 @@ if (merged.dims) {
     } catch {
       htmlBody = `<p>${opener}</p>`;
     }
+    // Step 21: previews go back to the caller, so they carry plain links, not
+    // the buyer's private edit links (only the emailed copy has those).
+    let previewHtml = htmlBody;
+    try {
+      previewHtml = renderQuoteEmail({ ...templateInput, plainLinks: true });
+    } catch {
+      previewHtml = `<p>${opener}</p>`;
+    }
 
     const toEmail = p.toEmail || merged.email || merged.customerEmail;
     if (!toEmail) {
       return ok({
         dryRun: true,
         reason: "missing_toEmail",
-        htmlPreview: htmlBody,
+        htmlPreview: previewHtml,
         specs,
         calc,
         facts: merged,
@@ -2887,7 +2895,7 @@ if (merged.dims) {
     if (dryRun) {
       return ok({
         mode: "dryrun",
-        htmlPreview: htmlBody,
+        htmlPreview: previewHtml,
         specs,
         calc,
         facts: merged,
@@ -2898,7 +2906,7 @@ if (merged.dims) {
 
     const r = await fetch(sendUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...internalHeaders() },
       body: JSON.stringify({
         toEmail,
         subject: subject || "Foam quote",

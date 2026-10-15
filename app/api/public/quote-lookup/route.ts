@@ -2,13 +2,14 @@
 //
 // Public "Look up a quote" for tenant pages (/t/[tenant]).
 // Returns the quote URL only when quote number AND email both match a quote
-// in that tenant. "Not found" and "wrong email" get the same response so the
+// in that tenant, and (Step 21) gives this browser the quote's edit grant. "Not found" and "wrong email" get the same response so the
 // endpoint can't be used to discover which quote numbers exist.
 // Rate limited per IP (5/min).
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { addEditGrant } from "@/lib/quote-edit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,10 +68,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    // Step 21: number + email both matched, so this browser may change the
+    // quote too (same as opening the link from the quote email).
+    const res = NextResponse.json({
       ok: true,
       url: `/quote?quote_no=${encodeURIComponent(row.quote_no)}`,
     });
+    return addEditGrant(res, req, row.quote_no);
   } catch (err: any) {
     console.error("[quote-lookup] error:", err);
     return NextResponse.json(

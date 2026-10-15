@@ -1,5 +1,9 @@
 // app/api/msgraph/lookup/route.ts
+//
+// Step 21: server-to-server only (it reads the shop mailbox). Nothing in the
+// app calls it today.
 import { NextRequest, NextResponse } from "next/server";
+import { isInternalCall } from "@/lib/internal-call";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -101,7 +105,12 @@ async function lookupByInternetMessageId(mailbox: string, internetMessageId: str
 }
 
 // --- route handlers ---
+function refuse() {
+  return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+}
+
 export async function GET(req: NextRequest) {
+  if (!isInternalCall(req)) return refuse();
   try {
     const { searchParams } = new URL(req.url);
     const mailbox = process.env.MS_MAILBOX_FROM || requireEnv("MS_MAILBOX_FROM");
@@ -118,6 +127,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!isInternalCall(req)) return refuse();
   try {
     const mailbox = process.env.MS_MAILBOX_FROM || requireEnv("MS_MAILBOX_FROM");
     const body = await req.json().catch(() => ({}));

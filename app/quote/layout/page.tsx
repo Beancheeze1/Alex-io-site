@@ -2847,6 +2847,12 @@ if (prevLayerIdRef.current == null && effectiveActiveLayerId != null) {
 
         if (!res.ok) {
           console.error("Failed to add box to quote", res.status, data);
+          // Step 21: tell the buyer why (no edit link / released quote).
+          // (Not for the automatic add the editor does on open.)
+          const msg = (data as { message?: unknown } | null)?.message;
+          if (!payload.auto && (res.status === 403 || res.status === 409) && typeof msg === "string") {
+            alert(msg);
+          }
         }
       } catch (err) {
         console.error("Error in handlePickCarton /api/boxes/add-to-quote", err);
@@ -4183,6 +4189,12 @@ const handleGoToFoamAdvisor = () => {
             alert(
               `Couldn’t find a quote header for ${quoteNo}.\nOpen this link from a real quote email.`,
             );
+          } else if (
+            // Step 21: no edit link, released quote, too many tries, bad number.
+            typeof payloadJson?.message === "string" &&
+            [400, 403, 409, 410, 429].includes(res.status)
+          ) {
+            alert(payloadJson.message);
           }
         } catch {
           // ignore

@@ -4,6 +4,12 @@
 //
 // The types here are aligned with app/api/ai/orchestrate/route.ts.
 // Only HTML / styling and simple display helpers should be edited here.
+//
+// Step 21: the quote page and layout editor links in the email are the
+// buyer's private edit links (editLinkUrl): opening one lets that browser
+// change the quote. A bare quote number only lets someone view it.
+
+import { editLinkUrl } from "@/lib/quote-edit-token";
 
 export type TemplateSpecs = {
   L_in: number;
@@ -68,6 +74,9 @@ export type TemplateLayoutLayer = {
 export type TemplateInput = {
   customerLine?: string | null;
   quoteNumber?: string | null;
+  // Step 21: true = plain quote/layout links (previews shown to the caller),
+  // not the buyer's private edit links.
+  plainLinks?: boolean;
   status?: string;
   specs: TemplateSpecs;
   material: TemplateMaterial;
@@ -576,17 +585,19 @@ export function renderQuoteEmail(input: TemplateInput): string {
   const priceBreaks: PriceBreak[] = pricing.price_breaks ?? [];
 
   // Layout URL: prefer orchestrate-provided URL (facts), otherwise build one from normalized specs.
-  const layoutUrl =
+  const layoutUrlPlain =
     facts.layout_editor_url ||
     facts.layoutEditorUrl ||
     facts.layoutEditorLink ||
     buildLayoutUrl({ ...input, specs } as any);
+  const layoutUrl = quoteNumber && !input.plainLinks ? editLinkUrl(layoutUrlPlain, quoteNumber) : layoutUrlPlain;
 
   // Quote page URL (interactive viewer)
   const _base2 = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
-  const quotePageUrl =
+  const quotePageUrlPlain =
     input.quotePageUrl ||
     (quoteNumber ? `${_base2}/quote?quote_no=${encodeURIComponent(quoteNumber)}` : null);
+  const quotePageUrl = quoteNumber && !input.plainLinks ? editLinkUrl(quotePageUrlPlain, quoteNumber) : quotePageUrlPlain;
 
   // Rich line items / totals (from print route)
   const lineItems = Array.isArray(input.lineItems) ? input.lineItems : [];

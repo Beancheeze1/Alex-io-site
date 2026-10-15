@@ -38,6 +38,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { addEditGrant } from "@/lib/quote-edit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
@@ -293,7 +294,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return json({ ok: true, quote_no: quote.quote_no, url: `/quote?quote_no=${encodeURIComponent(quote.quote_no)}` });
+    const done = json({ ok: true, quote_no: quote.quote_no, url: `/quote?quote_no=${encodeURIComponent(quote.quote_no)}` });
+    // Step 21: the browser that started the quote may keep changing it.
+    if (createdQuoteHere) addEditGrant(done, req, quote.quote_no);
+    return done;
   } catch (e: any) {
     console.error("[quote/boxes-only] failed:", e);
     if (cleanupQuoteId != null) {

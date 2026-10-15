@@ -4,8 +4,10 @@
 // against a quote's facts store.
 //
 // Called by the public layout editor (/quote/layout) when the user types dims
-// into the "Customer box (inside)" inputs.  No admin auth required — only
-// a valid quote_no is needed to confirm the quote exists.
+// into the "Customer box (inside)" inputs.
+// Step 21: GET needs only the quote number. POST (a change) needs staff of the
+// quote's shop, or the buyer's edit grant (lib/quote-edit.ts); buyers can't
+// change a released (locked) quote.
 //
 // POST body:
 //   { "quote_no": "Q-AI-...", "box": { "L": 18, "W": 12, "H": 6, "style": "mailer" | "rsc" } | null }
@@ -21,11 +23,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { one } from "@/lib/db";
 import { parsePrintSpec } from "@/lib/corrugated-price";
+import { buyerEditGuard } from "@/lib/quote-edit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type QuoteRow = { id: number };
+type QuoteRow = { id: number; quote_no: string; tenant_id: number; locked: boolean | null };
 
 type BoxStyle = "mailer" | "rsc";
 
@@ -95,9 +98,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Confirm the quote exists (no full auth required — just existence check).
     const quote = await one<QuoteRow>(
-      `SELECT id FROM quotes WHERE quote_no = $1 LIMIT 1`,
+      `SELECT id, quote_no, tenant_id, locked FROM quotes WHERE quote_no = $1 LIMIT 1`,
       [quoteNo],
     );
 
@@ -107,6 +109,15 @@ export async function POST(req: NextRequest) {
         { status: 404 },
       );
     }
+
+    // Step 21: staff of the quote's shop, or the buyer's edit link; buyers
+    // can't change a released quote.
+    const guard = await buyerEditGuard(req, quote, {
+      rateName: "customer-box",
+      perMin: 120,
+      lockedMessage: "This quote has been released. Contact the shop to change it.",
+    });
+    if (guard) return guard;
 
     const existing = (await loadFacts(quoteNo)) || {};
     const box = hasBoxKey ? coerceBox(rawBox) : coerceBox((existing as any)?.customer_box_in);
