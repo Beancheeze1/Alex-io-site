@@ -56,6 +56,7 @@ type QuoteRow = {
   phone: string | null;
   status: string;
   locked: boolean | null;
+  tenant_id: number;
 };
 
 type QuoteItemRow = {
@@ -111,6 +112,7 @@ async function calcQuoteCI(opts: {
   qty: number;
   material_id: number;
   cavities: string[];
+  tenant_id: number; // Step 22: price with the quote's shop settings
 }) {
   const [L, W, H] = String(opts.dims)
     .toLowerCase()
@@ -133,6 +135,7 @@ async function calcQuoteCI(opts: {
       qty: opts.qty,
       cavities: opts.cavities || [],
       round_to_bf: false,
+      tenant_id: opts.tenant_id,
     }),
   });
 
@@ -148,6 +151,7 @@ async function buildPriceBreaksForSketch(opts: {
   material_id: number;
   cavities: string[];
   baseCalc: any;
+  tenant_id: number;
 }): Promise<PriceBreak[] | null> {
   const baseQty = opts.qty;
   if (!baseQty || baseQty <= 0) return null;
@@ -168,6 +172,7 @@ async function buildPriceBreaksForSketch(opts: {
         qty: q,
         material_id: opts.material_id,
         cavities: opts.cavities,
+        tenant_id: opts.tenant_id,
       });
       if (!calc) continue;
     }
@@ -208,7 +213,7 @@ export async function POST(req: NextRequest) {
     // 1) Load quote header
     const quote = await one<QuoteRow>(
       `
-      SELECT id, quote_no, customer_name, email, phone, status, locked
+      SELECT id, quote_no, customer_name, email, phone, status, locked, tenant_id
       FROM quotes
       WHERE quote_no = $1
       LIMIT 1;
@@ -379,6 +384,7 @@ export async function POST(req: NextRequest) {
       qty: mergedQty,
       material_id: safeMaterial.id,
       cavities,
+      tenant_id: Number(quote.tenant_id),
     });
 
     if (!calc) {
@@ -392,6 +398,7 @@ export async function POST(req: NextRequest) {
       material_id: safeMaterial.id,
       cavities,
       baseCalc: calc,
+      tenant_id: Number(quote.tenant_id),
     });
 
     // 5.5) Store sketch facts in memory keyed by quote_no

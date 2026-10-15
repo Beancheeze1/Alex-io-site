@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import logger from "@/lib/logger";
 import { handleApiError } from "@/lib/api-error";
+import { internalHeaders } from "@/lib/internal-call";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -198,9 +199,10 @@ export async function POST(req: NextRequest) {
       "}",
     );
 
+    // Step 22: orchestrate is internal-only now.
     const orchRes = await fetch(urlOrchestrate, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...internalHeaders() },
       body: JSON.stringify(orchBody),
       cache: "no-store",
     });

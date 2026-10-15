@@ -13,9 +13,10 @@ import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 
-export type AdminAlertKind = "new_quote" | "artwork" | "buyer_change" | "spec_request";
+// Step 22: "needs_review" = a quote line was priced from a material with no price.
+export type AdminAlertKind = "new_quote" | "artwork" | "buyer_change" | "spec_request" | "needs_review";
 
-const MERGE_KINDS = new Set<AdminAlertKind>(["artwork", "buyer_change"]);
+const MERGE_KINDS = new Set<AdminAlertKind>(["artwork", "buyer_change", "needs_review"]);
 
 export async function addAdminAlert(a: {
   req?: NextRequest;

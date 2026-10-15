@@ -3,6 +3,10 @@
 // Tenant-scoped pricing settings.
 // Each tenant's settings are stored under separate KV and memory-cache keys.
 // Changing Tenant A's settings has zero effect on Tenant B.
+//
+// Step 22: the memory cache expires after 30 s, so a save on one server
+// instance reaches every instance within 30 s (it used to be cached forever).
+// Settings are keyed by the numeric shop id (the admin page saves under it).
 
 import { makeKv } from "@/app/lib/kv";
 
@@ -48,6 +52,9 @@ const DEFAULTS: PricingSettings = {
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };
 
+const CACHE_TTL_MS = 30_000;
+type CacheEntry = { at: number; value: PricingSettings };
+
 // Keys are scoped per tenant
 function memKey(tenantId: number | string): string {
   return `__ALEXIO_PRICING_SETTINGS_${tenantId}__`;
@@ -56,19 +63,25 @@ function kvKey(tenantId: number | string): string {
   return `alexio:pricing_settings:${tenantId}`;
 }
 
+function getMemEntry(tenantId: number | string): CacheEntry | null {
+  const e = (globalThis as any)[memKey(tenantId)];
+  return e && typeof e === "object" && "value" in e && "at" in e ? (e as CacheEntry) : null;
+}
+/** A cached value younger than the TTL, or null. */
 function getMemCache(tenantId: number | string): PricingSettings | null {
-  return (globalThis as any)[memKey(tenantId)] ?? null;
+  const e = getMemEntry(tenantId);
+  return e && Date.now() - e.at < CACHE_TTL_MS ? e.value : null;
 }
 function setMemCache(tenantId: number | string, s: PricingSettings): void {
-  (globalThis as any)[memKey(tenantId)] = s;
+  (globalThis as any)[memKey(tenantId)] = { at: Date.now(), value: s } satisfies CacheEntry;
 }
 function mergeWithDefaults(raw: Partial<PricingSettings>): PricingSettings {
   return { ...DEFAULTS, ...raw };
 }
 
 /**
- * Async — loads from KV on first call per tenant, then caches in memory.
- * Pass tenantId (number or string) from the authenticated user.
+ * Async — loads from KV, cached in memory for 30 s per tenant.
+ * Pass the numeric shop id.
  */
 export async function getPricingSettings(tenantId: number | string = "default"): Promise<PricingSettings> {
   const cached = getMemCache(tenantId);
@@ -83,7 +96,10 @@ export async function getPricingSettings(tenantId: number | string = "default"):
       return parsed;
     }
   } catch {
-    // KV unavailable — fall through to defaults
+    // KV unavailable — keep the last known settings for this shop if any,
+    // rather than silently switching to the defaults.
+    const stale = getMemEntry(tenantId);
+    if (stale) return stale.value;
   }
 
   const defaults = mergeWithDefaults({});
@@ -92,11 +108,11 @@ export async function getPricingSettings(tenantId: number | string = "default"):
 }
 
 /**
- * Sync — returns in-memory cache for this tenant if warm, else defaults.
- * For fresh serverless instances call getPricingSettings() (async) first.
+ * Sync — returns the last cached settings for this tenant (even if older than
+ * the TTL), else defaults. Prefer getPricingSettings() (async).
  */
 export function getPricingSettingsSync(tenantId: number | string = "default"): PricingSettings {
-  return getMemCache(tenantId) ?? mergeWithDefaults({});
+  return getMemEntry(tenantId)?.value ?? mergeWithDefaults({});
 }
 
 /**

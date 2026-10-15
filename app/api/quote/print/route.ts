@@ -35,6 +35,7 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
 import { lockedChargeSettings, lockedFoamPrice } from "@/app/lib/pricing/foam-lock";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
+import { addAdminAlert } from "@/lib/admin-alerts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -526,6 +527,17 @@ export async function GET(req: NextRequest) {
                 force_skived: forceLayeredSkive,
                 tenant_id: tenantId,
               });
+              // Step 22: a material with no price is priced at the shop's
+              // default rate — tell the shop once, when the price is saved.
+              if (p.raw?.result?.needs_review === true && p.total > 0) {
+                await addAdminAlert({
+                  tenantId,
+                  quoteNo: quote.quote_no,
+                  kind: "needs_review",
+                  title: "Material has no price",
+                  detail: `${p.raw.result.material_name || "A material"} was priced at your default rate. Set its price on Materials, then reprice the quote.`,
+                });
+              }
               return { unit: p.unit, total: p.total, detail: p.raw?.result ?? null };
             },
           );

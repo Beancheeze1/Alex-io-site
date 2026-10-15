@@ -5,7 +5,8 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { isInternalCall } from "@/lib/internal-call";
-import { applyShopPrice, shopMaterialPrice } from "@/lib/material-prices";
+import { applyShopPrice, resolveTenantNumericId, shopMaterialPrice } from "@/lib/material-prices";
+import { priceFoam } from "@/app/lib/pricing/foam-core";
 
 // Step 19: who may call this route and what they get back.
 //   - Internal server-to-server calls (x-alexio-internal header): full result,
@@ -14,6 +15,9 @@ import { applyShopPrice, shopMaterialPrice } from "@/lib/material-prices";
 //     (the platform owner may pass tenant_id).
 //   - Everyone else: 30/min per IP, the host's shop only, and only the totals
 //     (no rates, markup, kerf, minimum or setup).
+// Step 22: the math lives in app/lib/pricing/foam-core.ts (shared with
+// computePricing and the foam tests). An internal call MUST name the shop
+// (tenant_id): no more silent "default" settings for email / AI / sketch prices.
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,7 +31,7 @@ type In = {
   cavities?: string[] | null; // e.g., ["3x3x1", "Ø6x1"]
   round_to_bf?: boolean;
   force_skived?: boolean;
-  tenant_id?: number | string | null; // optional: skip host-based lookup when called server-to-server
+  tenant_id?: number | string | null; // shop id or slug; REQUIRED on internal (server-to-server) calls
 };
 
 type MaterialRow = {
@@ -66,40 +70,6 @@ function toNum(v: any, label: string): number {
   }
   return n;
 }
-function safeNum(v: any, fallback: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-function round2(v: number) {
-  return Math.round(v * 100) / 100;
-}
-function round4(v: number) {
-  return Math.round(v * 10000) / 10000;
-}
-
-/** Parse cavity strings like "2x3x0.5" or "Ø6x1" (dia x depth) into cubic inches. */
-function cavityVolumeCi(s: string): number {
-  const raw = s.trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x");
-  if (!raw) return 0;
-
-  // Round cavity: "ø6x1", "o6x1"
-  const roundMatch = raw.match(/^([øo0]?)(\d*\.?\d+)x(\d*\.?\d+)$/i);
-  if (roundMatch && roundMatch[1]) {
-    const dia = Number(roundMatch[2]);
-    const depth = Number(roundMatch[3]);
-    if (!Number.isFinite(dia) || !Number.isFinite(depth)) return 0;
-    const radius = dia / 2;
-    return Math.PI * radius * radius * depth;
-  }
-
-  // Rectangular cavity: "2x3x1"
-  const parts = raw.split("x").map((p) => Number(p));
-  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-    return parts[0] * parts[1] * parts[2];
-  }
-
-  return 0;
-}
 
 /** GET = simple usage help. (Step 19: the database function inspector is gone.) */
 export async function GET() {
@@ -129,20 +99,16 @@ export async function GET() {
 }
 
 /**
- * POST: deterministic volumetric quote
+ * POST: deterministic volumetric quote (formula: app/lib/pricing/foam-core.ts).
  *
- * - Uses materials table for:
- *   - price_per_cuin / price_per_bf / cost_per_ci_usd
- *   - kerf_waste_pct (falls back to settings.kerf_pct_default)
- *   - min_charge_usd (falls back to settings.min_charge_default)
- *   - skiving_upcharge_pct (applied when thickness NOT a whole inch)
- *   - cutting_setup_fee_usd
- *
+ * - Material inputs: price_per_cuin / price_per_bf / cost_per_ci_usd,
+ *   kerf_waste_pct, min_charge_usd, skiving_upcharge_pct, cutting_setup_fee_usd
+ *   (the shop's own price / minimum / waste % override the catalog: Step 20).
  * - Cavities subtract volume per piece.
- * - Global markup factor from /admin/settings (markup_factor_default)
- *   multiplies the raw total before min charge (default 1.0 = no change).
- * - If material has no direct pricing, machine knobs can be used as a last resort.
- * - Returns a single row in `result`.
+ * - The shop markup (markup_factor_default, 1.45 unless the shop changed it)
+ *   multiplies the total before the minimum charge.
+ * - A material with no price is priced at the shop's default rate and
+ *   flagged needs_review.
  * - Also attaches a light-weight cushion summary when cushion_curves has data.
  */
 export async function POST(req: NextRequest) {
@@ -212,10 +178,16 @@ export async function POST(req: NextRequest) {
     // Fall back to host-based subdomain lookup for direct browser/external calls.
     // Step 19: only internal calls (or the platform owner) may name the shop.
     // Staff price for their own shop; the public gets the host's shop.
-    let tenantId: number | string = "default";
+    // Step 22: always a numeric shop id (settings are saved under it), and an
+    // internal call must say which shop it is pricing for.
+    let tenantId: number | null = null;
     const askedTenant = body.tenant_id != null && body.tenant_id !== "" ? body.tenant_id : null;
     if (askedTenant != null && (internal || (staff && isPlatformOwner(user)))) {
-      tenantId = askedTenant;
+      tenantId = await resolveTenantNumericId(askedTenant);
+      if (tenantId == null) return bad("tenant_not_found", { tenant_id: askedTenant });
+    } else if (internal) {
+      console.error("[quotes/calc] internal call without tenant_id — refusing to guess the shop");
+      return bad("tenant_required", { message: "Internal calc calls must pass tenant_id." });
     } else if (staff && user?.tenant_id != null) {
       tenantId = Number(user.tenant_id);
     } else {
@@ -225,7 +197,9 @@ export async function POST(req: NextRequest) {
         `SELECT id FROM public.tenants WHERE slug = $1`,
         [subdomain],
       ).catch(() => null);
-      tenantId = tenantRow?.id ?? "default";
+      // The core host (api.alex-io.com) is the default shop.
+      tenantId = tenantRow?.id ?? (await resolveTenantNumericId("default"));
+      if (tenantId == null) return bad("tenant_not_found", undefined, 404);
     }
     const settings = await getPricingSettings(tenantId);
 
@@ -233,113 +207,16 @@ export async function POST(req: NextRequest) {
     // override the shared catalog (blank fields keep the catalog value).
     applyShopPrice(mat, await shopMaterialPrice(tenantId, material_id));
 
-    // --- Volumes (cubic inches) ---
-    const piece_ci_raw = length_in * width_in * height_in;
-    let cavities_ci = 0;
-    for (const c of cavitiesArr) {
-      cavities_ci += cavityVolumeCi(c);
-    }
-    const piece_ci = Math.max(piece_ci_raw - cavities_ci, 0);
-    const order_ci = piece_ci * qty;
-
-    // Kerf / waste
-    const kerf_pct =
-      mat.kerf_waste_pct != null
-        ? safeNum(mat.kerf_waste_pct, 0)
-        : safeNum(settings.kerf_pct_default, 10);
-    const order_ci_with_waste = order_ci * (1 + kerf_pct / 100);
-
-    // --- Pricing base ---
-    const price_per_ci_direct = mat.price_per_cuin;
-    const price_per_ci_from_bf =
-      mat.price_per_bf != null ? Number(mat.price_per_bf) / 144 : null;
-    const price_per_ci_from_cost =
-      mat.cost_per_ci_usd != null ? Number(mat.cost_per_ci_usd) * 1.35 : null; // simple markup off cost
-
-    // NEW: derive a per-ci rate from machine knobs if needed
-    const machineRate = safeNum(settings.machining_in3_per_min, 3000);
-    const machineCostPerMin = safeNum(settings.machine_cost_per_min, 0.65);
-    const price_per_ci_from_machine =
-      machineRate > 0 ? machineCostPerMin / machineRate : null;
-
-    const default_price_per_ci =
-      settings.ratePerCI_default ||
-      (settings.ratePerBF_default ? settings.ratePerBF_default / 144 : 0.02);
-
-    const price_per_ci =
-      (price_per_ci_direct as number | null) ??
-      (price_per_ci_from_bf as number | null) ??
-      (price_per_ci_from_cost as number | null) ??
-      (price_per_ci_from_machine as number | null) ??
-      default_price_per_ci;
-
-    const price_per_bf =
-      (mat.price_per_bf as number | null) ?? round2(price_per_ci * 144);
-
-    // Skiving upcharge: if height is NOT within 0.01 of a whole inch,
-    // or if caller explicitly forces skiving (used for layered sets where
-    // individual layers may require skiving even when total stack depth is whole-inch).
-    //
-    // Two mechanisms (material-level % takes priority):
-    //   1. skiving_upcharge_pct on the material row  → % multiplier on raw total
-    //   2. skive_upcharge_each from admin settings    → flat $ per piece (fallback)
-    const skive_pct =
-      mat.skiving_upcharge_pct != null
-        ? Number(mat.skiving_upcharge_pct)
-        : 0;
-    const skive_each_fallback =
-      mat.skiving_upcharge_pct == null
-        ? safeNum(settings.skive_upcharge_each, 0)
-        : 0;
-    const heightTriggersSkive = Math.abs(height_in - Math.round(height_in)) > 0.01;
-    const is_skived = force_skived || heightTriggersSkive;
-
-    const setup_fee =
-      mat.cutting_setup_fee_usd != null
-        ? Number(mat.cutting_setup_fee_usd)
-        : 0;
-
-    // Raw total (before global markup & min charge)
-    let raw_total = order_ci_with_waste * price_per_ci;
-    if (is_skived && skive_pct > 0) {
-      // Material-level percentage upcharge
-      raw_total *= 1 + skive_pct / 100;
-    } else if (is_skived && skive_each_fallback > 0) {
-      // Settings-level flat per-piece upcharge
-      raw_total += skive_each_fallback * qty;
-    }
-    raw_total += setup_fee;
-
-    // Optional board-foot rounding (same behavior as before)
-    if (round_to_bf) {
-      const bf = order_ci_with_waste / 144;
-      const bf_rounded = Math.ceil(bf * 4) / 4; // quarter-board increments
-      raw_total = bf_rounded * price_per_bf;
-    }
-
-    // Global markup factor from admin settings (default 1.0 = no change)
-    const markupFactor =
-      typeof settings.markup_factor_default === "number" &&
-      Number.isFinite(settings.markup_factor_default) &&
-      settings.markup_factor_default > 0
-        ? settings.markup_factor_default
-        : 1;
-
-    raw_total *= markupFactor;
-
-    // Min charge: material row first, then settings default
-    const min_charge_source =
-      mat.min_charge_usd != null
-        ? mat.min_charge_usd
-        : settings.min_charge_default;
-    const min_charge = safeNum(min_charge_source, 0);
-
-    let total = raw_total;
-    let used_min_charge = false;
-    if (min_charge > 0 && total < min_charge) {
-      total = min_charge;
-      used_min_charge = true;
-    }
+    // Step 22: one shared formula (app/lib/pricing/foam-core.ts).
+    const priced = priceFoam(mat, settings, {
+      L: length_in,
+      W: width_in,
+      H: height_in,
+      qty,
+      cavities: cavitiesArr,
+      round_to_bf,
+      force_skived,
+    });
 
     // --- Cushion curve lookup (optional) ---
     let cushion: any = {
@@ -392,26 +269,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = {
-      piece_ci: round4(piece_ci),
-      order_ci: round4(order_ci),
-      order_ci_with_waste: round4(order_ci_with_waste),
-      price_per_ci: round4(price_per_ci),
-      price_per_bf: round2(price_per_bf),
-      min_charge: round2(min_charge),
-      total: round2(total),
-      used_min_charge,
-
-      // Extra debug / for templates
-      kerf_pct,
-      is_skived,
-      skive_pct,
-      skive_each_fallback: round2(skive_each_fallback),
-      setup_fee: round2(setup_fee),
-      cavities_ci: round4(cavities_ci),
-      piece_ci_raw: round4(piece_ci_raw),
-      material_name: mat.name,
-      markup_factor: round4(markupFactor),
-
+      ...priced,
       // Cushion curve summary (if available)
       cushion,
     };

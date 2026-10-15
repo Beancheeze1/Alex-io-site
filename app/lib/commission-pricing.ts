@@ -49,14 +49,17 @@ async function calcFoamTotal(
   H: number,
   qty: number,
   material_id: number,
+  tenant_id: number | null,
 ): Promise<number> {
+  // Step 22: the calc route needs the quote's shop on internal calls.
+  if (tenant_id == null) return 0;
   try {
     const r = await fetch(`${base}/api/quotes/calc?t=${Date.now()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...internalHeaders() },
       body: JSON.stringify({
         length_in: L, width_in: W, height_in: H,
-        material_id, qty, cavities: [], round_to_bf: false,
+        material_id, qty, cavities: [], round_to_bf: false, tenant_id,
       }),
     });
     const j = await r.json().catch(() => ({}));
@@ -123,6 +126,13 @@ export async function getCommissionableTotal(
   base: string,
   tenantId: number | null = null,
 ): Promise<number> {
+  // Step 22: foam is priced with the quote's own shop settings.
+  const shopId =
+    tenantId ??
+    (await one<{ tenant_id: number }>(`SELECT tenant_id FROM public.quotes WHERE id = $1`, [quoteId]).catch(() => null))
+      ?.tenant_id ??
+    null;
+
   // ── Foam items ──
   const items = await q<{
     length_in: string; width_in: string; height_in: string;
@@ -155,7 +165,7 @@ export async function getCommissionableTotal(
     const qty = safeNum((facts as any).qty);
     const materialId = safeNum((facts as any).material_id);
     if (dims && qty > 0 && materialId > 0) {
-      foamTotal = await calcFoamTotal(base, dims.L, dims.W, dims.H, qty, materialId);
+      foamTotal = await calcFoamTotal(base, dims.L, dims.W, dims.H, qty, materialId, shopId);
     }
 
     // Synthetic box: if no committed box row but customer_box_in is set in facts
@@ -192,7 +202,7 @@ export async function getCommissionableTotal(
             ![L, W, H].every((n) => Number.isFinite(n) && n > 0) ||
             !(qty > 0) || !(materialId > 0)
           ) return 0;
-          return calcFoamTotal(base, L, W, H, qty, materialId);
+          return calcFoamTotal(base, L, W, H, qty, materialId, shopId);
         }),
     );
     foamTotal = prices.reduce((s, p) => s + p, 0);

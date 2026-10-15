@@ -56,7 +56,8 @@ import { renderQuoteEmail } from "@/app/lib/email/quoteTemplate";
 import logger from "@/lib/logger";
 import { handleApiError } from "@/lib/api-error";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
-import { internalHeaders } from "@/lib/internal-call";
+import { internalHeaders, internalOrStaff } from "@/lib/internal-call";
+import { resolveTenantNumericId } from "@/lib/material-prices";
 import { extractQuoteNoFromText } from "@/lib/quote-no";
 import { newUniqueQuoteNo } from "@/lib/quote-no-server";
 
@@ -940,7 +941,14 @@ function specsCompleteForQuote(s: { dims: string | null; qty: number | string | 
    Quote calc via internal API
    ============================================================ */
 
-async function fetchCalcQuote(opts: { dims: string; qty: number; material_id: number; round_to_bf: boolean }) {
+// Step 22: tenant_id = the shop whose settings and material prices apply.
+async function fetchCalcQuote(opts: {
+  dims: string;
+  qty: number;
+  material_id: number;
+  round_to_bf: boolean;
+  tenant_id: number;
+}) {
   const { L, W, H } = parseDimsNums(opts.dims);
   const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
@@ -955,6 +963,7 @@ async function fetchCalcQuote(opts: { dims: string; qty: number; material_id: nu
       qty: opts.qty,
       cavities: [],
       round_to_bf: opts.round_to_bf,
+      tenant_id: opts.tenant_id,
     }),
   });
 
@@ -976,7 +985,7 @@ type PriceBreak = {
 };
 
 async function buildPriceBreaks(
-  baseOpts: { dims: string; qty: number; material_id: number; round_to_bf: boolean },
+  baseOpts: { dims: string; qty: number; material_id: number; round_to_bf: boolean; tenant_id: number },
   baseCalc: any,
 ): Promise<PriceBreak[] | null> {
   const baseQty = baseOpts.qty;
@@ -2200,6 +2209,19 @@ ${lastInbound}
 
 export async function POST(req: NextRequest) {
   try {
+    // Step 22: server-to-server (HubSpot webhook) or signed-in staff only.
+    // A public caller could otherwise point it at any quote number (through
+    // the subject), rewrite that quote's saved facts and make the shop email
+    // anyone. Refused calls are logged so an outside user shows up.
+    const caller = await internalOrStaff(req);
+    if (!caller) {
+      console.warn("[orchestrate] refused a public call", {
+        ip: req.headers.get("x-forwarded-for")?.split(",")[0] || "unknown",
+        userAgent: req.headers.get("user-agent") || "",
+      });
+      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
+    }
+
     // Rate limiting: 15 requests per minute per IP
     const rate = await rateLimit(req, 15, "orchestrate");
     if (!rate.success) {
@@ -2630,12 +2652,26 @@ newly = mergeFacts(newly, formFacts);
     let priceBreaks: PriceBreak[] | null = null;
     const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
 
-    if (canCalc) {
+    // Step 22: price with the quote's own shop; a new email quote belongs to
+    // the calling staff member's shop, else the default shop (the email inbox).
+    let pricingTenantId: number | null = null;
+    if (merged.quote_no) {
+      const row = await one<{ tenant_id: number }>(
+        `SELECT tenant_id FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+        [String(merged.quote_no)],
+      ).catch(() => null);
+      pricingTenantId = row?.tenant_id != null ? Number(row.tenant_id) : null;
+    }
+    if (pricingTenantId == null && caller.user?.tenant_id != null) pricingTenantId = Number(caller.user.tenant_id);
+    if (pricingTenantId == null) pricingTenantId = await resolveTenantNumericId("default");
+
+    if (canCalc && pricingTenantId != null) {
       calc = await fetchCalcQuote({
         dims: specs.dims as string,
         qty: Number(specs.qty),
         material_id: Number(specs.material_id),
         round_to_bf: false,
+        tenant_id: pricingTenantId,
       });
 
       if (calc && !dryRun) {
@@ -2645,6 +2681,7 @@ newly = mergeFacts(newly, formFacts);
             qty: Number(specs.qty),
             material_id: Number(specs.material_id),
             round_to_bf: false,
+            tenant_id: pricingTenantId,
           },
           calc,
         );

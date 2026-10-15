@@ -180,7 +180,8 @@ export async function POST(req: NextRequest) {
 
     // ── Compute foam dims for quote_items ───────────────────────────────────
     // For complete-pack quotes (box/mailer) the foam insert is undersized by
-    // FIT_ALLOW_IN on each side so it slides into the carton cleanly. Using
+    // FIT_ALLOW_IN in total on length and on width (0.0625" per side) so it
+    // slides into the carton cleanly. Using
     // the raw box dims here would create a phantom "box-sized" item that
     // conflicts with the foam-fit dimensions the layout editor uses, showing
     // up as an extra layer in the pre-Apply print view.

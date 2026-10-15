@@ -78,24 +78,6 @@ type ItemRow = {
     kerf_waste_pct?: number | null;
   } | null;
 
-  pricing_breakdown?: {
-    volumeIn3: number;
-    materialWeightLb: number;
-    materialCost: number;
-    machineMinutes: number;
-    machineCost: number;
-    rawCost: number;
-    markupFactor: number;
-    sellPrice: number;
-    unitPrice: number;
-    extendedPrice: number;
-    qty: number;
-    breaks: {
-      qty: number;
-      unit: number;
-      total: number;
-    }[];
-  } | null;
 };
 
 type LayoutPkgRow = {
@@ -1477,29 +1459,10 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   // If every layer uses the same material (or there's only one), fall back to the single display
   const hasMixedMaterials = layerMaterials.length > 1;
 
-  // breakdown from server, if available
-  const primaryBreakdown = primaryItem?.pricing_breakdown || null;
-
-  const breakdownUnitPrice =
-    primaryBreakdown && Number.isFinite(primaryBreakdown.unitPrice)
-      ? primaryBreakdown.unitPrice
-      : parsePriceField(primaryItem?.price_unit_usd ?? null);
-
-  const breakdownSubtotal =
-    primaryBreakdown && Number.isFinite(primaryBreakdown.extendedPrice) ? primaryBreakdown.extendedPrice : foamSubtotal;
-
-  const materialCost =
-    primaryBreakdown && Number.isFinite(primaryBreakdown.materialCost) ? primaryBreakdown.materialCost : null;
-
-  const machineCost =
-    primaryBreakdown && Number.isFinite(primaryBreakdown.machineCost) ? primaryBreakdown.machineCost : null;
-
-  const rawCost = primaryBreakdown && Number.isFinite(primaryBreakdown.rawCost) ? primaryBreakdown.rawCost : null;
-
-  const markupFactor =
-    primaryBreakdown && Number.isFinite(primaryBreakdown.markupFactor) ? primaryBreakdown.markupFactor : null;
-
-  const priceBreaks = primaryBreakdown?.breaks ?? [];
+  // Step 22: the old cost / machine-time "pricing breakdown" was never sent by
+  // the server (dead code, removed). Prices come from the saved line prices.
+  const breakdownUnitPrice = parsePriceField(primaryItem?.price_unit_usd ?? null);
+  const breakdownSubtotal = foamSubtotal;
 
   // Derived packaging subtotal from carton lines (used only if server subtotal is 0)
   const derivedPackagingSubtotal = React.useMemo(() => {
@@ -2716,67 +2679,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         </>
                       )}
 
-                      {primaryBreakdown && (
-                        <>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              paddingTop: 6,
-                              borderTop: "1px dashed var(--border)",
-                              display: "grid",
-                              gridTemplateColumns: "repeat(2,minmax(0,1fr))",
-                              gap: 8,
-                            }}
-                          >
-                            <div>
-                              <div style={labelStyle}>Material</div>
-                              <div style={{ fontSize: 13 }}>{formatUsd(materialCost)}</div>
-                            </div>
-                            <div>
-                              <div style={labelStyle}>Machine</div>
-                              <div style={{ fontSize: 13 }}>{formatUsd(machineCost)}</div>
-                            </div>
-                            <div>
-                              <div style={labelStyle}>Raw cost</div>
-                              <div style={{ fontSize: 13 }}>{formatUsd(rawCost)}</div>
-                            </div>
-                            <div>
-                              <div style={labelStyle}>Markup</div>
-                              <div style={{ fontSize: 13 }}>
-                                {markupFactor != null
-                                  ? (() => {
-                                      const over = (markupFactor - 1) * 100;
-                                      if (over > 0) return `${over.toFixed(0)}% over cost`;
-                                      return `${markupFactor.toFixed(2)}×`;
-                                    })()
-                                  : "—"}
-                              </div>
-                            </div>
-                          </div>
-
-                          {priceBreaks && priceBreaks.length > 1 && (
-                            <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
-                              <span style={{ fontWeight: 500 }}>Example price breaks: </span>
-                              {priceBreaks
-                                .filter((b) => b.qty === 10 || b.qty === 50)
-                                .map((b) => `${b.qty} pcs – ${formatUsd(b.unit)}/pc`)
-                                .join(" · ")}
-                            </div>
-                          )}
-                        </>
-                      )}
-
                       <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
                         {primaryPricing ? (
                           <>
                             <span>
                               Pricing includes material, cutting, and standard waste allowance
                               {typeof kerfPct === "number" ? ` (~${kerfPct}% kerf)` : ""}.
-                              {materialCost != null && machineCost != null
-                                ? ` In this estimate, material is approximately ${formatUsd(
-                                    materialCost,
-                                  )} and machine time approximately ${formatUsd(machineCost)} before markup.`
-                                : ""}
                               {setupFee && setupFee > 0 ? ` A one-time setup fee of ${formatUsd(setupFee)} is included.` : ""}
                               {minChargeApplied
                                 ? ` A minimum charge of ${formatUsd(

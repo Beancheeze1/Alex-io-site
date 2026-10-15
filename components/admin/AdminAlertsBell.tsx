@@ -24,6 +24,7 @@ const KIND_LABEL: Record<string, string> = {
   artwork: "Artwork",
   buyer_change: "Buyer change",
   spec_request: "Spec request",
+  needs_review: "Needs review",
 };
 
 function timeAgo(iso: string): string {
