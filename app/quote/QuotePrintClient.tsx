@@ -1346,6 +1346,75 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     }
   };
 
+  // Step 24: foam "Price by quantity" (foam-only and complete-pack quotes):
+  // the whole quote's price at each compare quantity, with a switch.
+  type FoamBreak = {
+    qty: number;
+    foam_usd: number;
+    cutting_usd: number;
+    method: string;
+    boxes_usd: number | null;
+    plates_usd: number;
+    total_usd: number;
+    unit_usd: number;
+    stored: boolean;
+  };
+  const [foamBreaks, setFoamBreaks] = React.useState<FoamBreak[]>([]);
+  const [foamBreaksInfo, setFoamBreaksInfo] = React.useState<{
+    current: number | null;
+    locked: boolean;
+    hasBoxes: boolean;
+    printingExtra: boolean;
+  }>({ current: null, locked: false, hasBoxes: false, printingExtra: false });
+  const [foamBreakBusy, setFoamBreakBusy] = React.useState<number | null>(null);
+  const [foamBreakError, setFoamBreakError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isBoxesOnly || !quoteNo) {
+      setFoamBreaks([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/quote/foam-breaks?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j?.ok) return;
+        setFoamBreaks(Array.isArray(j.breaks) ? j.breaks : []);
+        setFoamBreaksInfo({
+          current: j.current_qty != null && Number.isFinite(Number(j.current_qty)) ? Number(j.current_qty) : null,
+          locked: !!j.locked,
+          hasBoxes: !!j.has_boxes,
+          printingExtra: !!j.printing_extra,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isBoxesOnly, quoteNo]);
+
+  const switchToFoamBreak = async (qty: number) => {
+    setFoamBreakBusy(qty);
+    setFoamBreakError(null);
+    try {
+      const res = await fetch("/api/quote/foam-breaks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNo, qty }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setFoamBreakError(j?.message || "We couldn't change the quantity. Please try again.");
+        return;
+      }
+      window.location.reload();
+    } catch {
+      setFoamBreakError("We couldn't change the quantity. Please try again.");
+    } finally {
+      setFoamBreakBusy(null);
+    }
+  };
+
   // Print artwork (Corrugated Step 6): shown for any printed quote.
   const [artwork, setArtwork] = React.useState<
     { id: number; filename: string; size_bytes: number | null; url: string }[]
@@ -3285,7 +3354,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </tbody>
                   </table>
 
-                  {Array.isArray(quote.qty_breaks) && quote.qty_breaks.length > 0 && (
+                  {/* Rep-entered price breaks. Step 24: hidden when "Price by quantity"
+                      below already prices those quantities and no manual price was entered. */}
+                  {Array.isArray(quote.qty_breaks) &&
+                    quote.qty_breaks.length > 0 &&
+                    !(foamBreaks.length > 1 && quote.qty_breaks.every((b) => b.price == null)) && (
                     <div style={{ marginTop: 16 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
                         Quantity price breaks
@@ -3641,6 +3714,102 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       ? " Smaller quantities are digitally printed and CAD cut, so they have no plates."
                       : ""}{" "}
                     Switching updates the line items above.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Step 24: foam / complete pack — price at each compare quantity */}
+            {!isBoxesOnly && foamBreaks.length > 1 && (
+              <div style={{ marginTop: 4 }} data-foam-breaks>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Price by quantity</div>
+                <div style={{ ...cardBase, background: "var(--surface-card)" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                        <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Quantity</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per part</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Foam</th>
+                        {foamBreaks.some((b) => b.cutting_usd > 0) && (
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Cutting</th>
+                        )}
+                        {foamBreaksInfo.hasBoxes && (
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                        )}
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Total</th>
+                        <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }} />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {foamBreaks.map((b) => {
+                        const isCurrent = foamBreaksInfo.current === b.qty;
+                        return (
+                          <tr key={b.qty} style={{ color: "var(--text-primary)", fontWeight: isCurrent ? 600 : 400 }}>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              {b.qty.toLocaleString("en-US")}
+                              {b.method === "die" ? (
+                                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>Steel-rule die</div>
+                              ) : b.method === "cnc" ? (
+                                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>CNC, no tooling</div>
+                              ) : null}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {`$${b.unit_usd.toFixed(4)}`}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {formatUsd(b.foam_usd)}
+                            </td>
+                            {foamBreaks.some((x) => x.cutting_usd > 0) && (
+                              <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                                {b.cutting_usd > 0 ? formatUsd(b.cutting_usd) : "—"}
+                              </td>
+                            )}
+                            {foamBreaksInfo.hasBoxes && (
+                              <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                                {b.boxes_usd == null ? "—" : formatUsd(b.boxes_usd + (b.plates_usd || 0))}
+                              </td>
+                            )}
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {formatUsd(b.total_usd)}
+                            </td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
+                              {isCurrent ? (
+                                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
+                              ) : foamBreaksInfo.locked ? null : (
+                                <button
+                                  type="button"
+                                  onClick={() => switchToFoamBreak(b.qty)}
+                                  disabled={foamBreakBusy !== null}
+                                  style={{
+                                    padding: "4px 10px",
+                                    borderRadius: 8,
+                                    border: "1px solid var(--border)",
+                                    background: "var(--surface-card)",
+                                    color: "var(--text-primary)",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: foamBreakBusy !== null ? "default" : "pointer",
+                                    opacity: foamBreakBusy !== null && foamBreakBusy !== b.qty ? 0.5 : 1,
+                                  }}
+                                >
+                                  {foamBreakBusy === b.qty ? "Updating…" : "Use this quantity"}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {foamBreakError ? (
+                    <p style={{ color: "var(--attention)", fontSize: 13, marginTop: 8 }}>{foamBreakError}</p>
+                  ) : null}
+                  <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 8 }}>
+                    The quantity on this quote shows its saved price; other quantities are at today&apos;s rates.
+                    {foamBreaks.some((b) => b.method === "die") && foamBreaks.some((b) => b.method === "cnc")
+                      ? " Smaller quantities are CNC cut with no tooling; larger ones use a one-time steel-rule die."
+                      : ""}
+                    {foamBreaksInfo.printingExtra ? " Printing is added on the quote." : ""} Switching updates the line items above.
                   </p>
                 </div>
               </div>

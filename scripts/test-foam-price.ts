@@ -9,6 +9,7 @@
 import { cavityVolumeCi, priceFoam, type FoamMaterial, type FoamSettings } from "../app/lib/pricing/foam-core";
 import { foamGeometry } from "../app/lib/pricing/foam-geometry";
 import { pickFoamProcess, priceFoamProcess, resolveFoamMethod } from "../app/lib/pricing/foam-process";
+import { cleanQtyList, foamBreakList } from "../app/lib/pricing/qty-list";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -223,6 +224,21 @@ const noRates = priceFoamProcess({ model: 2, geom: g, qty: 100, settings: pickFo
 check("no CNC/die rates: old flat fee", noRates.total, 100);
 const noRatesLow = priceFoamProcess({ model: 2, geom: g, qty: 10, settings: pickFoamProcess({}), markup: 1.45, legacy: { ...legacy, qty: 10 } });
 check("no rates, under the old trigger: nothing", noRatesLow.lines.length, 0);
+
+// ---------------------------------------------------------------------------
+// Step 24: compare quantities
+// ---------------------------------------------------------------------------
+check("qty list: comma string", cleanQtyList("1000, 250,500").join(","), "250,500,1000");
+check("qty list: rep breaks [{qty, price}]", cleanQtyList([{ qty: 500, price: 1.2 }, { qty: 100, price: null }]).join(","), "100,500");
+check("qty list: junk dropped", cleanQtyList(["x", -5, 2.5, 0, "300", 300]).join(","), "300");
+check("qty list: JSON string", cleanQtyList("[50,25]").join(","), "25,50");
+check("breaks: ordered qty always kept, up to 3 others", foamBreakList(100, [25, 50, 250, 500, 1000]).join(","), "25,50,100,250");
+check("breaks: duplicates of the ordered qty dropped", foamBreakList(100, [100, 500]).join(","), "100,500");
+check("breaks: nothing to compare", foamBreakList(100, []).length, 1);
+
+// CNC → die switch by quantity (cutoff 500) on the same part
+check("price by qty: 100 is CNC", priceFoamProcess({ model: 2, geom: g, qty: 100, settings: proc, markup: 1.45, legacy }).method, "cnc");
+check("price by qty: 1,000 is die", priceFoamProcess({ model: 2, geom: g, qty: 1000, settings: proc, markup: 1.45, legacy }).method, "die");
 
 if (failed) {
   console.log(`\n${failed} FAILED`);

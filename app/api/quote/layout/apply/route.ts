@@ -80,6 +80,7 @@ import { buildStepFromLayout } from "@/lib/cad/step";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { tenantQuoteTypes } from "@/lib/quote-types-server";
+import { cleanQtyList } from "@/app/lib/pricing/qty-list";
 import {
   buildLayoutExports,
   computeGeometryHash,
@@ -2270,6 +2271,13 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
 
       if (updatedQty != null) {
         nextFacts.qty = updatedQty;
+      }
+
+      // Step 24: compare quantities picked at Start Quote ("Price by quantity"
+      // on the quote page). Only when sent; the ordered qty is added on read.
+      if (body?.qty_breaks != null) {
+        const extras = cleanQtyList(body.qty_breaks).slice(0, 3);
+        if (extras.length > 0) nextFacts.foam_qty_breaks = extras;
       }
 
       if (materialId != null) {

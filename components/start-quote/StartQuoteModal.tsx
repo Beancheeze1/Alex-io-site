@@ -1176,6 +1176,12 @@ export default function StartQuoteModal({
 
     if (qtyNum) p.set("qty", String(qtyNum));
 
+    // Step 24: up to 3 more quantities to compare on the quote (foam paths).
+    const foamBreaks = boBreaks
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0 && n !== qtyNum);
+    if (foamBreaks.length > 0) p.set("qty_breaks", Array.from(new Set(foamBreaks)).slice(0, 3).join(","));
+
 
     const matIdNum = Number(materialId);
     const hasMaterialId = Number.isFinite(matIdNum) && matIdNum > 0;
@@ -2519,6 +2525,33 @@ export default function StartQuoteModal({
                               k="Cavity seed"
                               v={normalizedSeed || "-"}
                             />
+                          </div>
+                        </div>
+
+                        {/* Step 24: foam "Price by quantity" */}
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
+                          <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                            COMPARE OTHER QUANTITIES (OPTIONAL)
+                          </div>
+                          <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                            Add up to 3 more quantities. Your quote will show the price at each one, and you can switch to any of them.
+                          </div>
+                          <div className="mt-3 grid grid-cols-3 gap-3">
+                            {boBreaks.map((v, i) => (
+                              <input
+                                key={i}
+                                value={v}
+                                inputMode="numeric"
+                                aria-label={`Other quantity ${i + 1}`}
+                                placeholder={`e.g. ${["250", "500", "1000"][i]}`}
+                                onChange={(e) => {
+                                  const next = [...boBreaks];
+                                  next[i] = e.target.value.replace(/[^\d]/g, "");
+                                  setBoBreaks(next);
+                                }}
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                            ))}
                           </div>
                         </div>
 

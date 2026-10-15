@@ -3909,6 +3909,18 @@ const handleGoToFoamAdvisor = () => {
     }
   })();
 
+  // Step 24: compare quantities from Start Quote (?qty_breaks=1000,2500),
+  // saved by Apply for the quote page's "Price by quantity".
+  const qtyBreaksForApply = (() => {
+    try {
+      if (typeof window === "undefined") return "";
+      const url = new URL(window.location.href);
+      return (url.searchParams.get("qty_breaks") || "").replace(/[^\d,]/g, "").slice(0, 60);
+    } catch {
+      return "";
+    }
+  })();
+
   const handleApplyToQuote = async () => {
     if (!hasRealQuoteNo) {
       alert("This layout isn’t linked to a quote.\nOpen from a real quote email.");
@@ -4046,6 +4058,11 @@ const handleGoToFoamAdvisor = () => {
       // Quote source: reporting only, does not affect sales credit above.
       if (quoteSourceForApply && quoteSourceForApply.length > 0) {
         payload.quote_source = quoteSourceForApply;
+      }
+
+      // Step 24: compare quantities picked at Start Quote.
+      if (qtyBreaksForApply) {
+        payload.qty_breaks = qtyBreaksForApply;
       }
 
       // Tenant the buyer came from (only used server-side on the core host,
