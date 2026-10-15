@@ -2370,6 +2370,27 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                   {/* Step 21: the buyer's private edit link */}
                   {quoteNoValue ? <BuyerLinkButton quoteNo={quoteNoValue} /> : null}
 
+                  {/* Step 33: the job ticket, once released for manufacture */}
+                  {quoteNoValue && quoteState?.locked ? (
+                    <a
+                      href={`/admin/quotes/${encodeURIComponent(quoteNoValue)}/ticket`}
+                      data-job-ticket-link
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        border: "1px solid var(--border-strong)",
+                        background: "var(--surface-card)",
+                        color: "var(--text-primary)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textDecoration: "none",
+                      }}
+                      title="Shop-floor job ticket: foam and box build, ship-to, proof (no prices)"
+                    >
+                      Job ticket
+                    </a>
+                  ) : null}
+
 
                   {/* REV (auto) + Revise button (Path A) */}
                   <div

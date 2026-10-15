@@ -15,6 +15,7 @@
   "test:freight": "npx --yes tsx scripts/test-freight.ts",
   "test:proofs": "npx --yes tsx scripts/test-proofs.ts",
   "test:queue": "npx --yes tsx scripts/test-review-queue.ts",
+  "test:dieline": "npx --yes tsx scripts/test-box-dieline.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },
