@@ -3,9 +3,20 @@
 // Step 29A: tests for the buyer status emails (app/lib/quote-mail-core.ts):
 // shop link address, reply-to choice, subjects and content per email, and
 // that shop text is escaped.
+// Step 29B: the reminder rules and emails (app/lib/reminders-core.ts).
 // Run: npm run test:mail   (= npx --yes tsx scripts/test-quote-mail.ts)
 
 import { isEmail, isStatusKind, pickReplyTo, statusEmail, tenantBaseUrl, type StatusEmailData } from "../app/lib/quote-mail-core";
+import {
+  approxExpiry,
+  digestHasNews,
+  expiringDue,
+  expiringKey,
+  followupDue,
+  isTimeZone,
+  shopClock,
+  staffDigestEmail,
+} from "../app/lib/reminders-core";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -82,6 +93,57 @@ check("bad color falls back", statusEmail("confirmed", { ...d, primaryColor: "re
 check("brand color used", statusEmail("confirmed", { ...d, primaryColor: "#123456" }).html.includes("#123456"), true);
 check("http logo ignored", statusEmail("confirmed", { ...d, logoUrl: "http://x.com/l.png" }).html.includes("<img"), false);
 check("https logo used", statusEmail("confirmed", { ...d, logoUrl: "https://x.com/l.png" }).html.includes("<img"), true);
+
+// ---- Step 29B: reminders ----
+const now = new Date("2026-10-15T16:30:00Z"); // 12:30 PM New York
+check("time zone ok", isTimeZone("America/Chicago"), true);
+check("time zone rejects junk", isTimeZone("Mars/Base"), false);
+check("shop hour in New York", shopClock(now, "America/New_York").hour, 12);
+check("shop day in New York", shopClock(now, "America/New_York").day, "2026-10-15");
+check("shop day rolls over in Tokyo", shopClock(now, "Asia/Tokyo").day, "2026-10-16");
+check("bad zone falls back to New York", shopClock(now, "nope").hour, 12);
+
+const row = { created_at: "2026-10-01T12:00:00Z", priced_at: null, expires_at: null };
+check("expiry = created + 30 days", approxExpiry(row, 30), "2026-10-31T12:00:00.000Z");
+check("reprice restarts expiry", approxExpiry({ ...row, priced_at: "2026-10-10T12:00:00Z" }, 30), "2026-11-09T12:00:00.000Z");
+check("staff date wins", approxExpiry({ ...row, expires_at: "2026-10-20T23:59:59Z" }, 30), "2026-10-20T23:59:59.000Z");
+check("0 days = never", approxExpiry(row, 0), null);
+
+check("expires in 4 days: due (5-day window)", expiringDue("2026-10-19T16:30:00Z", now, 5), true);
+check("expires in 6 days: not yet", expiringDue("2026-10-21T16:30:00Z", now, 5), false);
+check("already expired: no reminder", expiringDue("2026-10-15T16:00:00Z", now, 5), false);
+check("no expiry: no reminder", expiringDue(null, now, 5), false);
+check("expiring key is the day", expiringKey("2026-10-19T16:30:00Z"), "expires 2026-10-19");
+
+check("follow-up after 3 days", followupDue("2026-10-12T16:30:00Z", now, 3), true);
+check("no follow-up after 2 days", followupDue("2026-10-13T16:30:00Z", now, 3), false);
+check("no follow-up without a quote email", followupDue(null, now, 3), false);
+
+const exp = statusEmail("expiring", { ...d, validUntil: "2026-10-19T16:30:00Z" });
+check("expiring subject", exp.subject, "M-Line Packaging: quote Q-A-261015-75644 expires Oct 19, 2026");
+check("expiring button", exp.html.includes("Review and accept"), true);
+const fol = statusEmail("followup", { ...d, sentAt: "2026-10-12T16:30:00Z" });
+check("follow-up subject", fol.subject, "M-Line Packaging: following up on quote Q-A-261015-75644");
+check("follow-up names the send date", fol.html.includes("on Oct 12, 2026"), true);
+check("reminder kinds known", isStatusKind("expiring") && isStatusKind("followup"), true);
+
+const dig = {
+  brand: "M-Line <Packaging>",
+  day: "2026-10-15",
+  baseUrl: "https://mline.api.alex-io.com",
+  toConfirm: [{ quote_no: "Q-A-1", customer: "Acme", total: 1700, note: "accepted by Pat, PO 7" }],
+  newQuotes: [{ quote_no: "Q-A-2", customer: null, note: "draft" }],
+  newCount: 3,
+  expiring: [],
+};
+const de = staffDigestEmail(dig);
+check("digest subject", de.subject, "M-Line <Packaging> quotes for Oct 15, 2026: 1 to confirm, 3 new, 0 expiring");
+check("digest links the admin page", de.html.includes("https://mline.api.alex-io.com/admin/quotes/Q-A-1"), true);
+check("digest shows accepted total", de.html.includes("$1,700.00"), true);
+check("digest '...and N more'", de.html.includes("and 2 more"), true);
+check("digest escapes brand", de.html.includes("M-Line <Packaging>"), false);
+check("digest has news", digestHasNews(dig), true);
+check("empty digest is skipped", digestHasNews({ toConfirm: [], newCount: 0, expiring: [] }), false);
 
 if (failed) {
   console.log(`\n${failed} FAILED`);

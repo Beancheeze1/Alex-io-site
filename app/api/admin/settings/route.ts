@@ -10,6 +10,7 @@ import { adminOnly } from "@/lib/admin-auth";
 import { FOAM_PROCESS_KEYS } from "@/app/lib/pricing/foam-process";
 import { REVIEW_SETTING_KEYS } from "@/app/lib/pricing/foam-review";
 import { isEmail } from "@/app/lib/quote-mail-core";
+import { isTimeZone } from "@/app/lib/reminders-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,6 +102,15 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       "buyer_email_confirmed",
       "buyer_email_released",
       "reply_to_email",
+      // Step 29B: reminders
+      "reminder_expiring_on",
+      "reminder_expiring_days",
+      "reminder_followup_on",
+      "reminder_followup_days",
+      "staff_digest_on",
+      "staff_digest_hour",
+      "staff_digest_to",
+      "shop_timezone",
     ];
 
     const filtered: Partial<PricingSettings> = {};
@@ -126,6 +136,26 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
           typeof value === "string" && value.length <= 120
             ? null
             : { field: k, message: "Lead time must be text of at most 120 characters." };
+      } else if (k === "reminder_expiring_on" || k === "reminder_followup_on" || k === "staff_digest_on") {
+        error = typeof value === "boolean" ? null : { field: k, message: `${k} must be true or false.` };
+      } else if (k === "reminder_expiring_days" || k === "reminder_followup_days") {
+        error =
+          typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 60
+            ? null
+            : { field: k, message: "Reminder days must be a whole number from 1 to 60." };
+      } else if (k === "staff_digest_hour") {
+        error =
+          typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 23
+            ? null
+            : { field: k, message: "Digest hour must be a whole number from 0 to 23." };
+      } else if (k === "staff_digest_to") {
+        error =
+          typeof value === "string" && (value.trim() === "" || isEmail(value))
+            ? null
+            : { field: k, message: "Digest address must be one email address (or blank)." };
+        if (!error) (filtered as Record<string, unknown>)[k] = String(value).trim();
+      } else if (k === "shop_timezone") {
+        error = isTimeZone(value) ? null : { field: k, message: "Time zone must be a name like America/New_York." };
       } else if (k === "buyer_email_accepted" || k === "buyer_email_confirmed" || k === "buyer_email_released") {
         error = typeof value === "boolean" ? null : { field: k, message: `${k} must be true or false.` };
       } else if (k === "reply_to_email") {

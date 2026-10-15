@@ -60,6 +60,7 @@ import { internalHeaders, internalOrStaff } from "@/lib/internal-call";
 import { resolveTenantNumericId } from "@/lib/material-prices";
 import { extractQuoteNoFromText } from "@/lib/quote-no";
 import { newUniqueQuoteNo } from "@/lib/quote-no-server";
+import { logQuoteEmail } from "@/app/lib/quote-mail";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -2955,6 +2956,23 @@ if (merged.dims) {
     });
 
     const sent = await r.json().catch(() => ({} as any));
+
+    // Step 29B: log the quote email, so the quote page lists it and the
+    // buyer reminders (expiring / follow-up) know the buyer got the quote.
+    if (quoteId && Number.isFinite(Number(quoteId)) && sent?.mode !== "dry") {
+      const sentOk = r.ok && sent?.ok !== false;
+      await logQuoteEmail({
+        quoteId: Number(quoteId),
+        tenantId: pricingTenantId,
+        kind: "quote",
+        to: String(toEmail),
+        subject: subject || "Foam quote",
+        status: sentOk ? "sent" : "failed",
+        detail: sentOk ? null : `msgraph/send ${r.status}${sent?.error ? `: ${String(sent.error)}` : ""}`,
+        total: null,
+        by: "email / AI",
+      });
+    }
 
     if (threadKey && (sent.messageId || sent.internetMessageId)) {
       merged.__lastGraphMessageId = sent.messageId || merged.__lastGraphMessageId;

@@ -1,0 +1,37 @@
+# .github/workflows/reminders.yml
+#
+# Step 29B: runs Alex-IO's quote reminders every hour (buyer "expires soon" and
+# follow-up emails, the shops' daily staff digest). The work happens in
+# POST /api/cron/reminders; this only calls it.
+#
+# Needs the repository secret CRON_SECRET (Settings -> Secrets and variables ->
+# Actions), the same value as the CRON_SECRET environment variable on Render.
+# "Run workflow" on the Actions tab runs it by hand.
+
+name: Quote reminders
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: quote-reminders
+  cancel-in-progress: false
+
+jobs:
+  reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Run reminders
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "The CRON_SECRET repository secret is not set."
+            exit 1
+          fi
+          curl -sS --fail-with-body --max-time 300 -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://api.alex-io.com/api/cron/reminders

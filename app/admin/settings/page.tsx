@@ -76,6 +76,16 @@ type PricingSettings = {
   buyer_email_confirmed: boolean;
   buyer_email_released: boolean;
   reply_to_email: string;
+
+  // Step 29B: reminders
+  reminder_expiring_on: boolean;
+  reminder_expiring_days: number;
+  reminder_followup_on: boolean;
+  reminder_followup_days: number;
+  staff_digest_on: boolean;
+  staff_digest_hour: number;
+  staff_digest_to: string;
+  shop_timezone: string;
 } & Record<FoamKey, number> &
   Record<ReviewKey, number>;
 
@@ -86,6 +96,36 @@ type SettingsResponse = {
 
 const numberOr = (v: any, fallback: number) =>
   typeof v === "number" && Number.isFinite(v) ? v : fallback;
+
+// Step 29B: reminders (loaded with fallbacks to what's on screen).
+function reminderSettingsFrom(s: Record<string, unknown>, prev: PricingSettings) {
+  const b = (k: string, d: boolean) => (typeof s[k] === "boolean" ? (s[k] as boolean) : d);
+  const t = (k: string, d: string) => (typeof s[k] === "string" ? String(s[k]) : d);
+  return {
+    reminder_expiring_on: b("reminder_expiring_on", prev.reminder_expiring_on),
+    reminder_expiring_days: numberOr(s.reminder_expiring_days, prev.reminder_expiring_days),
+    reminder_followup_on: b("reminder_followup_on", prev.reminder_followup_on),
+    reminder_followup_days: numberOr(s.reminder_followup_days, prev.reminder_followup_days),
+    staff_digest_on: b("staff_digest_on", prev.staff_digest_on),
+    staff_digest_hour: numberOr(s.staff_digest_hour, prev.staff_digest_hour),
+    staff_digest_to: t("staff_digest_to", prev.staff_digest_to),
+    shop_timezone: t("shop_timezone", prev.shop_timezone),
+  };
+}
+
+const TIME_ZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Phoenix",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "America/Toronto",
+  "America/Mexico_City",
+  "Europe/London",
+  "UTC",
+];
 
 // Step 29A: buyer status emails (on/off per shop).
 type BuyerEmailKey = "buyer_email_accepted" | "buyer_email_confirmed" | "buyer_email_released";
@@ -125,6 +165,15 @@ export default function AdminSettingsPage() {
     buyer_email_confirmed: true,
     buyer_email_released: true,
     reply_to_email: "",
+
+    reminder_expiring_on: true,
+    reminder_expiring_days: 5,
+    reminder_followup_on: true,
+    reminder_followup_days: 3,
+    staff_digest_on: true,
+    staff_digest_hour: 7,
+    staff_digest_to: "",
+    shop_timezone: "America/New_York",
 
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
@@ -226,6 +275,7 @@ export default function AdminSettingsPage() {
             typeof (s as Record<string, unknown>).reply_to_email === "string"
               ? String((s as Record<string, unknown>).reply_to_email)
               : prev.reply_to_email,
+          ...reminderSettingsFrom(s as Record<string, unknown>, prev),
         }));
       } catch (e: any) {
         console.error("Admin settings load error:", e);
@@ -712,6 +762,125 @@ export default function AdminSettingsPage() {
                   Emails go to the quote&apos;s buyer email, show your shop name and link to the quote. Staff can
                   untick &quot;Email the buyer&quot; when confirming, and send &quot;please re-approve&quot; from the
                   quote page when a price changes. Every email is listed on the quote page.
+                </p>
+              </div>
+
+              {/* Step 29B: reminders */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-reminders>
+                <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">Reminders</h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="flex flex-col gap-2 text-xs">
+                    <label className="flex items-center gap-2 text-[var(--text-primary)]">
+                      <input
+                        type="checkbox"
+                        data-reminder="reminder_expiring_on"
+                        aria-label="Buyer: quote expires soon"
+                        checked={settings.reminder_expiring_on}
+                        onChange={(e) => setSettings((s) => ({ ...s, reminder_expiring_on: e.target.checked }))}
+                      />
+                      Buyer: &quot;your quote expires soon&quot;
+                    </label>
+                    <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        step="1"
+                        aria-label="Days before expiry"
+                        className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                        value={settings.reminder_expiring_days}
+                        onChange={(e) =>
+                          setSettings((s) => ({ ...s, reminder_expiring_days: Math.round(Number(e.target.value) || 0) }))
+                        }
+                      />
+                      days before it expires
+                    </label>
+                  </div>
+                  <div className="flex flex-col gap-2 text-xs">
+                    <label className="flex items-center gap-2 text-[var(--text-primary)]">
+                      <input
+                        type="checkbox"
+                        data-reminder="reminder_followup_on"
+                        aria-label="Buyer: follow-up"
+                        checked={settings.reminder_followup_on}
+                        onChange={(e) => setSettings((s) => ({ ...s, reminder_followup_on: e.target.checked }))}
+                      />
+                      Buyer: &quot;any questions?&quot; follow-up
+                    </label>
+                    <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        step="1"
+                        aria-label="Days after the quote email"
+                        className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                        value={settings.reminder_followup_days}
+                        onChange={(e) =>
+                          setSettings((s) => ({ ...s, reminder_followup_days: Math.round(Number(e.target.value) || 0) }))
+                        }
+                      />
+                      days after the quote email, if not accepted
+                    </label>
+                  </div>
+                  <div className="flex flex-col gap-2 text-xs">
+                    <label className="flex items-center gap-2 text-[var(--text-primary)]">
+                      <input
+                        type="checkbox"
+                        data-reminder="staff_digest_on"
+                        aria-label="Staff daily digest"
+                        checked={settings.staff_digest_on}
+                        onChange={(e) => setSettings((s) => ({ ...s, staff_digest_on: e.target.checked }))}
+                      />
+                      Staff: daily digest (to confirm, new, expiring)
+                    </label>
+                    <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                      at
+                      <select
+                        aria-label="Digest hour"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                        value={settings.staff_digest_hour}
+                        onChange={(e) => setSettings((s) => ({ ...s, staff_digest_hour: Number(e.target.value) }))}
+                      >
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <option key={h} value={h}>
+                            {`${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "AM" : "PM"}`}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Time zone"
+                        className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                        value={settings.shop_timezone}
+                        onChange={(e) => setSettings((s) => ({ ...s, shop_timezone: e.target.value }))}
+                      >
+                        {(TIME_ZONES.includes(settings.shop_timezone) ? TIME_ZONES : [settings.shop_timezone, ...TIME_ZONES]).map(
+                          (z) => (
+                            <option key={z} value={z}>
+                              {z.replace("_", " ")}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-[var(--text-secondary)]">Digest goes to (blank = every admin user)</span>
+                    <input
+                      type="email"
+                      maxLength={200}
+                      placeholder="e.g. sales@yourshop.com"
+                      aria-label="Digest email"
+                      className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]"
+                      value={settings.staff_digest_to}
+                      onChange={(e) => setSettings((s) => ({ ...s, staff_digest_to: e.target.value }))}
+                    />
+                  </label>
+                </div>
+                <p className="mt-3 text-[11px] text-[var(--text-faint)]">
+                  Checked every hour. Buyer reminders only go to quotes Alex-IO emailed to the buyer, at most once per
+                  quote email (and once per expiry date), never after the buyer accepts. The digest is skipped on days
+                  with nothing to report. Every buyer reminder is listed on the quote page.
                 </p>
               </div>
 

@@ -63,6 +63,16 @@ export type PricingSettings = {
   buyer_email_released: boolean; // "your order is in production"
   reply_to_email: string; // replies go here ("" = the quote's sales rep, else the shop page email)
 
+  // Step 29B: reminders (app/lib/reminders.ts, run hourly by GitHub Actions).
+  reminder_expiring_on: boolean; // buyer: "your quote expires soon"
+  reminder_expiring_days: number; // ... this many days before it expires
+  reminder_followup_on: boolean; // buyer: "any questions?" when they haven't accepted
+  reminder_followup_days: number; // ... this many days after the quote email
+  staff_digest_on: boolean; // staff: one daily email (to confirm, new, expiring)
+  staff_digest_hour: number; // 0-23, shop time
+  staff_digest_to: string; // "" = every admin user of the shop
+  shop_timezone: string; // IANA name, e.g. "America/New_York"
+
   cushion_family_order: string[];
 };
 
@@ -108,6 +118,15 @@ const DEFAULTS: PricingSettings = {
   buyer_email_confirmed: true,
   buyer_email_released: true,
   reply_to_email: "",
+
+  reminder_expiring_on: true,
+  reminder_expiring_days: 5,
+  reminder_followup_on: true,
+  reminder_followup_days: 3,
+  staff_digest_on: true,
+  staff_digest_hour: 7,
+  staff_digest_to: "",
+  shop_timezone: "America/New_York",
 
   cushion_family_order: ["EPE", "PU", "PE", "EVA"],
 };

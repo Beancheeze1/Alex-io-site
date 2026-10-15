@@ -49,6 +49,8 @@ const SETTING_FOR: Partial<Record<StatusKind, keyof PricingSettings>> = {
   accepted: "buyer_email_accepted",
   confirmed: "buyer_email_confirmed",
   released: "buyer_email_released",
+  expiring: "reminder_expiring_on",
+  followup: "reminder_followup_on",
 };
 
 export async function shopSender(tenantId: number, quoteId?: number | null): Promise<ShopSender> {
@@ -133,6 +135,10 @@ export async function sendQuoteStatusEmail(opts: {
   kind: StatusKind;
   by?: string | null;
   reapproval?: boolean;
+  /** Step 29B: the follow-up's "we sent you this quote on …" date. */
+  sentAt?: string | null;
+  /** Step 29B: stored as the log row's detail when sent (reminders use it to send once). */
+  logDetail?: string | null;
 }): Promise<MailOutcome> {
   const by = opts.by ?? null;
   try {
@@ -184,13 +190,16 @@ export async function sendQuoteStatusEmail(opts: {
       validUntil: approval.expires_at,
       revision: typeof facts.revision === "string" && facts.revision.trim() ? facts.revision.trim() : null,
       reapproval: !!opts.reapproval,
+      sentAt: opts.sentAt ?? null,
       primaryColor: sender.primaryColor,
       onPrimary: sender.onPrimary,
       logoUrl: sender.logoUrl,
     });
 
     const r = await sendHtmlEmail({ to, subject, html, replyTo: sender.replyTo, replyToName: sender.brand, fromName: sender.brand });
-    const outcome: MailOutcome = r.ok ? { status: "sent", to, detail: null } : { status: "failed", to, detail: r.error };
+    const outcome: MailOutcome = r.ok
+      ? { status: "sent", to, detail: opts.logDetail ?? null }
+      : { status: "failed", to, detail: opts.logDetail ? `${opts.logDetail}: ${r.error}` : r.error };
     await logQuoteEmail({
       quoteId: row.id,
       tenantId,

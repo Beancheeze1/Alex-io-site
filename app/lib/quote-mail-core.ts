@@ -6,13 +6,14 @@
 //     (mline.api.alex-io.com), so the buyer sees the shop's branding
 //   - isEmail() / pickReplyTo(): who the buyer's replies go to
 //   - statusEmail(kind, data): subject + HTML for accepted / confirmed /
-//     reapprove / released
+//     reapprove / released, and (Step 29B) the buyer reminders expiring /
+//     followup
 // Sending, settings and the log live in app/lib/quote-mail.ts.
 
 import { escapeHtml } from "../../lib/email/send-html";
 
-export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released";
-export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released"];
+export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup";
+export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup"];
 
 export function isStatusKind(v: unknown): v is StatusKind {
   return typeof v === "string" && (STATUS_KINDS as readonly string[]).includes(v);
@@ -62,6 +63,7 @@ export type StatusEmailData = {
   validUntil?: string | null; // ISO
   revision?: string | null;
   reapproval?: boolean; // "accepted" sent for a re-approval
+  sentAt?: string | null; // Step 29B: when the quote was emailed (follow-up)
   primaryColor?: string | null;
   onPrimary?: string | null;
   logoUrl?: string | null;
@@ -147,6 +149,44 @@ export function statusEmail(kind: StatusKind, d: StatusEmailData): { subject: st
           ["Lead time", d.leadTime || ""],
         ],
         "View your quote",
+      ),
+    };
+  }
+  if (kind === "expiring") {
+    return {
+      subject: `${d.brand}: quote ${qn} expires ${day(d.validUntil)}`,
+      html: render(
+        d,
+        "Your quote expires soon",
+        [
+          hi,
+          `Quote ${qn} is valid until ${day(d.validUntil)}.`,
+          "To keep this price, review and accept it before then. If anything needs to change, reply to this email.",
+        ],
+        [
+          ["Quote total", usd(d.total)],
+          ["Price valid until", day(d.validUntil)],
+        ],
+        "Review and accept",
+      ),
+    };
+  }
+  if (kind === "followup") {
+    return {
+      subject: `${d.brand}: following up on quote ${qn}`,
+      html: render(
+        d,
+        "Any questions about your quote?",
+        [
+          hi,
+          d.sentAt ? `We sent you quote ${qn} on ${day(d.sentAt)}.` : `We sent you quote ${qn} recently.`,
+          "If it looks right, you can accept it online. If anything needs to change, reply to this email.",
+        ],
+        [
+          ["Quote total", usd(d.total)],
+          ["Price valid until", day(d.validUntil)],
+        ],
+        "Review your quote",
       ),
     };
   }
