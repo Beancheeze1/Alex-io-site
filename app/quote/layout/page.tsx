@@ -5489,7 +5489,7 @@ const tenantCssVars = React.useMemo(() => {
                           ? printSpec.colors.length
                             ? `${printSpec.colors.length} color${printSpec.colors.length > 1 ? "s" : ""} (${printSpec.colors.join(", ")}), ${printSpec.sides === 2 ? "two sides" : "one side"} · priced per color on Apply`
                             : "Not printed"
-                          : "Adds printing upcharge to the quote total."}
+                          : "Check to price 1 spot color, one side (the shop can change it)."}
                       </div>
                     </div>
 
@@ -5503,8 +5503,12 @@ const tenantCssVars = React.useMemo(() => {
                           persistPrinted(next);
                           // Per-color quotes: checking with no colors picks 1 spot color;
                           // unchecking clears the colors. Repriced on Apply.
+                          // Step 28B: quotes not yet on per-color printing move onto it
+                          // (1 spot color, one side), the same as the saved facts.
                           setPrintSpec((ps) =>
-                            ps ? { colors: next ? (ps.colors.length ? ps.colors : ["spot"]) : [], sides: ps.sides } : ps,
+                            ps
+                              ? { colors: next ? (ps.colors.length ? ps.colors : ["spot"]) : [], sides: ps.sides }
+                              : { colors: next ? ["spot"] : [], sides: 1 },
                           );
                         }}
                         className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)] accent-[var(--tenant-secondary)]"

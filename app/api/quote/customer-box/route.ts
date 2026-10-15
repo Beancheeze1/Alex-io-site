@@ -17,6 +17,11 @@
 //
 // Behaviour:
 //   POST – merges { customer_box_in: {L,W,H,style?} | null } into the facts store.
+//          Step 28B: a bare { printed } (the editor's Printed checkbox) moves
+//          the quote onto per-color printing (print_spec): printed = 1 spot
+//          color, one side (or the quote's existing colors); not printed = no
+//          colors. A changed print spec reprices the quote's boxes, so the
+//          old art-setup fee + % no longer applies to these quotes.
 //   GET  – returns the stored customer_box_in for the given quote.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -24,6 +29,7 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { one } from "@/lib/db";
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import { buyerEditGuard } from "@/lib/quote-edit";
+import { repriceQuoteBoxes } from "@/app/lib/packaging-selection";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -130,14 +136,38 @@ export async function POST(req: NextRequest) {
       patch.printed = printedRaw ? 1 : 0;
     }
     // Per-color print spec (Corrugated Step 3B): { colors: ("spot"|"flood")[], sides: 1|2 }.
+    const ex = existing as Record<string, unknown>;
+    const prevSpec = parsePrintSpec(ex.print_spec);
     if (Object.prototype.hasOwnProperty.call(body ?? {}, "print_spec")) {
       const spec = parsePrintSpec(body.print_spec);
       if (spec) {
         patch.print_spec = spec;
         patch.printed = spec.colors.length > 0 ? 1 : 0;
       }
+    } else if ("printed" in patch && ex.print_mode !== "per_box") {
+      // Step 28B: the printed flag alone (layout editor checkbox) -> per-color printing.
+      patch.print_spec = patch.printed
+        ? prevSpec && prevSpec.colors.length > 0
+          ? prevSpec
+          : { colors: ["spot"], sides: 1 }
+        : { colors: [], sides: prevSpec?.sides ?? 1 };
     }
     await saveFacts(quoteNo, { ...(existing as any), ...patch });
+
+    // Step 28B: a new print spec reprices the boxes already on the quote.
+    if (patch.print_spec && JSON.stringify(patch.print_spec) !== JSON.stringify(prevSpec) && ex.print_mode !== "per_box") {
+      const boxes = await one<{ n: string }>(
+        `SELECT count(*)::text AS n FROM public.quote_box_selections WHERE quote_id = $1`,
+        [quote.id],
+      );
+      if (Number(boxes?.n) > 0) {
+        try {
+          await repriceQuoteBoxes(quote.id, quote.tenant_id == null ? null : Number(quote.tenant_id), patch.print_spec);
+        } catch (e) {
+          console.error("[customer-box] box reprice failed", { quoteNo, err: String(e) });
+        }
+      }
+    }
 
     return NextResponse.json({ ok: true, box: box ?? null });
   } catch (err: any) {

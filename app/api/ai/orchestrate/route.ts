@@ -2753,22 +2753,44 @@ newly = mergeFacts(newly, formFacts);
     }
 
 
-        const headerRes = await fetch(`${base}/api/quotes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            quote_no: String(merged.quoteNumber),
-            customer_name: String(customerName),
-            email: customerEmail,
-            phone,
-            status,
-            sales_rep_slug: salesRepSlugForHeader,
-            color: merged.color || null,
-          }),
-        });
+        // Step 28B: a quote row that already exists (e.g. the buyer applied a
+        // layout) is used as is, so its status and details aren't reset.
+        const existingRow = await one<{ id: number; status: string | null; sales_rep_id: number | null }>(
+          `SELECT id, status, sales_rep_id FROM public.quotes WHERE quote_no = $1 LIMIT 1`,
+          [String(merged.quoteNumber)],
+        ).catch(() => null);
 
-        const headerJson = await headerRes.json().catch(() => ({} as any));
-        if (headerRes.ok && headerJson?.ok && headerJson.quote?.id) {
+        // Step 28B: the email / AI path is a server call, so it creates the
+        // quote row with the internal header and names the quote's shop
+        // (before this, the call had no login and was refused with 401).
+        const headerRes = existingRow
+          ? null
+          : await fetch(`${base}/api/quotes`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...internalHeaders() },
+              body: JSON.stringify({
+                quote_no: String(merged.quoteNumber),
+                customer_name: String(customerName),
+                email: customerEmail,
+                phone,
+                status,
+                sales_rep_slug: salesRepSlugForHeader,
+                color: merged.color || null,
+                tenant_id: pricingTenantId,
+              }),
+            });
+
+        const headerJson = existingRow
+          ? { ok: true, quote: existingRow }
+          : await headerRes!.json().catch(() => ({} as any));
+        if (!existingRow && !(headerRes?.ok && headerJson?.ok)) {
+          console.error("[ai/orchestrate] quote row not created", {
+            quoteNo: String(merged.quoteNumber),
+            status: headerRes?.status,
+            error: headerJson?.error,
+          });
+        }
+        if (headerJson?.ok && headerJson.quote?.id) {
           quoteId = headerJson.quote.id;
           merged.quote_id = quoteId;
           merged.status = headerJson.quote.status || merged.status;
@@ -2783,31 +2805,11 @@ newly = mergeFacts(newly, formFacts);
       }
     }
 
-    if (!dryRun && quoteId && canCalc && specs.material_id && !merged.__primary_item_created) {
-      try {
-        const { L, W, H } = parseDimsNums(specs.dims);
-        const itemBody: any = {
-          length_in: L,
-          width_in: W,
-          height_in: H,
-          material_id: Number(specs.material_id),
-          qty: Number(specs.qty),
-          color: merged.color || null,
-        };
-
-        await fetch(`${base}/api/quotes/${quoteId}/items`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(itemBody),
-        });
-
-        merged.__primary_item_created = true;
-        if (threadKey) await saveFacts(threadKey, merged);
-        if (merged.quote_no) await saveFacts(merged.quote_no, merged);
-      } catch (err) {
-        console.error("quote item store error:", err);
-      }
-    }
+    // Step 28B: no quote line is stored here. The quote page prices an email
+    // quote from its saved facts (dims, qty, material) until the buyer or
+    // staff apply a layout, exactly like a quote started from Start Quote.
+    // (The old POST to /api/quotes/<id>/items went to a route that doesn't
+    // exist.)
 
     /* ------------------- Build canonical layout editor link (Path-A) ------------------- */
 

@@ -10,6 +10,7 @@ import { loadFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { displayRevisionLabel } from "@/app/lib/revision-label";
+import { isInternalCall } from "@/lib/internal-call";
 
 // GET /api/quotes?limit=25
 export async function GET(req: NextRequest) {
@@ -148,34 +149,53 @@ export async function GET(req: NextRequest) {
 //   "status": "draft",
 //   "sales_rep_id": 2,          // optional, direct id (admin tools)
 //   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug (tenant-scoped)
+//   "tenant_id": 1              // Step 28B: internal calls only (email/AI quotes)
 // }
+// Callers: staff (admin / cs / sales) for their own shop, or Step 28B an
+// internal server call (x-alexio-internal) that names the shop in tenant_id.
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUserFromRequest(req);
-
-    // Enforce tenant host -> session tenant match (A2 subdomain multi-tenant)
-    const enforced = await enforceTenantMatch(req, user);
-    if (!enforced.ok) {
-      return NextResponse.json(enforced.body, { status: enforced.status });
-    }
-
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: "unauthorized", message: "Login required." },
-        { status: 401 },
-      );
-    }
-
-    // Only internal roles can create quotes here.
-    const canCreate = isRoleAllowed(user, ["admin", "cs", "sales"]);
-    if (!canCreate) {
-      return NextResponse.json(
-        { ok: false, error: "forbidden", message: "Not allowed." },
-        { status: 403 },
-      );
-    }
-
+    const internal = isInternalCall(req);
     const body = (await req.json().catch(() => ({}))) || {};
+
+    let tenantId: number;
+    let user: Awaited<ReturnType<typeof getCurrentUserFromRequest>> | null = null;
+    if (internal) {
+      // Step 28B: email / AI quotes (app/api/ai/orchestrate) create their
+      // quote row here; the caller names the quote's shop.
+      tenantId = Number(body?.tenant_id);
+      if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return NextResponse.json(
+          { ok: false, error: "missing_tenant", message: "tenant_id is required on internal calls." },
+          { status: 400 },
+        );
+      }
+    } else {
+      user = await getCurrentUserFromRequest(req);
+
+      // Enforce tenant host -> session tenant match (A2 subdomain multi-tenant)
+      const enforced = await enforceTenantMatch(req, user);
+      if (!enforced.ok) {
+        return NextResponse.json(enforced.body, { status: enforced.status });
+      }
+
+      if (!user) {
+        return NextResponse.json(
+          { ok: false, error: "unauthorized", message: "Login required." },
+          { status: 401 },
+        );
+      }
+
+      // Only internal roles can create quotes here.
+      const canCreate = isRoleAllowed(user, ["admin", "cs", "sales"]);
+      if (!canCreate) {
+        return NextResponse.json(
+          { ok: false, error: "forbidden", message: "Not allowed." },
+          { status: 403 },
+        );
+      }
+      tenantId = Number(user.tenant_id);
+    }
 
     const {
       quote_no,
@@ -231,7 +251,7 @@ export async function POST(req: NextRequest) {
               AND sales_slug = $2
             LIMIT 1;
           `,
-            [user.tenant_id, slug],
+            [tenantId, slug],
           );
           if (userRow && userRow.id) {
             salesRepId = Number(userRow.id);
@@ -241,7 +261,7 @@ export async function POST(req: NextRequest) {
           salesRepId = null;
         }
       }
-    } else {
+    } else if (user) {
       // Default assignment for SALES creators.
       const role = (user.role || "").toLowerCase();
       if (role === "sales") {
@@ -254,7 +274,7 @@ export async function POST(req: NextRequest) {
     // deliberately email-only, not fuzzy name-matching). Returns null when
     // no email was provided at all; the quote is simply left unlinked in
     // that case rather than guessing at an identity.
-    const customer = await findOrCreateCustomer(user.tenant_id, {
+    const customer = await findOrCreateCustomer(tenantId, {
       name: customer_name,
       email,
       phone,
@@ -319,7 +339,7 @@ export async function POST(req: NextRequest) {
                 updated_at
     `,
       [
-        user.tenant_id,
+        tenantId,
         quote_no,
         customer_name,
         email,
