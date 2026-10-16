@@ -200,7 +200,9 @@ export function reviewFoam(args: {
   if (args.completePack && Array.isArray(args.boxes)) {
     for (const bx of args.boxes) {
       if (!(bx.L > 0 && bx.W > 0 && bx.H > 0)) continue;
-      const label = bx.label ? ` (${bx.label})` : "";
+      // Step 36C: labels can carry their own parentheses ("Custom box … (rsc, 32 ECT C)"),
+      // so quote them instead of wrapping them in more.
+      const label = bx.label ? ` "${bx.label}"` : "";
       const fits = (L <= bx.L + EPS && W <= bx.W + EPS) || (L <= bx.W + EPS && W <= bx.L + EPS);
       if (!fits) {
         flags.push({

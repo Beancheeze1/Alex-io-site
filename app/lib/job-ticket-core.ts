@@ -42,7 +42,8 @@ export type TicketBox = {
   cells: { across: number; down: number } | null;
   print: string; // "No print", "2-color print (1 spot, 1 flood), one side", "Digital print, one side"
   run: string | null; // "Press (plates)" / "Short run (digital + CAD cut)" / null for stock
-  blank: { length_in: number; width_in: number } | null; // as priced
+  blank: { length_in: number; width_in: number } | null; // as priced (or from the die line, below)
+  blank_from_die_line?: boolean; // Step 36C: no priced blank, so it comes from the RSC / HSC / FOL die line
   sheet: { length_in: number; width_in: number; up: number } | null; // as priced (sheet board)
   dxf: boolean; // a flat blank DXF can be made (custom RSC / HSC / FOL)
 };

@@ -272,7 +272,7 @@ export async function buildJobTicket(quoteNo: string, tenantId: number): Promise
       weight_lb: kept && Number(kept.actual_lb) > 0 ? Math.round(Number(kept.actual_lb)) : null,
     },
     foam,
-    boxes: boxRows.map((r, i) => boxFromRow(r, i + 1)),
+    boxes: await withDieLineBlanks(boxRows.map((r, i) => boxFromRow(r, i + 1)), tenantId),
     proof:
       proofs && (proofs.required || proofs.versions.length > 0)
         ? {
@@ -291,6 +291,23 @@ export async function buildJobTicket(quoteNo: string, tenantId: number): Promise
 export type DielineResult =
   | { ok: true; dieline: Dieline; line: number; box: TicketBox; priced_blank_differs: boolean }
   | { ok: false; status: number; error: string; message: string };
+
+/**
+ * Step 36C: a custom RSC / HSC / FOL line priced without an engine blank (e.g.
+ * from the nearest stock box) shows the die line's blank instead of "—".
+ */
+async function withDieLineBlanks(boxes: TicketBox[], tenantId: number): Promise<TicketBox[]> {
+  if (!boxes.some((b) => !b.blank && b.dxf && b.inside && isSlottedStyle(b.style))) return boxes;
+  const cfg = await loadCorrugated(tenantId).catch(() => null);
+  if (!cfg) return boxes;
+  return boxes.map((b) => {
+    if (b.blank || !b.dxf || !b.inside || !isSlottedStyle(b.style)) return b;
+    const gradeFlute = b.flute || cfg.grades.find((g) => g.is_default)?.flute || null;
+    const flute = cfg.flutes.find((f) => f.flute === gradeFlute) || cfg.flutes[0];
+    const dl = flute ? slottedDieline(b.style, b.inside, flute, { ...cfg.settings, waste_pct: 0 }) : null;
+    return dl ? { ...b, blank: { length_in: dl.blank.length_in, width_in: dl.blank.width_in }, blank_from_die_line: true } : b;
+  });
+}
 
 /** The flat blank for one box line (selection id) of the shop's quote. */
 export async function boxDieline(quoteNo: string, tenantId: number, selectionId: number): Promise<DielineResult> {

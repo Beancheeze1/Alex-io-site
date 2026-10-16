@@ -194,6 +194,7 @@ export default function OrdersPortal({
                     {day(o.created_at)}
                     {o.po ? ` · PO ${o.po}` : ""}
                     {o.total != null ? ` · ${usd(o.total)}` : ""}
+                    {o.was_total != null ? ` (was ${usd(o.was_total)})` : ""}
                   </span>
                 </div>
 

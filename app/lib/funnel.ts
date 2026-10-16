@@ -96,7 +96,7 @@ export async function loadFunnelQuotes(scope: { tenantId: number | null; days: n
   return { quotes: out, capped };
 }
 
-export async function funnelShops(): Promise<{ id: number; name: string }[]> {
-  const rows = await q<{ id: number; name: string }>(`SELECT id, name FROM public.tenants WHERE active = true ORDER BY name, id`, []);
-  return rows.map((r) => ({ id: Number(r.id), name: r.name }));
+export async function funnelShops(): Promise<{ id: number; name: string; slug: string }[]> {
+  const rows = await q<{ id: number; name: string; slug: string }>(`SELECT id, name, slug FROM public.tenants WHERE active = true ORDER BY name, id`, []);
+  return rows.map((r) => ({ id: Number(r.id), name: r.name, slug: r.slug }));
 }

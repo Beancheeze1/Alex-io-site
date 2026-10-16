@@ -3476,7 +3476,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <>
                               <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
                                 {isBoxesOnly
-                                  ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${freightLine ? " + freight" : ""})`
+                                  ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${effectiveDieCuttingCharge > 0 ? " + cutting die" : ""}${freightLine ? " + freight" : ""})`
                                   : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""}${freightLine ? " + freight" : ""})`}
                               </div>
                               <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}</div>

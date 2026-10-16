@@ -111,6 +111,11 @@ export default function QuoteApprovalPanel({ quoteNo }: { quoteNo: string }) {
     setA(next);
     setExpiry(next?.expires_override ? ymd(next.expires_at) : "");
     setLead(next?.lead_time_override ? next.lead_time || "" : "");
+    // Step 36C: a re-approval starts from the earlier acceptance's name and PO.
+    if (next?.stage === "needs_reapproval" && next.accepted) {
+      setBuyerName((v) => v || next.accepted?.name || "");
+      setPo((v) => v || next.accepted?.po || "");
+    }
   };
 
   React.useEffect(() => {

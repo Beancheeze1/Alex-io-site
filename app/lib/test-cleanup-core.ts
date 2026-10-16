@@ -59,7 +59,19 @@ export function isSkippedTable(table: string): boolean {
   return table === "quotes" || table === "schema_migrations";
 }
 
-export type TableHit = { table: string; column: QuoteColumn; rows: number };
+/** Rows in one table that point at the quotes (by quote_id and / or quote_no, each row counted once). */
+export type TableHit = { table: string; columns: QuoteColumn[]; rows: number };
+
+/** Step 36C: one entry per table with all its quote columns (a table can have both). */
+export function groupColumns(rows: { table: string; column: QuoteColumn }[]): { table: string; columns: QuoteColumn[] }[] {
+  const m = new Map<string, QuoteColumn[]>();
+  for (const r of rows) {
+    const cols = m.get(r.table) || [];
+    if (!cols.includes(r.column)) cols.push(r.column);
+    m.set(r.table, cols);
+  }
+  return [...m.entries()].map(([table, columns]) => ({ table, columns: [...columns].sort() }));
+}
 
 export type QuotePreview = {
   quote_no: string;
@@ -91,7 +103,7 @@ export function phraseMatches(typed: unknown, n: number): boolean {
   return typeof typed === "string" && typed.trim().toUpperCase() === confirmPhrase(n);
 }
 
-/** Sums table hits by table name (a table can match on both quote_id and quote_no). */
+/** Sums table hits by table name. */
 export function totalByTable(hits: TableHit[]): { table: string; rows: number }[] {
   const m = new Map<string, number>();
   for (const h of hits) m.set(h.table, (m.get(h.table) || 0) + h.rows);

@@ -197,6 +197,7 @@ export default function JobTicketPage() {
                       </td>
                       <td className={cell}>
                         {b.blank ? dimsText({ L: b.blank.length_in, W: b.blank.width_in }) : "—"}
+                        {b.blank_from_die_line ? <div className="text-[11px] text-[var(--text-muted)]">from die line</div> : null}
                         {b.sheet && b.sheet.up > 1 ? <div className="text-[11px] text-[var(--text-muted)]">{b.sheet.up} up</div> : null}
                       </td>
                       <td className={cell} data-no-print>

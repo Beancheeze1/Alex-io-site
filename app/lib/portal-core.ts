@@ -53,6 +53,7 @@ export type OrderFacts = {
   proof: { stage: "none" | "waiting" | "approved" | "changes"; version: number | null; required: boolean; at: string | null } | null;
   ship_to_zip: string | null;
   terms: "prepaid_add" | "fob_origin" | "pickup" | null;
+  needs_reapproval?: boolean; // Step 36C: the price changed since the buyer accepted
 };
 
 const t = (iso: string | null | undefined) => {
@@ -107,13 +108,17 @@ export function orderTimeline(o: OrderFacts): TimelineStep[] {
   return steps;
 }
 
-export type OpenAction = { key: "accept" | "proof" | "ship_to"; label: string };
+export type OpenAction = { key: "accept" | "reapprove" | "proof" | "ship_to"; label: string };
+
+/** Step 36C: the stage line when the price changed since the buyer accepted. */
+export const REAPPROVE_LABEL = "Price changed: please re-approve";
 
 /** What the buyer still has to do on this order. */
 export function openActions(o: OrderFacts, now: Date, freightSetUp: boolean): OpenAction[] {
   const stage = orderStage(o, now);
   const out: OpenAction[] = [];
   if (stage === "estimate") out.push({ key: "accept", label: "Review and accept" });
+  if (o.needs_reapproval && !o.locked && !o.shipped_at) out.push({ key: "reapprove", label: "Re-approve the new price" });
   if (o.proof && o.proof.stage === "waiting" && !o.shipped_at) out.push({ key: "proof", label: `Review proof v${o.proof.version}` });
   if (freightSetUp && !o.locked && stage !== "expired" && o.terms !== "pickup" && !(o.ship_to_zip && o.ship_to_zip.trim())) {
     out.push({ key: "ship_to", label: "Add a ship-to address" });

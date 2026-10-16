@@ -107,6 +107,9 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
   const hasProducts = t.products.length > 0;
   const hasAbout = !!t.aboutText || t.stats.length > 0;
   const hasTalkCard = !!t.phone || !!t.email;
+  // Step 36C: with 5 cards, a 6-column grid: 3 cards of 2 columns, then 2 of 3.
+  const topSpan = hasTalkCard ? "lg:col-span-2" : "";
+  const bottomSpan = hasTalkCard ? "lg:col-span-3" : "";
   const hasContactStrip = !!(t.phone || t.email || t.address || t.hours);
 
   const primaryBtn = { background: t.primaryColor, color: t.onPrimary };
@@ -236,9 +239,10 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
 
       {/* Action cards (overlap the banner) */}
       <section className="relative mx-auto -mt-24 max-w-[1200px] px-6">
-        <div className={`grid gap-5 md:grid-cols-2 ${hasTalkCard ? "xl:grid-cols-4" : "lg:grid-cols-3"}`}>
+        {/* Step 36C: 4 cards in one row, or with "Talk to our team" 3 + 2 (no card left alone on a row) */}
+        <div className={`grid gap-5 md:grid-cols-2 ${hasTalkCard ? "lg:grid-cols-6" : "lg:grid-cols-4"}`}>
           <div
-            className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+            className={`flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)] ${topSpan}`}
             style={{
               background: "var(--surface-card)",
               border: "1px solid var(--border)",
@@ -259,7 +263,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
           </div>
 
           <div
-            className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+            className={`flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)] ${topSpan}`}
             style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
           >
             <h2 className="mb-2 text-xl font-medium">Send us your specs</h2>
@@ -277,7 +281,7 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
 
           {hasTalkCard ? (
             <div
-              className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+              className={`flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)] ${topSpan}`}
               style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
             >
               <h2 className="mb-2 text-xl font-medium">Talk to our team</h2>
@@ -307,11 +311,13 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
             </div>
           ) : null}
 
-          <QuoteLookupCard tenantSlug={t.slug} primaryColor={t.primaryColor} onPrimary={t.onPrimary} />
+          <div className={`grid ${bottomSpan}`}>
+            <QuoteLookupCard tenantSlug={t.slug} primaryColor={t.primaryColor} onPrimary={t.onPrimary} />
+          </div>
 
           {/* Step 34A: the buyer portal */}
           <div
-            className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+            className={`flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)] ${bottomSpan}`}
             style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
             data-orders-card
           >

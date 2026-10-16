@@ -40,8 +40,10 @@ const TITLE: Record<QuoteApprovalView["stage"], string> = {
 };
 
 export default function QuoteApprovalCard({ quoteNo, approval }: { quoteNo: string; approval: QuoteApprovalView | null }) {
-  const [name, setName] = React.useState("");
-  const [po, setPo] = React.useState("");
+  // Step 36C: a re-approval starts from the earlier acceptance's name and PO.
+  const earlier = approval?.stage === "needs_reapproval" ? approval.accepted : null;
+  const [name, setName] = React.useState(earlier?.name || "");
+  const [po, setPo] = React.useState(earlier?.po || "");
   const [agree, setAgree] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);

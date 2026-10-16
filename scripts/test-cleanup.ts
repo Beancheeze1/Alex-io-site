@@ -6,6 +6,7 @@
 import {
   MAX_QUOTES,
   confirmPhrase,
+  groupColumns,
   isDeletableTable,
   isProtectedTable,
   isSkippedTable,
@@ -72,12 +73,25 @@ check("confirm: match case-insensitive", phraseMatches(" delete 3 quotes ", 3), 
 check("confirm: wrong count", phraseMatches("DELETE 2 QUOTES", 3), false);
 check("confirm: missing", phraseMatches(undefined, 3), false);
 
+// ---- columns grouped per table (Step 36C: rows counted once)
+{
+  const g = groupColumns([
+    { table: "quote_box_selections", column: "quote_no" },
+    { table: "quote_box_selections", column: "quote_id" },
+    { table: "quote_items", column: "quote_id" },
+    { table: "quote_items", column: "quote_id" },
+  ]);
+  check("group: two tables", g.length, 2);
+  check("group: both columns", g.find((x) => x.table === "quote_box_selections")?.columns.join(","), "quote_id,quote_no");
+  check("group: no duplicate column", g.find((x) => x.table === "quote_items")?.columns.length, 1);
+}
+
 // ---- totals
 {
   const t = totalByTable([
-    { table: "quote_emails", column: "quote_id", rows: 2 },
-    { table: "quote_items", column: "quote_id", rows: 5 },
-    { table: "quote_emails", column: "quote_no", rows: 1 },
+    { table: "quote_emails", columns: ["quote_id"], rows: 2 },
+    { table: "quote_items", columns: ["quote_id"], rows: 5 },
+    { table: "quote_emails", columns: ["quote_no"], rows: 1 },
   ]);
   check("totals: merged tables", t.length, 2);
   check("totals: biggest first", t[0].table, "quote_items");

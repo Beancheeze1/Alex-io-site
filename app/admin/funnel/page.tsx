@@ -152,14 +152,19 @@ export default function FunnelPage() {
                   <div className="h-6 rounded bg-[var(--surface-page)]">
                     <div
                       className="flex h-6 items-center rounded bg-[var(--action-primary)] px-2 text-[11px] font-semibold text-white"
-                      style={{ width: `${created ? Math.max(4, (s.count / created) * 100) : 0}%`, minWidth: s.count ? 28 : 0 }}
+                      style={{ width: `${created && s.count ? Math.max(4, (s.count / created) * 100) : 0}%`, minWidth: s.count ? 28 : 0 }}
                     >
                       {s.count}
                     </div>
                   </div>
                   <div className="text-right text-xs tabular-nums text-[var(--text-secondary)]">
                     {s.pct_of_previous != null ? `${pct(s.pct_of_previous)} of previous` : ""}
-                    {s.value != null ? ` · ${usd(s.value)}` : ""}
+                    {s.value != null && (s.value > 0 || s.no_total < s.count) ? ` · ${usd(s.value)}` : ""}
+                    {s.value != null && s.no_total > 0 ? (
+                      <span className="block text-[11px] text-[var(--text-muted)]" data-stage-no-total>
+                        {s.no_total} without an accepted price
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -217,9 +222,15 @@ export default function FunnelPage() {
                   {data.stalled.map((s) => (
                     <tr key={s.quote_no} data-stalled={s.quote_no}>
                       <td className={td}>
-                        <Link href={`/admin/quotes/${encodeURIComponent(s.quote_no)}`} className="font-semibold hover:underline">
-                          {s.quote_no}
-                        </Link>
+                        {s.admin_url && /^https?:/.test(s.admin_url) ? (
+                          <a href={s.admin_url} className="font-semibold hover:underline" target="_blank" rel="noopener noreferrer" data-stalled-external>
+                            {s.quote_no}
+                          </a>
+                        ) : (
+                          <Link href={s.admin_url || `/admin/quotes/${encodeURIComponent(s.quote_no)}`} className="font-semibold hover:underline">
+                            {s.quote_no}
+                          </Link>
+                        )}
                         {s.customer ? <span className="text-[var(--text-muted)]"> · {s.customer}</span> : null}
                       </td>
                       <td className={td}>{s.stage}</td>

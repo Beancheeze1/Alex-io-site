@@ -227,7 +227,9 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
         b.inside ? dimsText(b.inside) : "-",
         [b.grade, b.flute && !(b.grade || "").includes(b.flute) ? `${b.flute} flute` : null].filter(Boolean).join(", ") || "-",
         [b.print, b.run].filter(Boolean).join("; "),
-        b.blank ? `${dimsText({ L: b.blank.length_in, W: b.blank.width_in })}${b.sheet && b.sheet.up > 1 ? ` (${b.sheet.up} up)` : ""}` : "-",
+        b.blank
+          ? `${dimsText({ L: b.blank.length_in, W: b.blank.width_in })}${b.sheet && b.sheet.up > 1 ? ` (${b.sheet.up} up)` : ""}${b.blank_from_die_line ? " (die line)" : ""}`
+          : "-",
       ]),
     );
   }

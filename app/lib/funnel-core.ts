@@ -74,7 +74,15 @@ export function reached(q: FunnelQuote): Record<StageKey, boolean> {
   return { created: true, priced, accepted, confirmed, production, shipped };
 }
 
-export type StageRow = { key: StageKey; label: string; count: number; pct_of_created: number | null; pct_of_previous: number | null; value: number | null };
+export type StageRow = {
+  key: StageKey;
+  label: string;
+  count: number;
+  pct_of_created: number | null;
+  pct_of_previous: number | null;
+  value: number | null;
+  no_total: number; // Step 36C: quotes at this stage with no accepted / confirmed total (e.g. released without confirming)
+};
 
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null);
 const money = (n: number) => Math.round(n * 100) / 100;
@@ -83,12 +91,14 @@ const money = (n: number) => Math.round(n * 100) / 100;
 export function funnel(quotes: FunnelQuote[]): StageRow[] {
   const counts = Object.fromEntries(STAGES.map((s) => [s, 0])) as Record<StageKey, number>;
   const value: Record<StageKey, number> = { created: 0, priced: 0, accepted: 0, confirmed: 0, production: 0, shipped: 0 };
+  const noTotal: Record<StageKey, number> = { created: 0, priced: 0, accepted: 0, confirmed: 0, production: 0, shipped: 0 };
   for (const q of quotes) {
     const r = reached(q);
     const total = Number(q.confirmed_total ?? q.accepted_total ?? 0) || 0;
     for (const s of STAGES) {
       if (!r[s]) continue;
       counts[s]++;
+      if (s !== "created" && s !== "priced" && !(total > 0)) noTotal[s]++;
       if (s === "accepted") value.accepted += Number(q.accepted_total ?? q.confirmed_total ?? 0) || 0;
       else if (s === "confirmed" || s === "production" || s === "shipped") value[s] += total;
     }
@@ -100,6 +110,7 @@ export function funnel(quotes: FunnelQuote[]): StageRow[] {
     pct_of_created: i === 0 ? null : pct(counts[s], counts.created),
     pct_of_previous: i === 0 ? null : pct(counts[s], counts[STAGES[i - 1]]),
     value: s === "created" || s === "priced" ? null : money(value[s]),
+    no_total: noTotal[s],
   }));
 }
 
@@ -178,7 +189,22 @@ export function durationLabel(h: number | null): string {
 
 export const STALL_DAYS = { estimate: 7, accepted: 2, confirmed: 7, production: 14 } as const;
 
-export type StalledRow = { quote_no: string; tenant_id: number; customer: string | null; stage: string; since: string; days: number; value: number | null };
+export type StalledRow = {
+  quote_no: string;
+  tenant_id: number;
+  customer: string | null;
+  stage: string;
+  since: string;
+  days: number;
+  value: number | null;
+  admin_url?: string; // Step 36C: set by the route (another shop's quote opens on that shop's address)
+};
+
+/** Step 36C: where staff open a quote: here for their own shop, else on the quote's shop address. */
+export function quoteAdminUrl(quoteNo: string, rowTenant: number, ownTenant: number, shopBase: string | null): string {
+  const path = `/admin/quotes/${encodeURIComponent(quoteNo)}`;
+  return rowTenant === ownTenant || !shopBase ? path : `${shopBase.replace(/\/+$/, "")}${path}`;
+}
 
 /**
  * Quotes waiting longer than STALL_DAYS at a stage: an estimate nobody

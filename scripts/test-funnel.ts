@@ -15,6 +15,7 @@ import {
   funnelCsv,
   median,
   reached,
+  quoteAdminUrl,
   stalled,
   type FunnelQuote,
 } from "../app/lib/funnel-core";
@@ -159,6 +160,23 @@ check("csv stage", lines[1].includes("Accepted by the buyer"), true);
 check("days 30", cleanDays("30"), 30);
 check("days 365", cleanDays(365), 365);
 check("days junk -> 90", cleanDays("7"), 90);
+
+// Step 36C: quotes released without an accepted price, and links to other shops' quotes
+{
+  const f = funnel([
+    qq({ priced: true, released: true, released_at: "2026-10-05T00:00:00Z" }),
+    qq({ priced: true, accepted_at: "2026-10-02T00:00:00Z", accepted_total: 500, confirmed_at: "2026-10-03T00:00:00Z", confirmed_total: 500, released: true, released_at: "2026-10-04T00:00:00Z" }),
+  ]);
+  const prod = f.find((s) => s.key === "production");
+  check("production count", prod?.count, 2);
+  check("production $ from priced quotes only", prod?.value, 500);
+  check("production no_total", prod?.no_total, 1);
+  check("created no_total 0", f[0].no_total, 0);
+  check("priced no_total 0", f[1].no_total, 0);
+}
+check("admin url own shop", quoteAdminUrl("Q-A-1", 1, 1, "https://mline.api.alex-io.com"), "/admin/quotes/Q-A-1");
+check("admin url other shop", quoteAdminUrl("Q-A-1", 7, 1, "https://mline.api.alex-io.com/"), "https://mline.api.alex-io.com/admin/quotes/Q-A-1");
+check("admin url no base", quoteAdminUrl("Q-A-1", 7, 1, null), "/admin/quotes/Q-A-1");
 
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASS");
 if (failed) process.exit(1);

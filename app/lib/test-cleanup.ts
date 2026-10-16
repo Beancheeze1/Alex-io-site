@@ -15,6 +15,7 @@ import { forgetFacts } from "@/app/lib/memory";
 import {
   QUOTE_COLUMNS,
   confirmPhrase,
+  groupColumns,
   isDeletableTable,
   isProtectedTable,
   isSkippedTable,
@@ -30,7 +31,7 @@ import {
 
 const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
-async function quoteTables(db: PoolClient): Promise<{ table: string; column: QuoteColumn }[]> {
+async function quoteTables(db: PoolClient): Promise<{ table: string; columns: QuoteColumn[] }[]> {
   const r = await db.query<{ table_name: string; column_name: QuoteColumn }>(
     `SELECT c.table_name, c.column_name
        FROM information_schema.columns c
@@ -39,7 +40,7 @@ async function quoteTables(db: PoolClient): Promise<{ table: string; column: Quo
       ORDER BY c.table_name, c.column_name`,
     [QUOTE_COLUMNS as unknown as string[]],
   );
-  return r.rows.filter((x) => !isSkippedTable(x.table_name)).map((x) => ({ table: x.table_name, column: x.column_name }));
+  return groupColumns(r.rows.filter((x) => !isSkippedTable(x.table_name)).map((x) => ({ table: x.table_name, column: x.column_name })));
 }
 
 async function findQuotes(db: PoolClient, quoteNos: string[]): Promise<QuotePreview[]> {
@@ -80,17 +81,27 @@ async function findQuotes(db: PoolClient, quoteNos: string[]): Promise<QuotePrev
   }));
 }
 
-async function countHits(db: PoolClient, tables: { table: string; column: QuoteColumn }[], ids: string[], nos: string[]): Promise<TableHit[]> {
+/**
+ * Step 36C: one WHERE over all of a table's quote columns, so a row with both
+ * is counted / deleted once. Returns the SQL and only the parameters it uses.
+ */
+function match(columns: QuoteColumn[], ids: string[], nos: string[]): { where: string; params: string[][] } {
+  const params: string[][] = [];
+  const parts = columns.map((c) => {
+    params.push(c === "quote_id" ? ids : nos);
+    return `${ident(c)}::text = ANY($${params.length}::text[])`;
+  });
+  return { where: parts.join(" OR "), params };
+}
+
+async function countHits(db: PoolClient, tables: { table: string; columns: QuoteColumn[] }[], ids: string[], nos: string[]): Promise<TableHit[]> {
   const hits: TableHit[] = [];
+  if (!ids.length) return hits;
   for (const t of tables) {
-    const keys = t.column === "quote_id" ? ids : nos;
-    if (!keys.length) continue;
-    const r = await db.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM public.${ident(t.table)} WHERE ${ident(t.column)}::text = ANY($1::text[])`,
-      [keys],
-    );
+    const m = match(t.columns, ids, nos);
+    const r = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM public.${ident(t.table)} WHERE ${m.where}`, m.params);
     const n = Number(r.rows[0]?.n) || 0;
-    if (n > 0) hits.push({ table: t.table, column: t.column, rows: n });
+    if (n > 0) hits.push({ table: t.table, columns: t.columns, rows: n });
   }
   return hits;
 }
@@ -160,11 +171,10 @@ export async function deleteTestQuotes(text: unknown, typed: unknown, by: string
       for (const h of pending) {
         await tx.query("SAVEPOINT cleanup_row");
         try {
-          const d = await tx.query(`DELETE FROM public.${ident(h.table)} WHERE ${ident(h.column)}::text = ANY($1::text[])`, [
-            h.column === "quote_id" ? ids : nos,
-          ]);
+          const m = match(h.columns, ids, nos);
+          const d = await tx.query(`DELETE FROM public.${ident(h.table)} WHERE ${m.where}`, m.params);
           await tx.query("RELEASE SAVEPOINT cleanup_row");
-          deleted.push({ table: h.table, column: h.column, rows: d.rowCount || 0 });
+          deleted.push({ table: h.table, columns: h.columns, rows: d.rowCount || 0 });
         } catch (e) {
           await tx.query("ROLLBACK TO SAVEPOINT cleanup_row");
           if ((e as { code?: string } | null)?.code !== "23503") throw e;

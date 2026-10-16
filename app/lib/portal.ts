@@ -7,16 +7,19 @@
 //   - loadBuyerOrders(): the buyer's 50 most recent quotes with stage,
 //     timeline, open actions and documents
 // Totals shown are the ones the buyer agreed to (accepted / confirmed);
-// estimates open the quote page for the live price.
+// estimates open the quote page for the live price. Step 36C: an accepted or
+// confirmed order not yet in production is re-priced; if the price changed,
+// it shows the new price, "please re-approve" and a Re-approve action.
 
 import { one, q } from "@/lib/db";
 import { computeApproval, type ApprovalRow } from "@/app/lib/quote-approval-core";
-import { quoteTerms } from "@/app/lib/quote-approval";
+import { currentQuoteTotal, quoteTerms } from "@/app/lib/quote-approval";
 import { shopFreightSettings } from "@/app/lib/freight";
 import { isFreightTerms } from "@/app/lib/freight-core";
 import { loadProofs } from "@/app/lib/proofs";
 import { proofStage } from "@/app/lib/proofs-core";
 import {
+  REAPPROVE_LABEL,
   STAGE_LABEL,
   normEmail,
   openActions,
@@ -38,7 +41,8 @@ export type PortalOrder = {
   created_at: string | null;
   stage: OrderStage;
   stage_label: string;
-  total: number | null; // accepted / confirmed total
+  total: number | null; // accepted / confirmed total (the new price when it changed)
+  was_total?: number | null; // Step 36C: the accepted total, when the price changed since
   po: string | null;
   timeline: TimelineStep[];
   actions: OpenAction[];
@@ -116,7 +120,12 @@ export async function loadBuyerOrders(tenantId: number, email: string, now: Date
         confirmed_by: str(j.confirmed_by),
         confirmed_total: j.confirmed_total == null ? null : Number(j.confirmed_total),
       };
-      const approval = computeApproval(approvalRow, Number(approvalRow.confirmed_total ?? approvalRow.accepted_total ?? 0), terms, now);
+      const agreed = Number(approvalRow.confirmed_total ?? approvalRow.accepted_total ?? 0);
+      // Step 36C: only accepted / confirmed orders not yet released or shipped can need re-approval.
+      const live =
+        approvalRow.accepted_at && j.locked !== true && !str(j.shipped_at) ? await currentQuoteTotal(r.quote_no).catch(() => null) : null;
+      const approval = computeApproval(approvalRow, live != null && live > 0 ? live : agreed, terms, now);
+      const changed = approval.stage === "needs_reapproval";
       const proofs = await loadProofs(Number(r.id), r.quote_no);
       const ps = proofStage(proofs);
       const approved = proofs.filter((p) => p.status === "approved").sort((a, b) => b.version - a.version)[0];
@@ -143,6 +152,7 @@ export async function loadBuyerOrders(tenantId: number, email: string, now: Date
           : null,
         ship_to_zip: str(j.ship_to_zip),
         terms: terms0,
+        needs_reapproval: changed,
       };
       const stage = orderStage(facts, now);
       const openUrl = `/api/portal/open?quote_no=${encodeURIComponent(r.quote_no)}`;
@@ -154,8 +164,9 @@ export async function loadBuyerOrders(tenantId: number, email: string, now: Date
         quote_no: r.quote_no,
         created_at: facts.created_at,
         stage,
-        stage_label: STAGE_LABEL[stage],
-        total: approval.confirmed?.total ?? approval.accepted?.total ?? null,
+        stage_label: changed ? REAPPROVE_LABEL : STAGE_LABEL[stage],
+        total: changed ? approval.current_total : approval.confirmed?.total ?? approval.accepted?.total ?? null,
+        was_total: changed ? approval.confirmed?.total ?? approval.accepted?.total ?? null : null,
         po: approvalRow.accepted_po ?? str(j.po_number),
         timeline: orderTimeline(facts),
         actions: openActions(facts, now, freightSetUp),

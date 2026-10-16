@@ -12,7 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
 import { funnelShops, loadFunnelQuotes } from "@/app/lib/funnel";
-import { byChannel, byRep, byShop, cleanDays, cycleTimes, funnel, funnelCsv, stalled } from "@/app/lib/funnel-core";
+import { byChannel, byRep, byShop, cleanDays, cycleTimes, funnel, funnelCsv, quoteAdminUrl, stalled } from "@/app/lib/funnel-core";
+import { tenantBaseUrl } from "@/app/lib/quote-mail-core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,17 +55,24 @@ export async function GET(req: NextRequest) {
     }
 
     const now = new Date();
+    const shops = owner ? await funnelShops() : [];
+    // Step 36C: another shop's quote opens on that shop's own address.
+    const base = process.env.NEXT_PUBLIC_BASE_URL || "https://api.alex-io.com";
+    const slugOf = new Map(shops.map((s) => [s.id, s.slug]));
+    const stalledRows = stalled(quotes, now)
+      .slice(0, 50)
+      .map((s) => ({ ...s, admin_url: quoteAdminUrl(s.quote_no, s.tenant_id, own, slugOf.has(s.tenant_id) ? tenantBaseUrl(base, slugOf.get(s.tenant_id)) : null) }));
     return json({
       ok: true,
       days,
       scope: { tenant: tenantId == null ? "all" : tenantId, owner },
-      ...(owner ? { shops: await funnelShops() } : {}),
+      ...(owner ? { shops } : {}),
       funnel: funnel(quotes),
       by_channel: byChannel(quotes),
       by_rep: byRep(quotes),
       ...(tenantId == null ? { by_shop: byShop(quotes) } : {}),
       cycle: cycleTimes(quotes),
-      stalled: stalled(quotes, now).slice(0, 50),
+      stalled: stalledRows,
       totals: {
         quotes: quotes.length,
         emailed: quotes.filter((x) => x.emailed).length,

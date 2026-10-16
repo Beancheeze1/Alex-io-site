@@ -166,5 +166,18 @@ check("shipped no tracking -> quote link", sh2.html.includes('href="https://x/qu
 const rel = statusEmail("released", { brand: "Shop", quoteNo: "Q-1", link: "https://x/q", total: 1, trackingUrl: "https://evil" });
 check("other kinds ignore trackingUrl", rel.html.includes('href="https://x/q"') && !rel.html.includes("evil"), true);
 
+// Step 36C: price changed since the buyer accepted
+check(
+  "reapprove action",
+  openActions(o({ accepted_at: "2026-10-11T00:00:00Z", ship_to_zip: "60601", needs_reapproval: true }), now, true).map((a) => a.key).join(","),
+  "reapprove",
+);
+check(
+  "no reapprove once released",
+  openActions(o({ accepted_at: "2026-10-11T00:00:00Z", ship_to_zip: "60601", needs_reapproval: true, locked: true }), now, true).length,
+  0,
+);
+check("no reapprove when unchanged", openActions(o({ accepted_at: "2026-10-11T00:00:00Z", ship_to_zip: "60601" }), now, true).length, 0);
+
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASS");
 if (failed) process.exit(1);
