@@ -218,12 +218,13 @@ export const POST = adminOnly(async (req: NextRequest) => {
     const role = roleRaw.trim().toLowerCase();
 
     // Roles must match the RBAC helper contract (fail closed).
-    if (!(role === "viewer" || role === "sales" || role === "cs" || role === "admin")) {
+    // Step 36B: new users are sales, cs or admin (the viewer role is retired).
+    if (!(role === "sales" || role === "cs" || role === "admin")) {
       return bad(
         {
           ok: false,
           error: "invalid_role",
-          message: "Role must be one of: viewer, sales, cs, admin.",
+          message: "Role must be one of: sales, cs, admin.",
         },
         400,
       );

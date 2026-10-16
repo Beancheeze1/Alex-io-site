@@ -975,8 +975,9 @@ function UsersAndRolesCard() {
 
   const [email, setEmail] = React.useState("");
   const [name, setName] = React.useState("");
-  const [role, setRole] = React.useState<"viewer" | "sales" | "cs" | "admin">(
-    "viewer",
+  // Step 36B: the viewer role is retired (it could open nothing); sales is the default.
+  const [role, setRole] = React.useState<"sales" | "cs" | "admin">(
+    "sales",
   );
   const [password, setPassword] = React.useState("");
   const [salesSlug, setSalesSlug] = React.useState("");
@@ -1138,15 +1139,16 @@ function UsersAndRolesCard() {
         if (!res.ok || !json?.ok) {
           setError(json?.message || "Failed to invite user.");
         } else {
+          setEmail("");
+          setName("");
+          setSalesSlug("");
+          // Step 36B: reload first (loadUsers clears the message), then say what happened.
+          await loadUsers();
           setOkMsg(
             json.email === "sent"
               ? `Invited ${json.user.email} (${json.user.role}): they'll get an email to set their password.`
               : `Created ${json.user.email}, but the invite email didn't go out. Use "Invite" in the list to resend.`,
           );
-          setEmail("");
-          setName("");
-          setSalesSlug("");
-          await loadUsers();
         }
       } catch (e) {
         console.error("Failed to invite user:", e);
@@ -1182,13 +1184,13 @@ function UsersAndRolesCard() {
         setError(msg);
         setOkMsg(null);
       } else {
-        setOkMsg(`Created user: ${json.user.email} (${json.user.role})`);
         setError(null);
         setEmail("");
         setName("");
         setPassword("");
         setSalesSlug("");
         await loadUsers();
+        setOkMsg(`Created user: ${json.user.email} (${json.user.role})`);
       }
     } catch (e) {
       console.error("Failed to create user:", e);
@@ -1213,7 +1215,7 @@ function UsersAndRolesCard() {
       </div>
 
       <p className="text-xs text-[var(--text-secondary)]">
-        Create internal accounts for testing login + role gates (viewer/sales/cs/admin).
+        Add your staff: sales, customer service (cs) or admin. Leave the password blank to email them an invite.
         This tool is enforced server-side; non-admins will receive 401/403 JSON.
       </p>
 
@@ -1246,11 +1248,10 @@ function UsersAndRolesCard() {
             <select
               value={role}
               onChange={(e) =>
-                setRole(e.target.value as "viewer" | "sales" | "cs" | "admin")
+                setRole(e.target.value as "sales" | "cs" | "admin")
               }
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-page)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none ring-[var(--action-primary)]/30 focus:border-[var(--action-primary)] focus:ring-1"
             >
-              <option value="viewer">viewer</option>
               <option value="sales">sales</option>
               <option value="cs">cs</option>
               <option value="admin">admin</option>

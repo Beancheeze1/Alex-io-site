@@ -212,7 +212,8 @@ export function starterGrades(grades: { id: number; name: string; cost_per_msf: 
 export const INVITE_DAYS = 7;
 export const RESET_MINUTES = 60;
 export const MIN_PASSWORD = 10;
-export const ROLES = ["admin", "cs", "sales", "viewer"] as const;
+// Step 36B: "viewer" retired (it could open nothing). Old viewer accounts land on /no-access.
+export const ROLES = ["admin", "cs", "sales"] as const;
 export type Role = (typeof ROLES)[number];
 
 export function passwordProblem(pw: unknown): string | null {
@@ -233,7 +234,7 @@ export function cleanInvite(raw: unknown): { ok: true; value: InviteInput } | { 
   const name = typeof b.name === "string" ? b.name.replace(/\s+/g, " ").trim().slice(0, 120) : "";
   if (!name) return { ok: false, field: "name", message: "Enter their name." };
   const role = typeof b.role === "string" ? b.role.trim().toLowerCase() : "";
-  if (!(ROLES as readonly string[]).includes(role)) return { ok: false, field: "role", message: "Role must be admin, cs, sales or viewer." };
+  if (!(ROLES as readonly string[]).includes(role)) return { ok: false, field: "role", message: "Role must be admin, cs or sales." };
   const slugRaw = typeof b.sales_slug === "string" ? b.sales_slug.trim().toLowerCase() : "";
   if (slugRaw && !/^[a-z0-9][a-z0-9-]{0,40}$/.test(slugRaw)) {
     return { ok: false, field: "sales_slug", message: "Sales slug: lowercase letters, numbers and hyphens." };

@@ -142,8 +142,10 @@ check("password: exactly 10 ok", passwordProblem("abcdefghij"), null);
   check("invite: bad role", bad({ email: "a@x.com", name: "A", role: "owner" }), "role");
   check("invite: bad slug", bad({ email: "a@x.com", name: "A", role: "cs", sales_slug: "Bad Slug!" }), "sales_slug");
   check("invite: null input", bad(null), "email");
-  const r = cleanInvite({ email: "a@x.com", name: "A", role: "viewer", sales_slug: "" });
+  const r = cleanInvite({ email: "a@x.com", name: "A", role: "cs", sales_slug: "" });
   check("invite: empty slug -> null", r.ok ? r.value.sales_slug : "x", null);
+  // Step 36B: the viewer role is retired
+  check("invite: viewer refused", bad({ email: "a@x.com", name: "A", role: "viewer" }), "role");
 }
 
 // ---- access emails

@@ -7,6 +7,7 @@
 //     kind stop working.
 //   - sendAccessEmail(): emails the link from the user's shop (its name,
 //     colors, its own address so the login that follows is on that host)
+//   - checkPasswordLink(): is the link still usable (read only, Step 36B)
 //   - redeemPasswordLink(): checks the token, sets the password, marks it used
 // A user created by invite gets an unusable random password until then.
 
@@ -77,13 +78,30 @@ export async function sendAccessEmail(args: {
 
 export type UseResult = { ok: true; email: string; kind: AccessKind } | { ok: false; status: number; error: string; message: string };
 
-/** Sets the password from a link (one use). */
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]{20,100}$/;
+const EXPIRED = "This link has expired or was already used. Ask for a new one.";
+
+/**
+ * Step 36B: is this link still usable? Read only: it does NOT use the link up,
+ * so the set-password page can say "expired" before showing the form.
+ */
+export async function checkPasswordLink(token: string): Promise<{ valid: boolean; kind: AccessKind | null }> {
+  if (!TOKEN_SHAPE.test(String(token || ""))) return { valid: false, kind: null };
+  const row = await one<{ kind: AccessKind }>(
+    `SELECT kind FROM public.user_invites WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`,
+    [hashAccessToken(token)],
+  );
+  return { valid: !!row, kind: row ? row.kind : null };
+}
+
+/** Sets the password from a link (one use). The link is checked before the password (Step 36B). */
 export async function redeemPasswordLink(token: string, password: string): Promise<UseResult> {
-  const problem = passwordProblem(password);
-  if (problem) return { ok: false, status: 400, error: "weak_password", message: problem };
-  if (!/^[A-Za-z0-9_-]{20,100}$/.test(String(token || ""))) {
+  if (!TOKEN_SHAPE.test(String(token || ""))) {
     return { ok: false, status: 400, error: "invalid_link", message: "This link isn't valid. Ask for a new one." };
   }
+  if (!(await checkPasswordLink(token)).valid) return { ok: false, status: 410, error: "expired_link", message: EXPIRED };
+  const problem = passwordProblem(password);
+  if (problem) return { ok: false, status: 400, error: "weak_password", message: problem };
   const hash = await bcrypt.hash(password, 10);
   return withTxn(async (tx) => {
     const used = await tx.query<{ user_id: number; kind: AccessKind }>(
@@ -93,7 +111,7 @@ export async function redeemPasswordLink(token: string, password: string): Promi
       [hashAccessToken(token)],
     );
     const row = used.rows[0];
-    if (!row) return { ok: false, status: 410, error: "expired_link", message: "This link has expired or was already used. Ask for a new one." } as UseResult;
+    if (!row) return { ok: false, status: 410, error: "expired_link", message: EXPIRED } as UseResult;
     const u = await tx.query<{ email: string }>(`UPDATE public."users" SET password_hash = $2 WHERE id = $1 RETURNING email`, [row.user_id, hash]);
     if (!u.rows[0]) return { ok: false, status: 410, error: "expired_link", message: "This account no longer exists." } as UseResult;
     return { ok: true, email: u.rows[0].email, kind: row.kind } as UseResult;

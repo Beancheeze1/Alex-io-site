@@ -210,6 +210,21 @@ export async function saveFacts(id: string, facts: Mem): Promise<void> {
   }
 }
 
+/**
+ * Step 36B: forget a deleted quote's facts (Redis + this instance). The
+ * durable quote_facts row is deleted with the quote by the cleanup tool.
+ */
+export async function forgetFacts(id: string): Promise<void> {
+  const k = keyFor(id);
+  FALLBACK.delete(k);
+  if (!(REDIS_URL && REDIS_TOKEN)) return;
+  try {
+    await redisCommand(["del", k]);
+  } catch (e) {
+    REDIS_LAST_ERROR = e instanceof Error ? e.message : String(e);
+  }
+}
+
 /* ============================================================
    Self-test for admin endpoint
    ============================================================ */

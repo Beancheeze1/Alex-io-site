@@ -19,8 +19,26 @@ export default function SetPasswordPage() {
   const [done, setDone] = React.useState<string | null>(null);
   const [dead, setDead] = React.useState(false);
 
+  const [kind, setKind] = React.useState<"invite" | "reset" | null>(null);
+
   React.useEffect(() => {
-    setToken(new URLSearchParams(window.location.search).get("t") || "");
+    const t = new URLSearchParams(window.location.search).get("t") || "";
+    if (!t) {
+      setToken("");
+      return;
+    }
+    // Step 36B: check the link first (read only) so an old link says so at once.
+    fetch(`/api/auth/set-password?t=${encodeURIComponent(t)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j?.ok && j.valid === false) {
+          setDead(true);
+          setError("This link has expired or was already used. Ask for a new one.");
+        }
+        if (j?.kind === "invite" || j?.kind === "reset") setKind(j.kind);
+      })
+      .catch(() => undefined)
+      .finally(() => setToken(t));
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -55,7 +73,9 @@ export default function SetPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--surface-page)] px-4">
       <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface-card)] p-6 shadow-sm" data-set-password>
-        <h1 className="mb-2 text-center text-xl font-medium text-[var(--text-primary)]">Choose your password</h1>
+        <h1 className="mb-2 text-center text-xl font-medium text-[var(--text-primary)]">
+          {kind === "reset" ? "Choose a new password" : "Choose your password"}
+        </h1>
         {done !== null ? (
           <div className="text-center text-sm text-[var(--text-secondary)]" data-set-password-done>
             <p className="mb-4">Your password is set{done ? ` for ${done}` : ""}.</p>

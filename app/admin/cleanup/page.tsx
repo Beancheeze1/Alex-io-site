@@ -4,6 +4,8 @@
 // Data Cleanup admin page.
 // Lets super-owner (and admins for their own tenant) safely delete test data.
 // Three sections: Quotes, Users/Sales Reps, Tenants (super-owner only).
+// Step 36B: plus "Test quotes" (super-owner only): delete QA quotes by number
+// (components/admin/TestQuoteCleanup.tsx).
 //
 // Pattern:
 //  1. Set filters
@@ -11,10 +13,11 @@
 //  3. Confirm modal with count → DELETE call
 
 import * as React from "react";
+import TestQuoteCleanup from "@/components/admin/TestQuoteCleanup";
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type Tab = "quotes" | "users" | "tenants";
+type Tab = "quotes" | "test-quotes" | "users" | "tenants";
 
 interface QuoteFilters {
   tenantId: string;
@@ -711,6 +714,7 @@ export default function CleanupPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "quotes", label: "Quotes" },
+    ...(isSuperOwner ? [{ key: "test-quotes" as Tab, label: "Test quotes" }] : []),
     { key: "users", label: "Users / Sales Reps" },
     ...(isSuperOwner ? [{ key: "tenants" as Tab, label: "Tenants" }] : []),
   ];
@@ -760,6 +764,7 @@ export default function CleanupPage() {
 
           <div>
             {tab === "quotes" && <QuotesSection isSuperOwner={isSuperOwner} tenants={tenants} />}
+            {tab === "test-quotes" && isSuperOwner && <TestQuoteCleanup />}
             {tab === "users" && <UsersSection isSuperOwner={isSuperOwner} tenants={tenants} />}
             {tab === "tenants" && isSuperOwner && <TenantsSection tenants={tenants} />}
           </div>

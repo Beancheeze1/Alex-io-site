@@ -56,7 +56,7 @@ const next = searchParams.get("next");
             ? "/admin/quotes"
             : role === "sales"
               ? "/admin/quotes"
-              : "/";
+              : "/no-access"; // Step 36B: e.g. an old "viewer" account
 
       const dest = next || fallback;
 
