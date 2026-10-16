@@ -3,7 +3,8 @@
 // Step 36A: "Forgot password?" on the login page.
 //   POST { email } -> always the same { ok, message } (emails can't be probed)
 // When the email is a user of the shop this host belongs to, they get a
-// 1-hour reset link (lib/user-invites.ts). Rate limited per IP.
+// 1-hour reset link (lib/user-invites.ts). Step 37H: on the main address
+// (no shop in the host) any account with that email gets it. Rate limited per IP.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
@@ -29,6 +30,15 @@ export async function POST(req: NextRequest) {
     if (tenant) {
       const user = await one<{ id: number }>(`SELECT id FROM public."users" WHERE lower(email) = $1 AND tenant_id = $2 LIMIT 1`, [email, tenant.id]);
       if (user) await sendAccessEmail({ userId: Number(user.id), tenantId: Number(tenant.id), kind: "reset" });
+    } else {
+      // Step 37H: on the main address (no shop in the host) find the account by
+      // email alone (emails are unique across shops); the link goes to that
+      // account's own shop address.
+      const user = await one<{ id: number; tenant_id: number | null }>(
+        `SELECT id, tenant_id FROM public."users" WHERE lower(email) = $1 AND tenant_id IS NOT NULL LIMIT 1`,
+        [email],
+      );
+      if (user?.tenant_id) await sendAccessEmail({ userId: Number(user.id), tenantId: Number(user.tenant_id), kind: "reset" });
     }
   } catch (e) {
     console.error("[auth/forgot] failed:", e);

@@ -123,6 +123,8 @@ type ApiOk = {
   // Step 25: review flags
   reviewFlags?: { code: string; message: string }[];
   grandTotal?: number;
+  // Step 37H: one-time cutting dies on boxes-only quotes
+  boxToolingTotal?: number;
   // Step 30: freight (in grandTotal when prepaid & add), options, ship-to
   freight?: FreightView | null;
   freightOptions?: FreightOptionsView | null;
@@ -1192,6 +1194,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [layoutPkg, setLayoutPkg] = React.useState<LayoutPkgRow | null>(null);
   const [printingUpcharge, setPrintingUpcharge] = React.useState<number>(0);
+  const [boxToolingTotal, setBoxToolingTotal] = React.useState<number>(0); // Step 37H
   const [printModel, setPrintModel] = React.useState<"per_color" | "legacy">("legacy");
   const [printSummary, setPrintSummary] = React.useState<string | null>(null);
   const [dieCuttingCharge, setDieCuttingCharge] = React.useState<number>(0);
@@ -1427,6 +1430,9 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
                 : 0,
             );
             setProcessLines(Array.isArray((json as ApiOk)?.processLines) ? ((json as ApiOk).processLines ?? []) : []);
+            setBoxToolingTotal(
+              Number.isFinite(Number((json as ApiOk)?.boxToolingTotal)) ? Number((json as ApiOk).boxToolingTotal) : 0,
+            );
             setReviewFlags(Array.isArray((json as ApiOk)?.reviewFlags) ? ((json as ApiOk).reviewFlags ?? []) : []);
             setGrandTotal(
               Number.isFinite((json as ApiOk)?.grandTotal as any)
@@ -2246,7 +2252,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     >
       <div
         style={{
-          maxWidth: "1100px",
+          maxWidth: "1280px", // Step 37H: room for the actions column
           margin: "0 auto",
           background: "var(--surface-card)",
           borderRadius: "24px",
@@ -2294,7 +2300,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 marginBottom: 4,
               }}
             >
-              Alex-IO internal
+              {/* Step 37H: shops see their own admin, so no "Alex-IO" here */}
+              Internal
             </div>
             <div
               style={{
@@ -2501,15 +2508,17 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
         {/* main content */}
         {!loading && quoteState && (
           <>
-            {/* top row: basic specs + quick pricing snapshot */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0,2.2fr) minmax(0,1.8fr)",
-                gap: 16,
-                marginBottom: 20,
-              }}
-            >
+            {/* Step 37H: two columns — the quote itself on the left (client,
+                line items, boxes, layout), the actions on the right (approval,
+                proof, shipping, pricing tools). One column under 1100px. */}
+            <style>{`
+              .aq-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; margin-bottom: 20px; }
+              .aq-main, .aq-aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+              .aq-main > *, .aq-aside > * { margin-top: 0 !important; margin-bottom: 0 !important; }
+              @media (min-width: 1100px) { .aq-grid { grid-template-columns: minmax(0, 1fr) 380px; } }
+            `}</style>
+            <div className="aq-grid">
+            <div className="aq-main">
               <div style={cardBase}>
                 <div style={cardTitleStyle}>Client & specs</div>
                 <div
@@ -2575,153 +2584,284 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </div>
               </div>
 
-              <div style={cardBase}>
-                <div style={cardTitleStyle}>Pricing snapshot</div>
-                {/* Step 28: estimate -> accepted -> confirmed, expiry, lead time */}
-                {quoteNoValue ? <QuoteApprovalPanel quoteNo={quoteNoValue} /> : null}
-                {/* Step 31: artwork proofs (send, record approval, history) */}
-                {quoteNoValue ? (
-                  <div style={{ marginBottom: 10 }}>
-                    <ProofCard quoteNo={quoteNoValue} canEdit staff />
-                  </div>
-                ) : null}
-                {/* Step 34A: shipped + tracking, once released */}
-                {quoteNoValue && quoteState?.locked ? (
-                  <div style={{ marginBottom: 10 }}>
-                    <ShippedCard quoteNo={quoteNoValue} />
-                  </div>
-                ) : null}
-                {/* Step 30: ship-to, freight terms and freight (staff can override) */}
-                {quoteNoValue && shipData ? (
-                  <div style={{ marginBottom: 10 }}>
-                    <ShipToCard
-                      quoteNo={quoteNoValue}
-                      freight={shipData.freight}
-                      options={shipData.options}
-                      shipTo={shipData.shipTo}
-                      canEdit
-                      staff
-                    />
-                  </div>
-                ) : null}
-                {quoteNoValue ? (
-                  <RepriceQuoteButton quoteNo={quoteNoValue} locked={!!quoteState?.locked} />
-                ) : null}
-                {quoteNoValue && (boxSelections?.length ?? 0) > 0 ? <RunMethodControl quoteNo={quoteNoValue} /> : null}
-                {/* Step 23: how the foam is cut (hides itself on quotes with no foam) */}
-                {quoteNoValue ? <FoamMethodControl quoteNo={quoteNoValue} /> : null}
-                {/* Step 25: review flags (Release for manufacturing asks to confirm these) */}
-                {reviewFlags.length > 0 ? (
-                  <div
-                    data-review-flags
-                    style={{
-                      marginBottom: 10,
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: "1px solid var(--attention)",
-                      fontSize: 12,
-                      lineHeight: 1.5,
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                      Review before release ({reviewFlags.length})
-                    </div>
-                    <ul style={{ margin: 0, paddingLeft: 16 }}>
-                      {reviewFlags.map((f, i) => (
-                        <li key={`rf-${i}`}>{f.message}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {items.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                    No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                      fontSize: 13,
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    <div>
-                      <div style={labelStyle}>Lines</div>
-                      <div>{items.length}</div>
-                    </div>
-                    <div>
-                      <div style={labelStyle}>Total quantity</div>
-                      <div>{overallQty}</div>
-                    </div>
-                    {anyPricing && (
-                      <>
-                        <div>
-                          <div style={labelStyle}>Estimated subtotal</div>
-                          <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(subtotal)}</div>
-                        </div>
-                        {effectivePrintingUpcharge > 0 && (
-                          <div>
-                            <div style={labelStyle}>Printing</div>
-                            <div>{formatUsd(effectivePrintingUpcharge)}</div>
+            {/* optional: quick line items table (admin view) */}
+            <div style={{ ...cardBase, background: "var(--surface-card)" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Line items (admin view)</div>
+              {items.length === 0 && !(boxSelections && boxSelections.length > 0) ? (
+                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>No line items stored for this quote.</p>
+              ) : (
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: 13,
+                    marginTop: 4,
+                    borderRadius: 12,
+                    overflow: "hidden",
+                  }}
+                >
+                  <thead>
+                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Line</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Material</th>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Dims (L × W × H)</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Unit</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const lineLabels = buildLineLabels(items);
+                      return items.map((item, idx) => {
+                        const isPackaging = isPackagingNotes(item.notes);
+                        const isLayoutLayer = isLayoutLayerNotes(item.notes);
+                        const dims = item.length_in + " × " + item.width_in + " × " + item.height_in;
+                        const lineLabel = lineLabels[idx];
+
+                        const matchedBoxSel = isPackaging ? findBoxSelectionForPackagingItem(item, boxSelections) : null;
+
+                        // Packaging rows: material_id is a borrowed FK value, not the row's
+                        // real material — never show it. Show the box's own description instead.
+                        const materialLabel = isPackaging
+                          ? matchedBoxSel?.description || "Box / mailer (see Customer requested cartons below)"
+                          : item.material_name || "Material #" + item.material_id;
+
+                        // Layout-layer rows are reference-only (already priced as part of the
+                        // primary row); packaging rows are priced on quote_box_selections, not
+                        // quote_items — pull that real price in rather than showing it as blank.
+                        const unit = isPackaging
+                          ? parsePriceField(matchedBoxSel?.unit_price_usd ?? null)
+                          : parsePriceField(item.price_unit_usd ?? null);
+                        const total = isPackaging
+                          ? parsePriceField(matchedBoxSel?.extended_price_usd ?? null)
+                          : parsePriceField(item.price_total_usd ?? null);
+
+                        const needsSkive =
+                          !isPackaging && Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
+
+                        return (
+                          <tr key={item.id} style={{ color: "var(--text-primary)" }}>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{lineLabel}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              <span>{materialLabel}</span>
+                              {needsSkive && (
+                                <span style={{
+                                  marginLeft: 6,
+                                  padding: "2px 7px",
+                                  borderRadius: 999,
+                                  border: "1px solid var(--status-pending-text)",
+                                  background: "var(--status-pending-bg)",
+                                  color: "var(--status-pending-text)",
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                }}>Skived</span>
+                              )}
+                              {isPackaging && (
+                                <span style={{
+                                  marginLeft: 6,
+                                  padding: "2px 7px",
+                                  borderRadius: 999,
+                                  border: "1px solid var(--border)",
+                                  background: "var(--surface-subtle)",
+                                  color: "var(--text-secondary)",
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                }}>Packaging</span>
+                              )}
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{dims}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{item.qty}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {isLayoutLayer ? (
+                                <span style={{ color: "var(--text-muted)" }}>Included</span>
+                              ) : (
+                                formatUsd(unit)
+                              )}
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {isLayoutLayer ? (
+                                <span style={{ color: "var(--text-muted)" }}>Included</span>
+                              ) : (
+                                formatUsd(total)
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                    {/* Boxes only (Corrugated Step 4B): no foam items, so list the boxes themselves. */}
+                    {items.length === 0 &&
+                      (boxSelections || []).map((sel) => {
+                        const boxUnit = parsePriceField(sel.unit_price_usd ?? null);
+                        const boxTotal = parsePriceField(sel.extended_price_usd ?? null);
+                        const dimParts = [sel.inside_length_in, sel.inside_width_in, sel.inside_height_in].map((v) =>
+                          v == null || v === "" || !Number.isFinite(Number(v)) ? null : String(Number(v)),
+                        );
+                        const boxDims = dimParts.every((p) => p != null) ? dimParts.join(" × ") : "—";
+                        return (
+                          <tr key={`box-${sel.id}`} style={{ color: "var(--text-primary)" }}>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>Box</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              <span>{sel.description || sel.sku || "Box"}</span>
+                              <span style={{
+                                marginLeft: 6,
+                                padding: "2px 7px",
+                                borderRadius: 999,
+                                border: "1px solid var(--border)",
+                                background: "var(--surface-subtle)",
+                                color: "var(--text-secondary)",
+                                fontSize: 10,
+                                fontWeight: 600,
+                              }}>{sel.kind === "custom" ? "Custom box" : "Stock box"}</span>
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{boxDims}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{Number(sel.qty).toLocaleString("en-US")}</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {boxUnit == null ? "—" : `$${boxUnit.toFixed(4)}`}
+                            </td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(boxTotal)}</td>
+                          </tr>
+                        );
+                      })}
+                    {effectivePrintingUpcharge > 0 && (
+                      <tr style={{ color: "var(--text-primary)" }}>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 2 }}>
+                            {printModel === "per_color" ? "Packaging – Printing plates (one time)" : "Packaging – Print upcharge"}
                           </div>
-                        )}
-                        {processLines.length > 0
-                          ? processLines.map((l, i) => (
-                              <div key={`proc-${i}`}>
-                                <div style={labelStyle}>{l.label}</div>
-                                <div>{formatUsd(l.amount)}</div>
-                                {l.note ? <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{l.note}</div> : null}
-                              </div>
-                            ))
-                          : (dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
-                              <div>
-                                <div style={labelStyle}>Die-cutting charge</div>
-                                <div>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
-                              </div>
-                            )}
-                        {effectiveGrandTotal > 0 && (
-                          <div>
-                            <div style={labelStyle}>
-                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""}
-                              {shipData?.freight?.in_total && (shipData.freight.cost > 0 || shipData.freight.status === "free") ? " + freight" : ""})
-                            </div>
-                            <div style={{ fontSize: 16, fontWeight: 600 }}>
-                              {formatUsd(effectiveGrandTotal)}
-                            </div>
+                          <div style={{ fontWeight: 500 }}>
+                            {printModel === "per_color" ? printSummary || "Printed box" : "Custom printed mailer / box"}
                           </div>
-                        )}
-                        {primaryItem && (
-                          <div>
-                            <div style={labelStyle}>Primary unit price</div>
-                            <div>{formatUsd(parsePriceField(primaryItem.price_unit_usd ?? null))}</div>
-                          </div>
-                        )}
-                        {primaryPricing && (
-                          <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
-                            <span>
-                              Calc basis: volumetric foam charge with{" "}
-                              {typeof kerfPct === "number" ? `~${kerfPct}% kerf/waste` : "standard kerf/waste"}.{" "}
-                              {setupFee && setupFee > 0 ? ` Includes a setup fee of ${formatUsd(setupFee)}.` : ""}
-                              {minChargeApplied
-                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(minChargeValue ?? subtotal)}), not the raw volume math.`
-                                : " Minimum charge is not the limiting factor for this configuration."}
-                            </span>
-                          </div>
-                        )}
-                      </>
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
+                      </tr>
                     )}
-                    {!anyPricing && (
-                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                        Volumetric calc did not attach pricing. Check material / dims / qty if you expect a value here.
-                      </div>
+                    {/* Step 37H: one-time cutting die(s) for die-cut styles */}
+                    {items.length === 0 && boxToolingTotal > 0 && (
+                      <tr style={{ color: "var(--text-primary)" }} data-admin-die-line>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>Die</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", fontWeight: 500 }}>Box cutting die (one time)</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(boxToolingTotal)}</td>
+                      </tr>
                     )}
-                  </div>
-                )}
-              </div>
+                    {/* Boxes only: one total line (boxes + one-time plates + die). */}
+                    {items.length === 0 && (boxSelections || []).length > 0 && (
+                      <tr style={{ color: "var(--text-primary)" }}>
+                        <td colSpan={5} style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>
+                          Total
+                          {effectivePrintingUpcharge > 0 || boxToolingTotal > 0
+                            ? ` (boxes${effectivePrintingUpcharge > 0 ? " + plates" : ""}${boxToolingTotal > 0 ? " + die" : ""})`
+                            : ""}
+                        </td>
+                        <td style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>
+                          {formatUsd(
+                            (boxSelections || []).reduce(
+                              (sum, sel) => sum + (parsePriceField(sel.extended_price_usd ?? null) ?? 0),
+                              0,
+                            ) + effectivePrintingUpcharge + boxToolingTotal,
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
+
+            {/* Boxes only, several sizes: buyer's compare quantities per size (Step 9A) */}
+            {adminBoxBreakGroups.map((g) => (
+              <div key={g.id} style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
+                  Price by quantity — {g.description || `Box ${g.id}`}
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Per box</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Plates</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
+                      <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.breaks.map((b) => (
+                      <tr key={b.qty} style={{ color: "var(--text-primary)", fontWeight: g.current_qty === b.qty ? 600 : 400 }}>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{b.qty.toLocaleString("en-US")}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", fontSize: 11, color: "var(--text-muted)" }}>
+                          {g.current_qty === b.qty ? "On quote" : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+
+            {/* Boxes only: buyer's compare quantities (Corrugated Step 6) */}
+            {adminBoxBreaks.length > 1 && (
+              <div style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
+                  Price by quantity (buyer&apos;s compare quantities)
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4 }}>
+                  <thead>
+                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
+                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Per box</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>
+                        {/* Step 37H: the one-time column carries the cutting die too */}
+                        {boxToolingTotal > 0 ? (effectivePrintingUpcharge > 0 ? "Plates + die" : "Die") : "Plates"}
+                      </th>
+                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
+                      <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminBoxBreaks.map((b) => (
+                      <tr
+                        key={b.qty}
+                        style={{ color: "var(--text-primary)", fontWeight: adminBoxBreaksCurrent === b.qty ? 600 : 400 }}
+                      >
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{b.qty.toLocaleString("en-US")}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                          {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
+                        </td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
+                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", fontSize: 11, color: "var(--text-muted)" }}>
+                          {adminBoxBreaksCurrent === b.qty ? "On quote" : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Step 18: edit the boxes on a boxes-only quote (no layout editor for these) */}
+            {quoteNoValue ? <BoxEditPanel quoteNo={quoteNoValue} /> : null}
 
             {/* Materials explorer + "view customer quote" */}
             {primaryItem && (
@@ -2878,9 +3018,6 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               </div>
             )}
 
-            {/* Step 18: edit the boxes on a boxes-only quote (no layout editor for these) */}
-            {quoteNoValue ? <BoxEditPanel quoteNo={quoteNoValue} /> : null}
-
             {/* Customer requested cartons */}
             <div style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 20 }}>
               <div style={cardTitleStyle}>Customer requested cartons</div>
@@ -2993,6 +3130,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
             {quoteNoValue && <QuoteAttachmentsPanel quoteNo={quoteNoValue} />}
 
+            {/* Step 37H: no foam layout & CAD card on a boxes-only quote (unless it has a layout) */}
+            {!(items.length === 0 && (boxSelections?.length ?? 0) > 0 && !layoutPkg) && (
+            <>
             {/* layout + CAD downloads */}
             <div style={{ marginTop: 4, marginBottom: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Foam layout & CAD exports</div>
@@ -3393,265 +3533,169 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </div>
               )}
             </div>
-
-            {/* optional: quick line items table (admin view) */}
-            <div style={{ ...cardBase, background: "var(--surface-card)" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Line items (admin view)</div>
-              {items.length === 0 && !(boxSelections && boxSelections.length > 0) ? (
-                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>No line items stored for this quote.</p>
-              ) : (
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: 13,
-                    marginTop: 4,
-                    borderRadius: 12,
-                    overflow: "hidden",
-                  }}
-                >
-                  <thead>
-                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Line</th>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Material</th>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Dims (L × W × H)</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Unit</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const lineLabels = buildLineLabels(items);
-                      return items.map((item, idx) => {
-                        const isPackaging = isPackagingNotes(item.notes);
-                        const isLayoutLayer = isLayoutLayerNotes(item.notes);
-                        const dims = item.length_in + " × " + item.width_in + " × " + item.height_in;
-                        const lineLabel = lineLabels[idx];
-
-                        const matchedBoxSel = isPackaging ? findBoxSelectionForPackagingItem(item, boxSelections) : null;
-
-                        // Packaging rows: material_id is a borrowed FK value, not the row's
-                        // real material — never show it. Show the box's own description instead.
-                        const materialLabel = isPackaging
-                          ? matchedBoxSel?.description || "Box / mailer (see Customer requested cartons below)"
-                          : item.material_name || "Material #" + item.material_id;
-
-                        // Layout-layer rows are reference-only (already priced as part of the
-                        // primary row); packaging rows are priced on quote_box_selections, not
-                        // quote_items — pull that real price in rather than showing it as blank.
-                        const unit = isPackaging
-                          ? parsePriceField(matchedBoxSel?.unit_price_usd ?? null)
-                          : parsePriceField(item.price_unit_usd ?? null);
-                        const total = isPackaging
-                          ? parsePriceField(matchedBoxSel?.extended_price_usd ?? null)
-                          : parsePriceField(item.price_total_usd ?? null);
-
-                        const needsSkive =
-                          !isPackaging && Math.abs(Number(item.height_in) - Math.round(Number(item.height_in))) > 0.01;
-
-                        return (
-                          <tr key={item.id} style={{ color: "var(--text-primary)" }}>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{lineLabel}</td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
-                              <span>{materialLabel}</span>
-                              {needsSkive && (
-                                <span style={{
-                                  marginLeft: 6,
-                                  padding: "2px 7px",
-                                  borderRadius: 999,
-                                  border: "1px solid var(--status-pending-text)",
-                                  background: "var(--status-pending-bg)",
-                                  color: "var(--status-pending-text)",
-                                  fontSize: 10,
-                                  fontWeight: 600,
-                                }}>Skived</span>
-                              )}
-                              {isPackaging && (
-                                <span style={{
-                                  marginLeft: 6,
-                                  padding: "2px 7px",
-                                  borderRadius: 999,
-                                  border: "1px solid var(--border)",
-                                  background: "var(--surface-subtle)",
-                                  color: "var(--text-secondary)",
-                                  fontSize: 10,
-                                  fontWeight: 600,
-                                }}>Packaging</span>
-                              )}
-                            </td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{dims}</td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{item.qty}</td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                              {isLayoutLayer ? (
-                                <span style={{ color: "var(--text-muted)" }}>Included</span>
-                              ) : (
-                                formatUsd(unit)
-                              )}
-                            </td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                              {isLayoutLayer ? (
-                                <span style={{ color: "var(--text-muted)" }}>Included</span>
-                              ) : (
-                                formatUsd(total)
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                    {/* Boxes only (Corrugated Step 4B): no foam items, so list the boxes themselves. */}
-                    {items.length === 0 &&
-                      (boxSelections || []).map((sel) => {
-                        const boxUnit = parsePriceField(sel.unit_price_usd ?? null);
-                        const boxTotal = parsePriceField(sel.extended_price_usd ?? null);
-                        const dimParts = [sel.inside_length_in, sel.inside_width_in, sel.inside_height_in].map((v) =>
-                          v == null || v === "" || !Number.isFinite(Number(v)) ? null : String(Number(v)),
-                        );
-                        const boxDims = dimParts.every((p) => p != null) ? dimParts.join(" × ") : "—";
-                        return (
-                          <tr key={`box-${sel.id}`} style={{ color: "var(--text-primary)" }}>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>Box</td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
-                              <span>{sel.description || sel.sku || "Box"}</span>
-                              <span style={{
-                                marginLeft: 6,
-                                padding: "2px 7px",
-                                borderRadius: 999,
-                                border: "1px solid var(--border)",
-                                background: "var(--surface-subtle)",
-                                color: "var(--text-secondary)",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}>{sel.kind === "custom" ? "Custom box" : "Stock box"}</span>
-                            </td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{boxDims}</td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{sel.qty}</td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                              {boxUnit == null ? "—" : `$${boxUnit.toFixed(4)}`}
-                            </td>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(boxTotal)}</td>
-                          </tr>
-                        );
-                      })}
-                    {effectivePrintingUpcharge > 0 && (
-                      <tr style={{ color: "var(--text-primary)" }}>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
-                          <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-secondary)", marginBottom: 2 }}>
-                            {printModel === "per_color" ? "Packaging – Printing plates (one time)" : "Packaging – Print upcharge"}
-                          </div>
-                          <div style={{ fontWeight: 500 }}>
-                            {printModel === "per_color" ? printSummary || "Printed box" : "Custom printed mailer / box"}
-                          </div>
-                        </td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>—</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(effectivePrintingUpcharge)}</td>
-                      </tr>
-                    )}
-                    {/* Boxes only: one total line (boxes + one-time plates). */}
-                    {items.length === 0 && (boxSelections || []).length > 0 && (
-                      <tr style={{ color: "var(--text-primary)" }}>
-                        <td colSpan={5} style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>
-                          Total{effectivePrintingUpcharge > 0 ? " (boxes + plates)" : ""}
-                        </td>
-                        <td style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>
-                          {formatUsd(
-                            (boxSelections || []).reduce(
-                              (sum, sel) => sum + (parsePriceField(sel.extended_price_usd ?? null) ?? 0),
-                              0,
-                            ) + effectivePrintingUpcharge,
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Boxes only, several sizes: buyer's compare quantities per size (Step 9A) */}
-            {adminBoxBreakGroups.map((g) => (
-              <div key={g.id} style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
-                  Price by quantity — {g.description || `Box ${g.id}`}
-                </div>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4 }}>
-                  <thead>
-                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Per box</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Boxes</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Plates</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
-                      <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.breaks.map((b) => (
-                      <tr key={b.qty} style={{ color: "var(--text-primary)", fontWeight: g.current_qty === b.qty ? 600 : 400 }}>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{b.qty.toLocaleString("en-US")}</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                          {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
-                        </td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                          {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
-                        </td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", fontSize: 11, color: "var(--text-muted)" }}>
-                          {g.current_qty === b.qty ? "On quote" : ""}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-
-            {/* Boxes only: buyer's compare quantities (Corrugated Step 6) */}
-            {adminBoxBreaks.length > 1 && (
-              <div style={{ ...cardBase, background: "var(--surface-card)", marginTop: 12 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
-                  Price by quantity (buyer&apos;s compare quantities)
-                </div>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 4 }}>
-                  <thead>
-                    <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
-                      <th style={{ textAlign: "left", padding: 6, borderBottom: "1px solid var(--border)" }}>Qty</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Per box</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Boxes</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Plates</th>
-                      <th style={{ textAlign: "right", padding: 6, borderBottom: "1px solid var(--border)" }}>Total</th>
-                      <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {adminBoxBreaks.map((b) => (
-                      <tr
-                        key={b.qty}
-                        style={{ color: "var(--text-primary)", fontWeight: adminBoxBreaksCurrent === b.qty ? 600 : 400 }}
-                      >
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{b.qty.toLocaleString("en-US")}</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                          {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
-                        </td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                          {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
-                        </td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
-                        <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", fontSize: 11, color: "var(--text-muted)" }}>
-                          {adminBoxBreaksCurrent === b.qty ? "On quote" : ""}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            </>
             )}
+
+            </div>
+            {/* end .aq-main */}
+
+            <aside className="aq-aside">
+                {/* Pricing numbers (foam quotes; boxes-only totals are in Line items) */}
+                {items.length > 0 ? (
+              <div style={cardBase}>
+                <div style={cardTitleStyle}>Pricing snapshot</div>
+                {items.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                    No stored line items yet. Once quote_items are written, you&apos;ll see per-line pricing here.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      fontSize: 13,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    <div>
+                      <div style={labelStyle}>Lines</div>
+                      <div>{items.length}</div>
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Total quantity</div>
+                      <div>{overallQty}</div>
+                    </div>
+                    {anyPricing && (
+                      <>
+                        <div>
+                          <div style={labelStyle}>Estimated subtotal</div>
+                          <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(subtotal)}</div>
+                        </div>
+                        {effectivePrintingUpcharge > 0 && (
+                          <div>
+                            <div style={labelStyle}>Printing</div>
+                            <div>{formatUsd(effectivePrintingUpcharge)}</div>
+                          </div>
+                        )}
+                        {processLines.length > 0
+                          ? processLines.map((l, i) => (
+                              <div key={`proc-${i}`}>
+                                <div style={labelStyle}>{l.label}</div>
+                                <div>{formatUsd(l.amount)}</div>
+                                {l.note ? <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{l.note}</div> : null}
+                              </div>
+                            ))
+                          : (dieCuttingTriggered || effectiveDieCuttingCharge > 0) && (
+                              <div>
+                                <div style={labelStyle}>Die-cutting charge</div>
+                                <div>{effectiveDieCuttingCharge > 0 ? formatUsd(effectiveDieCuttingCharge) : "TBD"}</div>
+                              </div>
+                            )}
+                        {effectiveGrandTotal > 0 && (
+                          <div>
+                            <div style={labelStyle}>
+                              Total (incl. printing{effectiveDieCuttingCharge > 0 ? " + cutting" : ""}
+                              {shipData?.freight?.in_total && (shipData.freight.cost > 0 || shipData.freight.status === "free") ? " + freight" : ""})
+                            </div>
+                            <div style={{ fontSize: 16, fontWeight: 600 }}>
+                              {formatUsd(effectiveGrandTotal)}
+                            </div>
+                          </div>
+                        )}
+                        {primaryItem && (
+                          <div>
+                            <div style={labelStyle}>Primary unit price</div>
+                            <div>{formatUsd(parsePriceField(primaryItem.price_unit_usd ?? null))}</div>
+                          </div>
+                        )}
+                        {primaryPricing && (
+                          <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                            <span>
+                              Calc basis: volumetric foam charge with{" "}
+                              {typeof kerfPct === "number" ? `~${kerfPct}% kerf/waste` : "standard kerf/waste"}.{" "}
+                              {setupFee && setupFee > 0 ? ` Includes a setup fee of ${formatUsd(setupFee)}.` : ""}
+                              {minChargeApplied
+                                ? ` Pricing is currently governed by the minimum charge (${formatUsd(minChargeValue ?? subtotal)}), not the raw volume math.`
+                                : " Minimum charge is not the limiting factor for this configuration."}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {!anyPricing && (
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                        Volumetric calc did not attach pricing. Check material / dims / qty if you expect a value here.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+                ) : null}
+                {/* Step 28: estimate -> accepted -> confirmed, expiry, lead time */}
+                {quoteNoValue ? <QuoteApprovalPanel quoteNo={quoteNoValue} /> : null}
+                {/* Step 31: artwork proofs (send, record approval, history) */}
+                {quoteNoValue ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <ProofCard quoteNo={quoteNoValue} canEdit staff />
+                  </div>
+                ) : null}
+                {/* Step 34A: shipped + tracking, once released */}
+                {quoteNoValue && quoteState?.locked ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <ShippedCard quoteNo={quoteNoValue} />
+                  </div>
+                ) : null}
+                {/* Step 30: ship-to, freight terms and freight (staff can override) */}
+                {quoteNoValue && shipData ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <ShipToCard
+                      quoteNo={quoteNoValue}
+                      freight={shipData.freight}
+                      options={shipData.options}
+                      shipTo={shipData.shipTo}
+                      canEdit
+                      staff
+                    />
+                  </div>
+                ) : null}
+                {/* Step 37H: reprice, run method, foam method, review flags */}
+              <div style={cardBase} data-admin-pricing-tools>
+                <div style={cardTitleStyle}>Pricing tools</div>
+                {quoteNoValue ? (
+                  <RepriceQuoteButton quoteNo={quoteNoValue} locked={!!quoteState?.locked} />
+                ) : null}
+                {quoteNoValue && (boxSelections?.length ?? 0) > 0 ? <RunMethodControl quoteNo={quoteNoValue} /> : null}
+                {/* Step 23: how the foam is cut (hides itself on quotes with no foam) */}
+                {quoteNoValue ? <FoamMethodControl quoteNo={quoteNoValue} /> : null}
+                {/* Step 25: review flags (Release for manufacturing asks to confirm these) */}
+                {reviewFlags.length > 0 ? (
+                  <div
+                    data-review-flags
+                    style={{
+                      marginBottom: 10,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--attention)",
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      Review before release ({reviewFlags.length})
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 16 }}>
+                      {reviewFlags.map((f, i) => (
+                        <li key={`rf-${i}`}>{f.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </aside>
+            </div>
+            {/* end .aq-grid */}
 
             <p style={{ marginTop: 24, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
               Internal-only view. Use this page for engineering review and CAD exports. Clients should continue to use the public /quote link in their email.
