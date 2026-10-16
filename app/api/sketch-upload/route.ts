@@ -31,6 +31,7 @@ import { internalHeaders } from "@/lib/internal-call";
 import { findOrCreateUploadDraft } from "@/lib/quote-draft";
 import { addEditGrant, buyerEditGuard } from "@/lib/quote-edit";
 import { stlToFacesJson } from "@/lib/stl/processor";
+import { dxfFacesForUpload } from "@/lib/dxf/upload";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -544,6 +545,62 @@ async function sketchUploadPost(req: NextRequest, grant: { quoteNo: string | nul
     // Feature-flagged Forge ingestion (DXF-primary v1)
     const forgeOn = isForgeEnabled();
     const kind = isForgeSupportedUpload(origFilename, contentType);
+
+    // Step 37A2: DXF is read here (lib/dxf/parse.ts), not by the outside
+    // converter, which only joined plain LINE shapes (arcs, splines and
+    // polylines came back as nothing). Same output as STL: the original file
+    // plus forge_faces.json for the editor. A drawing with several inserts
+    // carries all of them (faces.inserts); the editor imports the first and
+    // offers the rest.
+    if (kind.ok && kind.sourceType === "dxf") {
+      const dxf = dxfFacesForUpload(buf);
+      if (!dxf.ok) return err("dxf_unreadable", dxf.message, 422);
+      const facesBytes = Buffer.from(JSON.stringify(dxf.faces), "utf8");
+
+      const inserted = (await one<AttachRow>(
+        `
+        INSERT INTO quote_attachments
+          (quote_id, quote_no, filename, content_type, size_bytes, data)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, quote_id, quote_no, filename, content_type, size_bytes;
+        `,
+        [quoteId, quoteNo, origFilename, contentType, buf.length, buf],
+      )) as AttachRow | null;
+      if (!inserted) {
+        return err("insert_failed", "Could not create quote_attachments row", 500);
+      }
+
+      const facesRow = await one<{ id: number }>(
+        `
+        INSERT INTO quote_attachments
+          (quote_id, quote_no, filename, content_type, size_bytes, data)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id;
+        `,
+        [inserted.quote_id, inserted.quote_no, "forge_faces.json", "application/json", facesBytes.length, facesBytes],
+      );
+
+      return NextResponse.json(
+        {
+          ok: true,
+          attachmentId: inserted.id,
+          quoteId: quoteId,
+          quoteNo: quoteNo,
+          filename: inserted.filename,
+          size: inserted.size_bytes,
+          type: inserted.content_type,
+          parsed: null,
+          autoQuote: null,
+          dxf: {
+            used: true,
+            faces_attachment_id: facesRow?.id ?? null,
+            inserts: dxf.faces.inserts?.length ?? 1,
+            warnings: dxf.faces.warnings,
+          },
+        },
+        { status: 200 },
+      );
+    }
 
         // STL: use in-process extraction (ported from CORS_edit worker)
     if (kind.ok && kind.sourceType === "stl") {

@@ -21,6 +21,7 @@
   "test:funnel": "npx --yes tsx scripts/test-funnel.ts",
   "test:onboarding": "npx --yes tsx scripts/test-onboarding.ts",
   "test:cleanup": "npx --yes tsx scripts/test-cleanup.ts",
+  "test:dxf": "npx --yes tsx scripts/test-dxf.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },

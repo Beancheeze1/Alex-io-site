@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 
 import { Cavity, CavityShape, LayoutModel } from "./editor/layoutTypes";
 import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
+import type { DxfFaces } from "@/lib/dxf/parse";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT, SNAP_IN as RESIZE_SNAP_IN } from "./editor/InteractiveCanvas";
 import { usePageTracker } from "@/hooks/usePageTracker";
@@ -2131,6 +2132,15 @@ function LayoutEditorHostReady(props: {
     newWidthIn: number;
   } | null>(null);
 
+  // Step 37A2: a DXF with several inserts (e.g. the 3 pads of one box). The
+  // first is imported; this offers the others as extra layers or as a swap.
+  const [dxfInsertsNotice, setDxfInsertsNotice] = React.useState<{
+    inserts: DxfFaces[];
+    label: string;
+    shown: number; // which insert is in the imported layer
+  } | null>(null);
+  const [dxfWarnings, setDxfWarnings] = React.useState<string[]>([]);
+
 
   const {
     layout,
@@ -3642,6 +3652,8 @@ else nextYIn = snapInches(nextYIn);
       setUploadError(null);
       setStlUnitNotice(null);
       setFootprintChangeNotice(null);
+      setDxfInsertsNotice(null);
+      setDxfWarnings([]);
 
       const fd = new FormData();
       fd.append("file", file);
@@ -3757,6 +3769,15 @@ try {
           footprintChanged ? { oldLengthIn, oldWidthIn, newLengthIn, newWidthIn } : null,
         );
 
+        // Step 37A2: other inserts in the same DXF, and shapes that didn't close
+        const allInserts = Array.isArray(parsedFaces?.inserts) ? parsedFaces.inserts : [];
+        setDxfInsertsNotice(
+          allInserts.length > 1 ? { inserts: allInserts, label: importLabel || "DXF", shown: 0 } : null,
+        );
+        setDxfWarnings(
+          Array.isArray(parsedFaces?.warnings) ? parsedFaces.warnings.filter((w: unknown) => typeof w === "string") : [],
+        );
+
         setUploadError(null);
 
         // STL-only: surface the mm-vs-inches assumption instead of applying
@@ -3863,6 +3884,38 @@ return;
       };
     });
   }, [rescaleLayoutSeed, importLayerFromSeed, activeLayerId]);
+
+  // Step 37A2: seed for one insert of a multi-insert DXF (same chamfer rule
+  // as the upload above).
+  const seedForInsert = React.useCallback((faces: DxfFaces) => {
+    const s = facesJsonToLayoutSeed(faces);
+    if (s.block?.cornerStyle === "chamfer" && (s.block?.chamferIn ?? 0) > 0 && Array.isArray(s.stack)) {
+      s.stack = s.stack.map((layer) => ({ ...layer, cropCorners: true }));
+    }
+    return s;
+  }, []);
+
+  // Adds every insert not already shown as its own layer.
+  const handleAddDxfInserts = React.useCallback(() => {
+    const n = dxfInsertsNotice;
+    if (!n) return;
+    n.inserts.forEach((faces, i) => {
+      if (i === n.shown) return;
+      importLayerFromSeed(seedForInsert(faces), { mode: "append", label: `${n.label} (insert ${i + 1})` });
+    });
+    setDxfInsertsNotice(null);
+  }, [dxfInsertsNotice, importLayerFromSeed, seedForInsert]);
+
+  // Swaps the imported layer for another insert.
+  const handleUseDxfInsert = React.useCallback(
+    (i: number) => {
+      const n = dxfInsertsNotice;
+      if (!n || !n.inserts[i]) return;
+      importLayerFromSeed(seedForInsert(n.inserts[i]), { mode: "replace", targetLayerId: activeLayerId });
+      setDxfInsertsNotice({ ...n, shown: i });
+    },
+    [dxfInsertsNotice, importLayerFromSeed, seedForInsert, activeLayerId],
+  );
 
 /* ---------- Foam Advisor navigation ---------- */
 
@@ -5142,6 +5195,55 @@ const tenantCssVars = React.useMemo(() => {
                   </div>
                   {uploadStatus === "error" && uploadError ? (
                     <div className="mt-1 text-[11px] text-[var(--attention)]">{uploadError}</div>
+                  ) : null}
+                  {dxfInsertsNotice ? (
+                    <div
+                      className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--surface-subtle)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]"
+                      data-dxf-inserts={dxfInsertsNotice.inserts.length}
+                    >
+                      <span>
+                        {`This drawing has ${dxfInsertsNotice.inserts.length} inserts. Insert ${
+                          dxfInsertsNotice.shown + 1
+                        } is in the layer now.`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleAddDxfInserts}
+                        className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
+                        data-dxf-add-all
+                      >
+                        {`Add the other ${dxfInsertsNotice.inserts.length - 1} as layers`}
+                      </button>
+                      {dxfInsertsNotice.inserts.map((ins, i) =>
+                        i === dxfInsertsNotice.shown ? null : (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => handleUseDxfInsert(i)}
+                            className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
+                            data-dxf-use={i + 1}
+                          >
+                            {`Use insert ${i + 1} instead`}
+                            {ins?.insert?.lengthIn && ins?.insert?.widthIn
+                              ? ` (${Number(ins.insert.lengthIn).toFixed(2)} × ${Number(ins.insert.widthIn).toFixed(2)}")`
+                              : ""}
+                          </button>
+                        ),
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDxfInsertsNotice(null)}
+                        className="ml-auto text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        aria-label="Dismiss"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  ) : null}
+                  {dxfWarnings.length ? (
+                    <div className="mt-1 text-[11px] text-[var(--text-muted)]" data-dxf-warnings>
+                      {dxfWarnings.join(" ")}
+                    </div>
                   ) : null}
                   {stlUnitNotice ? (
                     <div
