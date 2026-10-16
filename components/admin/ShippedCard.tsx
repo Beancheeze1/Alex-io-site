@@ -105,7 +105,7 @@ export default function ShippedCard({ quoteNo }: { quoteNo: string }) {
 
   return (
     <div style={box} data-shipped-card={shipped ? "shipped" : "not_shipped"}>
-      <div style={{ fontWeight: 600, fontSize: 12, color: "var(--text-primary)", marginBottom: 4 }}>Shipping</div>
+      <div style={{ fontWeight: 600, fontSize: 12, color: "var(--text-primary)", marginBottom: 4 }}>Shipped / tracking</div>
       {shipped && !editing ? (
         <div data-shipped-info>
           Shipped {day(shipped.at)}

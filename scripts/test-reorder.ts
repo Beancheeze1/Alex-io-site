@@ -3,7 +3,7 @@
 // Step 34B: tests for the reorder and saved-address rules (app/lib/reorder-core.ts).
 // Run: npm run test:reorder   (= npx --yes tsx scripts/test-reorder.ts)
 
-import { addressKey, cleanReorderInput, itemQty, reorderFacts, savedAddresses } from "../app/lib/reorder-core";
+import { addressKey, cleanReorderInput, factsFoam, itemQty, reorderFacts, savedAddresses } from "../app/lib/reorder-core";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -74,6 +74,16 @@ check("foam row follows", itemQty({ qty: 250, isPackaging: false }, 250, 400), 4
 check("packaging row that matched follows", itemQty({ qty: 250, isPackaging: true }, 250, 400), 400);
 check("packaging row with its own qty stays", itemQty({ qty: 10, isPackaging: true }, 250, 400), 10);
 check("no foam: unchanged", itemQty({ qty: 5, isPackaging: false }, null, null), 5);
+
+// foam from facts only (never applied to a layout)
+const ff = factsFoam({ dims: "10x8x3", qty: 300, material_id: 4, material_name: "1.7# Black" });
+check("facts foam", ff && `${ff.sets}|${ff.label}`, "300|10 x 8 x 3 in, 1.7# Black");
+check("facts foam object dims", factsFoam({ dims: { L: 12.5, W: 10, H: 2 }, qty: 5, material_id: 1 })?.label, "12.5 x 10 x 2 in");
+check("facts foam boxes-only", factsFoam({ dims: "10x8x3", qty: 300, material_id: 4, pack_type: "boxes_only" }), null);
+check("facts foam no material", factsFoam({ dims: "10x8x3", qty: 300 }), null);
+check("facts foam no qty", factsFoam({ dims: "10x8x3", material_id: 4 }), null);
+check("facts foam bad dims", factsFoam({ dims: "big", qty: 3, material_id: 4 }), null);
+check("facts foam none", factsFoam(null), null);
 
 // addresses
 const a1 = { name: "Receiving", company: "Acme", line1: "100 Main St", line2: null, city: "Chicago", state: "IL", zip: "60601" };

@@ -94,6 +94,37 @@ export function reorderFacts(
   return out;
 }
 
+/**
+ * Foam a quote prices from its facts alone (a quote that was never applied
+ * to a layout: dims, qty and material in the facts, no foam lines), the same
+ * way the quote page does. Null for boxes-only quotes or incomplete facts.
+ */
+export function factsFoam(facts: Record<string, unknown> | null | undefined): { sets: number; label: string } | null {
+  const f = facts || {};
+  if (f.pack_type === "boxes_only") return null;
+  const qty = Number(f.qty);
+  const mat = Number(f.material_id);
+  if (!Number.isInteger(qty) || qty < 1 || !(mat > 0)) return null;
+  let L: number, W: number, H: number;
+  const d = f.dims;
+  if (d && typeof d === "object") {
+    const o = d as Record<string, unknown>;
+    L = Number(o.L ?? o.l ?? o.length);
+    W = Number(o.W ?? o.w ?? o.width);
+    H = Number(o.H ?? o.h ?? o.height);
+  } else {
+    const m = /([\d.]+)\s*[x×]\s*([\d.]+)\s*[x×]\s*([\d.]+)/i.exec(String(d ?? ""));
+    if (!m) return null;
+    L = Number(m[1]);
+    W = Number(m[2]);
+    H = Number(m[3]);
+  }
+  if (![L, W, H].every((n) => Number.isFinite(n) && n > 0)) return null;
+  const n = (v: number) => String(Number(v.toFixed(4)));
+  const name = typeof f.material_name === "string" && f.material_name.trim() ? `, ${f.material_name.trim()}` : "";
+  return { sets: qty, label: `${n(L)} x ${n(W)} x ${n(H)} in${name}` };
+}
+
 /** Packaging rows that followed the foam quantity keep following it. */
 export function itemQty(row: { qty: number; isPackaging: boolean }, oldFoam: number | null, newFoam: number | null): number {
   if (newFoam == null || oldFoam == null) return row.qty;

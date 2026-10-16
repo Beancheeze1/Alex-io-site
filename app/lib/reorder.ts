@@ -22,7 +22,7 @@ import { parsePrintSpec } from "@/lib/corrugated-price";
 import { repriceQuoteBoxes } from "@/app/lib/packaging-selection";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { loadProofs, quotePrinted } from "@/app/lib/proofs";
-import { itemQty, reorderFacts, type ReorderInput, type ReorderSource } from "@/app/lib/reorder-core";
+import { factsFoam, itemQty, reorderFacts, type ReorderInput, type ReorderSource } from "@/app/lib/reorder-core";
 
 type SrcQuote = { id: number; quote_no: string; tenant_id: number; locked: boolean | null };
 
@@ -81,7 +81,13 @@ export async function reorderInfo(quoteNo: string, tenantId: number): Promise<In
   const src = await srcQuote(quoteNo, tenantId);
   if (!src) return { ok: false, status: 404, error: "not_found", message: "Quote not found." };
   if (!src.locked) return { ok: false, status: 409, error: "NOT_RELEASED", message: "Only orders that went into production can be reordered." };
-  const [its, boxes, printed, proofs] = await Promise.all([items(src.id), boxRows(src.id), quotePrinted(src.id, src.quote_no), loadProofs(src.id, src.quote_no)]);
+  const [its, boxes, printed, proofs, facts] = await Promise.all([
+    items(src.id),
+    boxRows(src.id),
+    quotePrinted(src.id, src.quote_no),
+    loadProofs(src.id, src.quote_no),
+    loadFacts(src.quote_no).catch(() => ({}) as Record<string, unknown>),
+  ]);
   const primary = its.find((it) => !isLayer(it.notes) && !isPackaging(it.notes));
   const approved = proofs.filter((p) => p.status === "approved").sort((a, b) => b.version - a.version)[0];
   const info: ReorderInfo = {
@@ -91,7 +97,7 @@ export async function reorderInfo(quoteNo: string, tenantId: number): Promise<In
           sets: Number(primary.qty) || 1,
           label: `${num(primary.length_in)} x ${num(primary.width_in)} x ${num(primary.height_in)} in${primary.material_name ? `, ${primary.material_name}` : ""}`,
         }
-      : null,
+      : factsFoam(facts as Record<string, unknown>),
     boxes: boxes.map((b) => ({ id: Number(b.id), qty: Number(b.qty) || 1, label: b.description || b.sku || `Box line ${b.id}` })),
     printed,
     proof_version: approved ? approved.version : null,
@@ -123,7 +129,8 @@ export async function createReorder(args: {
   ]);
   const primary = srcItems.find((it) => !isLayer(it.notes) && !isPackaging(it.notes));
   const oldFoam = primary ? Number(primary.qty) || null : null;
-  const newFoam = primary ? args.input.foamQty : null;
+  // Foam from the facts alone (never applied to a layout) follows facts.qty.
+  const newFoam = primary || factsFoam(srcFacts as Record<string, unknown>) ? args.input.foamQty : null;
   const approved = args.input.artworkChanged ? undefined : proofs.filter((p) => p.status === "approved").sort((a, b) => b.version - a.version)[0];
   const boxQty = new Map(args.input.boxes.map((b) => [b.id, b.qty]));
   const newNo = await newUniqueQuoteNo(args.by === "staff" ? "R" : "A");

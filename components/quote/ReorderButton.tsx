@@ -121,7 +121,18 @@ export default function ReorderButton({
             if (e.target === e.currentTarget && !busy) setOpen(false);
           }}
         >
-          <div style={{ width: "100%", maxWidth: 520, background: "var(--surface-card)", color: "var(--text-primary)", borderRadius: 14, padding: 22, border: "1px solid var(--border)" }}>
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "var(--surface-card)",
+              color: "var(--text-primary)",
+              borderRadius: 14,
+              padding: 22,
+              border: "1px solid var(--border)",
+              textAlign: "left",
+            }}
+          >
             <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Reorder {quoteNo}</div>
             <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 14 }}>
               Makes a new quote with the same job at today&apos;s prices. You review and accept it as usual.

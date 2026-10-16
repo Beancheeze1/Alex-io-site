@@ -21,6 +21,7 @@ export default function PortalSignIn({
 }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(token ? null : "This sign-in link is missing its code. Ask for a new one.");
+  const [dead, setDead] = React.useState(false); // used / expired / invalid: only "Get a new link" is left
   const ordersHref = `/t/${encodeURIComponent(tenantSlug)}/orders`;
 
   async function signIn() {
@@ -37,6 +38,7 @@ export default function PortalSignIn({
         window.location.assign(ordersHref);
         return;
       }
+      if (res.status === 400 || res.status === 410) setDead(true);
       setError(
         res.status === 429
           ? "Too many attempts. Please wait a minute and try again."
@@ -69,7 +71,7 @@ export default function PortalSignIn({
           </a>
         </p>
       ) : null}
-      {token ? (
+      {token && !dead ? (
         <button
           type="button"
           onClick={() => void signIn()}
