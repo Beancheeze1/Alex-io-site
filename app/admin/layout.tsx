@@ -146,6 +146,9 @@ export default async function AdminLayout({ children }: Props) {
                 </Link>
 
                 <ReviewQueueLink />
+                <Link href="/admin/funnel" className="hover:text-[var(--text-primary)]">
+                  Funnel
+                </Link>
                 <Link href="/admin/spec-requests" className="hover:text-[var(--text-primary)]">
                   Spec requests
                 </Link>

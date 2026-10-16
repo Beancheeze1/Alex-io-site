@@ -18,6 +18,7 @@
   "test:dieline": "npx --yes tsx scripts/test-box-dieline.ts",
   "test:portal": "npx --yes tsx scripts/test-portal.ts",
   "test:reorder": "npx --yes tsx scripts/test-reorder.ts",
+  "test:funnel": "npx --yes tsx scripts/test-funnel.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },
