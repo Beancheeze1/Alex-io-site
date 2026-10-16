@@ -13,10 +13,13 @@
 //   - Validates quote_item belongs to quote
 //   - Allows deletion ONLY for included-layer rows (notes like "[LAYOUT-LAYER]")
 //   - Hard blocks primary foam rows
+// Step 37A: same rule as the box edits (buyerEditGuard): staff of the quote's
+// shop, or the buyer with the quote's edit grant (the email link). Nobody can
+// remove a layer from a released (locked) quote, staff included.
 
 import { NextRequest, NextResponse } from "next/server";
 import { q, one } from "@/lib/db";
-import { getCurrentUserFromRequest } from "@/lib/auth";
+import { buyerEditGuard } from "@/lib/quote-edit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +32,8 @@ type InBody = {
 type QuoteRow = {
   id: number;
   quote_no: string;
+  tenant_id: number | null;
+  locked: boolean | null;
 };
 
 type ItemRow = {
@@ -49,14 +54,6 @@ function isPrimaryFoamRow(item: ItemRow | null | undefined) {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUserFromRequest(req);
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: "UNAUTHENTICATED", message: "Login required." },
-        { status: 401 },
-      );
-    }
-
     let body: InBody;
     try {
       body = (await req.json()) as InBody;
@@ -98,13 +95,12 @@ export async function POST(req: NextRequest) {
 
     const quote = await one<QuoteRow>(
       `
-      SELECT id, quote_no
+      SELECT id, quote_no, tenant_id, COALESCE((to_jsonb(quotes) ->> 'locked')::boolean, false) AS locked
       FROM public."quotes"
       WHERE quote_no = $1
-        AND tenant_id = $2
       LIMIT 1
     `,
-      [quoteNo, user.tenant_id],
+      [quoteNo],
     );
 
     if (!quote) {
@@ -115,6 +111,20 @@ export async function POST(req: NextRequest) {
           message: `No quote found for quote_no ${quoteNo}.`,
         },
         { status: 404 },
+      );
+    }
+
+    const guard = await buyerEditGuard(req, quote, {
+      rateName: "layer-remove",
+      perMin: 30,
+      lockedMessage: "This quote has been released. Contact the shop to change it.",
+    });
+    if (guard) return guard;
+    // Staff pass the guard even on released quotes; layers still can't change then.
+    if (quote.locked) {
+      return NextResponse.json(
+        { ok: false, error: "QUOTE_LOCKED", message: "This quote has been released. Use Revise to change it." },
+        { status: 409 },
       );
     }
 

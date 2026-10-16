@@ -854,6 +854,9 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [processLines, setProcessLines] = React.useState<ProcessLine[]>([]);
   const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
   const [approval, setApproval] = React.useState<QuoteApprovalView | null>(null);
+  // Step 37A: who may change this quote from this page: staff, or the buyer with
+  // the edit link (server: approval.buyer_can_edit), and never once released.
+  // The edit controls below are hidden for everyone else (the APIs refuse them anyway).
   // Step 30: freight, the shop's freight options and the ship-to.
   const [freight, setFreight] = React.useState<FreightView | null>(null);
   const [freightOptions, setFreightOptions] = React.useState<FreightOptionsView | null>(null);
@@ -1183,7 +1186,13 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         });
 
         if (!res.ok) {
-          console.error("Failed to remove included layer:", await res.text().catch(() => ""));
+          const t = await res.text().catch(() => "");
+          console.error("Failed to remove included layer:", t);
+          // Step 37A: say why (no edit link / released quote), like the carton remove.
+          try {
+            const j = JSON.parse(t);
+            if (typeof j?.message === "string") alert(j.message);
+          } catch {}
           return;
         }
 
@@ -1617,6 +1626,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 };
 
   const effectivePackagingSubtotal = packagingSubtotal > 0 ? packagingSubtotal : derivedPackagingSubtotal;
+  const canEditQuote = !!approval?.buyer_can_edit && !quote?.locked; // Step 37A
 
   const effectiveGrandSubtotal = grandSubtotal > 0 ? grandSubtotal : foamSubtotal + effectivePackagingSubtotal;
   const effectivePrintingUpcharge = printingUpcharge > 0 ? printingUpcharge : 0;
@@ -3117,7 +3127,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                   </div>
                                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                                    {isIncludedLayer && (
+                                    {isIncludedLayer && canEditQuote && (
                                       <button
                                         type="button"
                                         onClick={() => handleRemoveIncludedLayer(item.id)}
@@ -3273,6 +3283,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   <div style={{ fontWeight: 500 }}>{mainLabel}</div>
                                   {subLabel && <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
+                                {canEditQuote ? (
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveCarton(rb.id)}
@@ -3291,6 +3302,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 >
                                   {isRemoving ? "Removing…" : "✕ Remove"}
                                 </button>
+                                ) : null}
                               </div>
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{dimsDisplay}</td>
@@ -3528,7 +3540,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "var(--text-primary)" }}>
                               View
                             </a>
-                            {!quote?.locked && (
+                            {canEditQuote && (
                               <button
                                 type="button"
                                 onClick={() => removeArtwork(a.id)}
@@ -3545,6 +3557,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
                   {quote?.locked ? (
                     <p style={{ color: "var(--text-muted)", fontSize: 12 }}>This quote is locked. Email any artwork changes to us.</p>
+                  ) : !canEditQuote ? (
+                    <p style={{ color: "var(--text-muted)", fontSize: 12 }}>To add artwork, open this quote from the link in your quote email.</p>
                   ) : (
                     <label
                       style={{
@@ -3622,7 +3636,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
                                 {isCurrent ? (
                                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
-                                ) : boxBreaksLocked ? null : (
+                                ) : boxBreaksLocked || !canEditQuote ? null : (
                                   <button
                                     type="button"
                                     onClick={() => switchToBoxBreak(b.qty, g.id)}
@@ -3714,7 +3728,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
                               {isCurrent ? (
                                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
-                              ) : boxBreaksLocked ? null : (
+                              ) : boxBreaksLocked || !canEditQuote ? null : (
                                 <button
                                   type="button"
                                   onClick={() => switchToBoxBreak(b.qty)}
@@ -3847,7 +3861,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
                               {isCurrent ? (
                                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
-                              ) : foamBreaksInfo.locked ? null : (
+                              ) : foamBreaksInfo.locked || !canEditQuote ? null : (
                                 <button
                                   type="button"
                                   onClick={() => switchToFoamBreak(b.qty)}
@@ -3926,7 +3940,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             fontWeight: 500,
                           }}
                         >
-                          Open layout editor
+                          {canEditQuote ? "Open layout editor" : "View layout"}
                         </a>
                       </div>
                     </div>

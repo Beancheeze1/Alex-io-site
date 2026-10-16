@@ -849,6 +849,9 @@ export default function LayoutPage({
   const [facesJson, setFacesJson] = React.useState<any | null>(null);
   const [seed, setSeed] = React.useState<LayoutModel | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
+  // Step 37A: a requested older layout package (layout_pkg_id) that couldn't be opened
+  const [pkgLoadError, setPkgLoadError] = React.useState<string | null>(null);
+  const [pkgLoadNote, setPkgLoadNote] = React.useState<string | null>(null);
   const [initialNotes, setInitialNotes] = React.useState<string>("");
   const [initialQty, setInitialQty] = React.useState<number | null>(null);
   const [initialMaterialId, setInitialMaterialId] =
@@ -1368,15 +1371,24 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
               `/api/quote/layout/packages/${requestedPkgId}?quote_no=${encodeURIComponent(quoteNoFromUrl.trim())}`,
               { cache: "no-store" },
             );
-            if (pkgRes.ok) {
-              const pkgJson = await pkgRes.json();
-              if (pkgJson.ok && pkgJson.package?.layout) {
-                overrideLayoutJson = pkgJson.package.layout as LayoutModel;
-                overrideLayoutNotes = (pkgJson.package.notes as string | null) ?? null;
+            const pkgJson = await pkgRes.json().catch(() => null);
+            if (pkgRes.ok && pkgJson?.ok && pkgJson.package?.layout) {
+              overrideLayoutJson = pkgJson.package.layout as LayoutModel;
+              overrideLayoutNotes = (pkgJson.package.notes as string | null) ?? null;
+              if (!cancelled) {
+                const when = pkgJson.package.createdAt ? new Date(pkgJson.package.createdAt).toLocaleString() : "";
+                setPkgLoadNote(
+                  `Opened saved layout package #${requestedPkgId}${when ? ` (${when})` : ""}. Apply saves it as the quote's new current layout.`,
+                );
               }
+            } else {
+              // Step 37A: say so instead of quietly showing the latest layout.
+              const why = pkgJson?.message || pkgJson?.error || `HTTP ${pkgRes.status}`;
+              if (!cancelled) setPkgLoadError(`Couldn't open layout package #${requestedPkgId} (${why}). Showing the current layout.`);
             }
           } catch (e) {
             console.warn("layout_pkg_id fetch failed, will use latest:", e);
+            if (!cancelled) setPkgLoadError(`Couldn't open layout package #${requestedPkgId}. Showing the current layout.`);
           }
         }
 
@@ -1487,7 +1499,8 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
           typeof window !== "undefined" &&
           new URLSearchParams(window.location.search).get("force_forge_seed") === "1";
 
-        if (json && json.ok && (forceForgeSeed || !dbLayout || !dbHasStack)) {
+        // Step 37A: a requested older package is never replaced by the uploaded-file seed.
+        if (json && json.ok && (forceForgeSeed || ((!dbLayout || !dbHasStack) && !overrideLayoutJson))) {
           try {
             const latestRes = await fetch(
               `/api/quote-attachments/latest?quote_no=${encodeURIComponent(
@@ -1645,13 +1658,14 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
         if (
           json &&
           json.ok &&
-          json.layoutPkg &&
-          json.layoutPkg.layout_json &&
+          (overrideLayoutJson || (json.layoutPkg && json.layoutPkg.layout_json)) &&
           !hasExplicitCavities &&
           !hasDimsFromUrl &&
           !hasCavitiesFromUrl
         ) {
-          const layoutFromDb = json.layoutPkg.layout_json as LayoutModel;
+          // Step 37A: the requested older package (layout_pkg_id) when there is one,
+          // even without a layer stack; else the latest.
+          const layoutFromDb = (overrideLayoutJson ?? json.layoutPkg.layout_json) as LayoutModel;
           const notesFromDb = dbLayoutNotes;
 
           if (!cancelled) {
@@ -1749,6 +1763,23 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
   }
 
   return (
+    <>
+    {pkgLoadError ? (
+      <div
+        role="alert"
+        data-pkg-load-error
+        style={{ margin: "8px 16px 0", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--attention-border)", background: "var(--attention-bg)", color: "var(--attention)", fontSize: 13 }}
+      >
+        {pkgLoadError}
+      </div>
+    ) : pkgLoadNote ? (
+      <div
+        data-pkg-load-note
+        style={{ margin: "8px 16px 0", padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface-card)", color: "var(--text-secondary)", fontSize: 13 }}
+      >
+        {pkgLoadNote}
+      </div>
+    ) : null}
     <LayoutEditorHost
       key={`seed-${seedVersion}`}
       quoteNo={quoteNo}
@@ -1766,6 +1797,7 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
       setUploadError={setUploadError}
       setFacesJson={setFacesJson}
     />
+    </>
   );
 }
 
@@ -3383,13 +3415,12 @@ else nextYIn = snapInches(nextYIn);
     });
   }, [selectedCavity, addCavity]);
 
+  // Step 37A: arrow-key nudge in Basic too (it was Advanced-only).
   React.useEffect(() => {
-    if (editorMode !== "advanced") return;
-
     const onKeyDown = (e: KeyboardEvent) => {
-      // Don’t steal keys while typing in inputs/textareas
+      // Don’t steal keys while typing in inputs/textareas/selects
       const tag = (e.target as any)?.tagName?.toLowerCase?.() || "";
-      if (tag === "input" || tag === "textarea" || (e.target as any)?.isContentEditable) return;
+      if (tag === "input" || tag === "textarea" || tag === "select" || (e.target as any)?.isContentEditable) return;
 
       if (!selectedCavity) return;
 
@@ -3412,7 +3443,7 @@ else nextYIn = snapInches(nextYIn);
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editorMode, selectedCavity, nudgeSelected]);
+  }, [selectedCavity, nudgeSelected]);
 
   const openFilePicker = () => {
     setUploadError(null);
@@ -3632,8 +3663,16 @@ else nextYIn = snapInches(nextYIn);
 
       const res = await fetch(url, { method: "POST", body: fd });
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Upload failed");
+        // Step 37A: show the server's message (e.g. no edit link / released
+        // quote), not the raw JSON.
+        const text = await res.text().catch(() => "");
+        let msg = text || "Upload failed";
+        try {
+          const j = JSON.parse(text);
+          msg = j?.message || (typeof j?.detail === "string" ? j.detail : null) || j?.error || msg;
+        } catch {}
+        if (res.status === 403 || res.status === 409) alert(msg);
+        throw new Error(msg);
       }
 
       const json = await res.json().catch(() => null);
@@ -3737,15 +3776,19 @@ try {
 
         console.log("Converter file loaded successfully!");
       } else {
+        setUploadStatus("error"); // Step 37A: errors only show in the "error" state
         setUploadError(`Failed to download converted file: ${facesDownload.status}`);
       }
     } else {
+      setUploadStatus("error");
       setUploadError("Converter output not found. Please try again.");
     }
   } else {
+    setUploadStatus("error");
     setUploadError(`Failed to fetch converter output: ${latestRes.status}`);
   }
 } catch (err: any) {
+  setUploadStatus("error");
   setUploadError(`Error loading converter output: ${String(err?.message || err)}`);
   console.error("Error loading faces after upload:", err);
 }
@@ -5798,6 +5841,7 @@ const tenantCssVars = React.useMemo(() => {
                   Drag cavities to adjust placement. Use the square handle at the bottom-right of each cavity to resize.
                   Cavities are placed inside a 0.5&quot; wall on all sides. When a cavity is selected, the nearest
                   horizontal and vertical gaps to other cavities and to the block edges are dimensioned.
+                  Arrow keys nudge the selected cavity 1/8&quot; (Shift = 1&quot;).
                 </p>
 
                 {/* canvas wrapper */}
