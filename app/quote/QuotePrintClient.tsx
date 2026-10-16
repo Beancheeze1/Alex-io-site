@@ -141,6 +141,8 @@ type ApiOk = {
   // Step 25: things the shop will check before confirming
   reviewFlags?: { code: string; message: string }[];
   grandTotal: number;
+  // Step 37G: the shop's name and logo for the header
+  shop?: { name?: string | null; logoUrl?: string | null } | null;
   // Step 28: estimate -> accepted -> confirmed, expiry, lead time
   approval?: QuoteApprovalView | null;
   // Step 30: freight (in grandTotal when prepaid & add), options, ship-to
@@ -228,6 +230,29 @@ function formatDimPart(raw: any): string {
 
 function formatDims(l: any, w: any, h: any): string {
   return [l, w, h].map(formatDimPart).join(" x ");
+}
+
+// Step 37G: one label / amount row in the quote summary card.
+function SummaryRow({ label, value, strong }: { label: React.ReactNode; value: React.ReactNode; strong?: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        gap: 12,
+        padding: strong ? "8px 0 0" : "3px 0",
+        marginTop: strong ? 6 : 0,
+        borderTop: strong ? "1px solid var(--border)" : undefined,
+        fontSize: strong ? 15 : 13,
+      }}
+    >
+      <span style={{ color: strong ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: strong ? 600 : 400 }}>{label}</span>
+      <span style={{ color: "var(--text-primary)", fontWeight: strong ? 700 : 500, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+        {value}
+      </span>
+    </div>
+  );
 }
 
 function formatUsd(value: number | null | undefined): string {
@@ -854,6 +879,13 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [processLines, setProcessLines] = React.useState<ProcessLine[]>([]);
   const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
   const [approval, setApproval] = React.useState<QuoteApprovalView | null>(null);
+  // Step 37G: shop branding for the header and the browser tab.
+  const [shop, setShop] = React.useState<{ name: string | null; logoUrl: string | null } | null>(null);
+  const [logoFailed, setLogoFailed] = React.useState(false);
+  React.useEffect(() => {
+    if (typeof document === "undefined" || !quote?.quote_no) return;
+    document.title = `Quote ${quote.quote_no}${shop?.name ? ` | ${shop.name}` : ""}`;
+  }, [quote?.quote_no, shop?.name]);
   // Step 37A: who may change this quote from this page: staff, or the buyer with
   // the edit link (server: approval.buyer_can_edit), and never once released.
   // The edit controls below are hidden for everyone else (the APIs refuse them anyway).
@@ -1105,6 +1137,14 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
         setProcessLines(Array.isArray(asOk.processLines) ? asOk.processLines : []);
         setReviewFlags(Array.isArray(asOk.reviewFlags) ? asOk.reviewFlags : []);
         setApproval(asOk.approval && typeof asOk.approval === "object" ? asOk.approval : null);
+        setShop(
+          asOk.shop && typeof asOk.shop === "object"
+            ? {
+                name: typeof asOk.shop.name === "string" && asOk.shop.name.trim() ? asOk.shop.name.trim() : null,
+                logoUrl: typeof asOk.shop.logoUrl === "string" && /^https?:\/\//i.test(asOk.shop.logoUrl) ? asOk.shop.logoUrl : null,
+              }
+            : null,
+        );
         setFreight(asOk.freight && typeof asOk.freight === "object" ? asOk.freight : null);
         setFreightOptions(asOk.freightOptions && typeof asOk.freightOptions === "object" ? asOk.freightOptions : null);
         setShipTo(asOk.shipTo && typeof asOk.shipTo === "object" ? asOk.shipTo : null);
@@ -1835,6 +1875,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
   return (
     <div
+      className="qp-page"
       style={{
         fontFamily: "Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
         background: "var(--surface-page)",
@@ -1843,8 +1884,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
       }}
     >
       <div
+        className="qp-shell"
         style={{
-          maxWidth: "960px",
+          maxWidth: embedded ? "960px" : "1180px", // Step 37G: room for the summary column
           margin: "0 auto",
           background: "var(--surface-card)",
           borderRadius: "24px",
@@ -2391,8 +2433,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 </div>
               </div>
             ) : (
-              /* ── Real quote header (unchanged) ── */
+              /* ── Real quote header (Step 37G: shop branding) ── */
               <div
+                className="qp-head"
                 style={{
                   margin: "-24px -24px 20px -24px",
                   padding: "16px 24px",
@@ -2427,13 +2470,24 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       ← Back to quotes list
                     </a>
                   ) : null}
-                  <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 4 }}>
-                    Powered by Alex-IO
+                  {/* Step 37G: the shop's logo (or name) instead of "Powered by Alex-IO /
+                      Interactive quote viewer"; the quote number is the title. */}
+                  <div style={{ marginBottom: 8, minHeight: 20 }} data-quote-brand>
+                    {shop?.logoUrl && !logoFailed ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- the shop's logo from its own https address
+                      <img
+                        src={shop.logoUrl}
+                        alt={shop.name || "Shop logo"}
+                        onError={() => setLogoFailed(true)}
+                        style={{ maxHeight: 40, maxWidth: 200, display: "block" }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.04em", color: "var(--text-primary)" }}>
+                        {shop?.name || "Your quote"}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ margin: 0, fontSize: 20, fontWeight: 500, letterSpacing: "0.02em", color: "var(--text-primary)" }}>
-                    Interactive quote viewer
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+                  <div style={{ margin: 0, fontSize: 20, fontWeight: 500, letterSpacing: "0.01em", color: "var(--text-primary)" }} data-quote-title>
                     Quote {quote.quote_no}
                     {displayRevision ? (
                       <span
@@ -2444,6 +2498,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           borderRadius: 999,
                           background: "var(--surface-card)",
                           border: "1px solid var(--border)",
+                          verticalAlign: "middle",
                           fontSize: 11,
                           fontWeight: 500,
                           letterSpacing: "0.06em",
@@ -2461,6 +2516,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           borderRadius: 999,
                           background: "var(--attention-bg)",
                           border: "1px solid var(--attention-border)",
+                          verticalAlign: "middle",
                           fontSize: 11,
                           fontWeight: 600,
                           letterSpacing: "0.06em",
@@ -2471,12 +2527,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       </span>
                     ) : null}
                     {quote.po_number ? (
-                      <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>
+                      <span style={{ marginLeft: 8, fontSize: 13, color: "var(--text-muted)" }}>
                         · PO {quote.po_number}
                       </span>
                     ) : null}
                   </div>
-                  <p style={{ margin: "2px 0 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+                  <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
                     {quote.customer_name}
                     {quote.company ? <> • {quote.company}</> : null}
                     {quote.email ? <> • {quote.email}</> : null}
@@ -2487,7 +2543,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 <div style={{ textAlign: "right", fontSize: 12, color: "var(--text-secondary)" }}>
                   {(() => {
                     const pill = getStatusPill(quote.status);
-                    return <div style={pill.style}>{pill.label}</div>;
+                    // Step 37G: buyers see "Quoted", not the internal "Applied"
+                    const label = !isStaffView && pill.label === "Applied" ? "Quoted" : pill.label;
+                    return <div style={pill.style}>{label}</div>;
                   })()}
                   <p style={{ margin: "4px 0 0 0", fontSize: 11, color: "var(--text-muted)" }}>
                     Created: {new Date(quote.created_at).toLocaleString()}
@@ -2519,34 +2577,6 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               </div>
             ))}
 
-            {/* Quote total summary — now placed under the gradient header */}
-            {primaryItem && (
-              <div style={{
-                marginBottom: 20,
-                padding: "14px 18px",
-                borderRadius: 12,
-                background: "var(--surface-subtle)",
-                border: "1px solid var(--border)",
-              }}>
-                <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
-                  Quote estimate
-                </div>
-                {anyPricing ? (
-                  <>
-                    <div style={{ fontSize: 28, fontWeight: 600, color: "var(--text-primary)", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
-                      {formatUsd(planningTotal > 0 ? planningTotal : effectiveGrandTotal > 0 ? effectiveGrandTotal : breakdownSubtotal)}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                      {breakdownUnitPrice != null ? `${formatUsd(breakdownUnitPrice)}/pc · ` : ""}
-                      Qty {primaryItem.qty.toLocaleString()}
-                      {shippingEstimate > 0 ? " · incl. est. shipping" : ""}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 14, color: "var(--text-muted)" }}>Pricing pending — see full breakdown below</div>
-                )}
-              </div>
-            )}
 
             {/* Demo watermark banner — only shown for Q-DEMO- quotes */}
             {isDemo && (
@@ -2981,6 +3011,24 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               </div>
             ))}
 
+            {/* Step 37G: two columns on wide screens — details on the left, the
+                summary (total, proof, shipping, accept) on the right. One column
+                on phones and when printed. */}
+            <style>{`
+              .qp-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+              .qp-main, .qp-aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+              .qp-main > *, .qp-aside > * { margin-top: 0 !important; margin-bottom: 0 !important; }
+              @media (min-width: 1024px) { .qp-grid { grid-template-columns: minmax(0, 1fr) 340px; } }
+              @media print { .qp-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+              @media (max-width: 640px) {
+                .qp-page { padding: 8px !important; }
+                .qp-shell { padding: 16px 14px 24px !important; }
+                .qp-head { margin: -16px -14px 16px -14px !important; flex-wrap: wrap; }
+                .qp-main > div { overflow-x: auto; }
+              }
+            `}</style>
+            <div className="qp-grid">
+            <div className="qp-main">
             {/* LINE ITEMS CARD (foam items + layers + carton selections) */}
             <div style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 24 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Line items</div>
@@ -3268,18 +3316,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                                 <div>
-                                  <div
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: 600,
-                                      textTransform: "uppercase",
-                                      letterSpacing: "0.08em",
-                                      color: "var(--text-secondary)",
-                                      marginBottom: 2,
-                                    }}
-                                  >
-                                    Packaging – Carton selection
-                                  </div>
+                                  {/* Step 37G: the "Packaging" row above already labels these */}
                                   <div style={{ fontWeight: 500 }}>{mainLabel}</div>
                                   {subLabel && <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
@@ -3306,8 +3343,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               </div>
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{dimsDisplay}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{qty}</td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(unitPrice)}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{Number(qty).toLocaleString("en-US")}</td>
+                            {/* Step 37G: box prices to 4 places, so unit x qty matches the line total */}
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {unitPrice == null ? "—" : `$${unitPrice.toFixed(4)}`}
+                            </td>
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(lineTotal)}</td>
                           </tr>
                         );
@@ -3430,74 +3470,6 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </div>
                   )}
 
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{isBoxesOnly ? "Total boxes" : "Total quantity"}</div>
-                      <div style={{ fontSize: 18, fontWeight: 600 }}>{overallQty}</div>
-                      {anyPricing && (
-                        <>
-                          {/* Foam subtotal (not shown on boxes-only quotes) */}
-                          {!isBoxesOnly && (
-                            <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Foam subtotal</div>
-                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(foamSubtotal)}</div>
-                            </>
-                          )}
-
-                          {/* Packaging subtotal. Legacy quotes fold the print upcharge in here;
-                              per-color quotes list the one-time plates on their own line below
-                              instead, so they're not counted twice on screen. */}
-                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
-                            <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                                {isBoxesOnly ? "Boxes subtotal" : "Packaging subtotal"}
-                              </div>
-                              <div style={{ fontSize: 14, fontWeight: 600 }}>
-                                {formatUsd(effectivePackagingSubtotal + (printModel === "per_color" ? 0 : effectivePrintingUpcharge))}
-                              </div>
-                            </>
-                          )}
-
-                          {/* Printing line in summary */}
-                          {effectivePrintingUpcharge > 0 && (
-                            <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                                {printModel === "per_color" ? "Printing plates (one time)" : "Printing upcharge"}
-                              </div>
-                              <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectivePrintingUpcharge)}</div>
-                            </>
-                          )}
-
-                          {/* Cutting / lamination lines in summary (Step 23) */}
-                          {processLines.length > 0
-                            ? processLines.map((l, i) => (
-                                <React.Fragment key={`proc-sum-${i}`}>
-                                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>{l.label}</div>
-                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(l.amount)}</div>
-                                </React.Fragment>
-                              ))
-                            : effectiveDieCuttingCharge > 0 && (
-                                <>
-                                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>Die-cutting charge</div>
-                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{formatUsd(effectiveDieCuttingCharge)}</div>
-                                </>
-                              )}
-
-                          {/* Grand subtotal — show when packaging, printing, or die-cutting is present */}
-                          {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0 || effectiveDieCuttingCharge > 0) && (
-                            <>
-                              <div style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-                                {isBoxesOnly
-                                  ? `Estimated subtotal (boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${effectiveDieCuttingCharge > 0 ? " + cutting die" : ""}${freightLine ? " + freight" : ""})`
-                                  : `Estimated subtotal (foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""}${freightLine ? " + freight" : ""})`}
-                              </div>
-                              <div style={{ fontSize: 16, fontWeight: 600 }}>{formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}</div>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
                 </>
               )}
             </div>
@@ -3771,22 +3743,6 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               </div>
             )}
 
-            {/* Step 28: estimate / accepted / confirmed, with Accept for the buyer */}
-            {/* Step 31: artwork proof (approve / request changes) */}
-            {quoteNo ? <ProofCard quoteNo={quoteNo} canEdit={!!approval?.buyer_can_edit && !quote?.locked} /> : null}
-
-            {/* Step 30: shipping (freight terms, ship-to, freight) */}
-            {quoteNo ? (
-              <ShipToCard
-                quoteNo={quoteNo}
-                freight={freight}
-                options={freightOptions}
-                shipTo={shipTo}
-                canEdit={!!approval?.buyer_can_edit && !quote?.locked}
-              />
-            ) : null}
-
-            {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} /> : null}
 
             {/* Step 25: things the shop will check before confirming */}
             {reviewFlags.length > 0 && (
@@ -3901,7 +3857,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
               </div>
             )}
 
-            {/* Foam layout package section */}
+            {/* Foam layout package section (Step 37G: not on boxes-only quotes) */}
+            {!isBoxesOnly && (
             <div style={{ marginTop: 4 }}>
               <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Foam layout package</div>
 
@@ -4234,6 +4191,108 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 )}
               </div>
             </div>
+
+            )}
+            </div>
+            {/* end .qp-main */}
+
+            <aside className="qp-aside">
+                    {/* Quote total (foam quotes) — Step 37G: moved into the summary column */}
+                {primaryItem && (
+                  <div style={{
+                    padding: "14px 18px",
+                    borderRadius: 12,
+                    background: "var(--surface-subtle)",
+                    border: "1px solid var(--border)",
+                  }}>
+                    <div style={{ fontSize: 10, fontWeight: 500, color: "var(--text-muted)", letterSpacing: "0.10em", textTransform: "uppercase", marginBottom: 4 }}>
+                      Quote estimate
+                    </div>
+                    {anyPricing ? (
+                      <>
+                        <div style={{ fontSize: 28, fontWeight: 600, color: "var(--text-primary)", letterSpacing: "-0.02em", lineHeight: 1.1 }}>
+                          {formatUsd(planningTotal > 0 ? planningTotal : effectiveGrandTotal > 0 ? effectiveGrandTotal : breakdownSubtotal)}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                          {breakdownUnitPrice != null ? `${formatUsd(breakdownUnitPrice)}/pc · ` : ""}
+                          Qty {primaryItem.qty.toLocaleString()}
+                          {shippingEstimate > 0 ? " · incl. est. shipping" : ""}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 14, color: "var(--text-muted)" }}>Pricing pending — see full breakdown below</div>
+                    )}
+                  </div>
+                )}
+                {/* Step 37G: quote summary (moved out of the line items card) */}
+                <div style={{ ...cardBase, background: "var(--surface-card)" }} data-quote-summary>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>Summary</div>
+                  <SummaryRow label={isBoxesOnly ? "Total boxes" : "Total quantity"} value={Number(overallQty).toLocaleString("en-US")} />
+                  {anyPricing && (
+                    <>
+                      {/* Foam subtotal (not shown on boxes-only quotes) */}
+                      {!isBoxesOnly && <SummaryRow label="Foam subtotal" value={formatUsd(foamSubtotal)} />}
+
+                      {/* Packaging subtotal. Legacy quotes fold the print upcharge in here;
+                          per-color quotes list the one-time plates on their own line below
+                          instead, so they're not counted twice on screen. */}
+                      {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
+                        <SummaryRow
+                          label={isBoxesOnly ? "Boxes" : "Packaging"}
+                          value={formatUsd(effectivePackagingSubtotal + (printModel === "per_color" ? 0 : effectivePrintingUpcharge))}
+                        />
+                      )}
+
+                      {/* Printing line */}
+                      {effectivePrintingUpcharge > 0 && (
+                        <SummaryRow
+                          label={printModel === "per_color" ? "Printing plates (one time)" : "Printing upcharge"}
+                          value={formatUsd(effectivePrintingUpcharge)}
+                        />
+                      )}
+
+                      {/* Cutting / lamination lines (Step 23) */}
+                      {processLines.length > 0
+                        ? processLines.map((l, i) => <SummaryRow key={`proc-sum-${i}`} label={l.label} value={formatUsd(l.amount)} />)
+                        : effectiveDieCuttingCharge > 0 && <SummaryRow label="Die-cutting charge" value={formatUsd(effectiveDieCuttingCharge)} />}
+
+                      {/* Total — when packaging, printing, or die-cutting is present */}
+                      {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0 || effectiveDieCuttingCharge > 0) && (
+                        <>
+                          <SummaryRow
+                            strong
+                            label="Estimated total"
+                            value={formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}
+                          />
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                            {isBoxesOnly
+                              ? `Boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${effectiveDieCuttingCharge > 0 ? " + cutting die" : ""}${freightLine ? " + freight" : ""}`
+                              : `Foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""}${freightLine ? " + freight" : ""}`}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+                {/* Step 28: estimate / accepted / confirmed, with Accept for the buyer */}
+                {/* Step 31: artwork proof (approve / request changes) */}
+                {quoteNo ? <ProofCard quoteNo={quoteNo} canEdit={!!approval?.buyer_can_edit && !quote?.locked} /> : null}
+
+                {/* Step 30: shipping (freight terms, ship-to, freight) */}
+                {quoteNo ? (
+                  <ShipToCard
+                    quoteNo={quoteNo}
+                    freight={freight}
+                    options={freightOptions}
+                    shipTo={shipTo}
+                    canEdit={!!approval?.buyer_can_edit && !quote?.locked}
+                  />
+                ) : null}
+
+                {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} /> : null}
+            </aside>
+            </div>
+            {/* end .qp-grid */}
 
             <p style={{ marginTop: 24, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
               This print view mirrors the core specs of your emailed quote. Actual charges may differ if specs or

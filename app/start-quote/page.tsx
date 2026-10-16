@@ -30,12 +30,17 @@ export default function StartQuotePage() {
 
         document.documentElement.style.setProperty("--tenant-primary", primary);
         document.documentElement.style.setProperty("--tenant-secondary", secondary);
+
+        // Step 37G: the browser tab names the shop, not Alex-IO's marketing title.
+        const brand = typeof data.theme_json.brandName === "string" ? data.theme_json.brandName.trim() : "";
+        if (brand) document.title = `Get a quote | ${brand}`;
       })
       .catch(() => {});
   }, [sp]);
 
   return (
-    <div className="min-h-screen bg-[#070A12]">
+    // Step 37G: light page behind the form (was near-black), matching the shop page.
+    <div className="min-h-screen bg-[var(--surface-page)]">
       {/* Subtle background glow to match the rest of the app vibe */}
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute left-1/2 top-[-140px] h-[420px] w-[720px] -translate-x-1/2 rounded-full bg-[color:color-mix(in_srgb,var(--tenant-secondary)_12%,transparent)] blur-3xl" />
@@ -46,7 +51,7 @@ export default function StartQuotePage() {
           className="absolute inset-0 opacity-[0.10]"
           style={{
             backgroundImage:
-              "linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)",
+              "linear-gradient(to right, rgba(0,0,0,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.05) 1px, transparent 1px)",
             backgroundSize: "72px 72px",
             backgroundPosition: "0 0",
           }}

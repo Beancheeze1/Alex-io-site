@@ -65,6 +65,7 @@ type WidgetFacts = {
   printColorCount?: "1" | "2" | "3" | "4" | null;
   printColors?: ("spot" | "flood")[] | null;
   printSides?: "1" | "2" | null;
+  boardGrade?: string | null; // Step 37G: "32 ECT C", "200#"...
 };
 
 type Msg = {
@@ -167,6 +168,7 @@ function buildPrefillPayload(facts: WidgetFacts) {
       w: facts.boxW ?? "",
       d: facts.boxD ?? "",
       style: facts.boxStyle ?? "",
+      grade: facts.boardGrade ?? "",
     },
     print: {
       colors: Array.isArray(facts.printColors) ? facts.printColors : [],
@@ -193,6 +195,7 @@ function summarizeBoxFacts(facts: WidgetFacts): string[] {
     `Box: ${size}`,
     `Style: ${style}`,
     `Quantity: ${facts.qty ? facts.qty : "(qty not set)"}`,
+    facts.boardGrade ? `Board grade: ${facts.boardGrade}` : null,
     `Printing: ${printing}`,
     facts.customerName ? `Name: ${facts.customerName}` : null,
     facts.customerEmail ? `Email: ${facts.customerEmail}` : null,

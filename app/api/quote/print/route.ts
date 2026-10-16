@@ -38,6 +38,7 @@ import { foamChargeLines, latestLayoutJson, quoteFoamGeometry, quoteReviewFlags 
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { safeUrl } from "@/lib/tenant-page";
 import { buyerMayEdit } from "@/lib/quote-edit";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { buyerCanAccept, computeApproval } from "@/app/lib/quote-approval-core";
@@ -854,6 +855,18 @@ export async function GET(req: NextRequest) {
     const buyerCanEdit = isStaffCaller || buyerMayEdit(req, String(quoteNo));
     const canAccept = buyerCanEdit && buyerCanAccept(approval, !!(quote as { locked?: boolean | null }).locked);
 
+    // Step 37G: the shop's name and logo for the quote page header.
+    const shopRow = await one<{ name: string | null; theme_json: Record<string, unknown> | null }>(
+      `SELECT name, theme_json FROM public.tenants WHERE id = $1`,
+      [tenantId],
+    ).catch(() => null);
+    const shopTheme = (shopRow?.theme_json || {}) as Record<string, unknown>;
+    const shopBrand = typeof shopTheme.brandName === "string" ? shopTheme.brandName.trim() : "";
+    const shop = {
+      name: shopBrand || String(shopRow?.name || "").trim() || null,
+      logoUrl: safeUrl(shopTheme.logoUrl) || null,
+    };
+
     const factsObj = (facts || {}) as Record<string, unknown>;
     const factsOut = isStaffCaller
       ? factsObj
@@ -915,6 +928,7 @@ export async function GET(req: NextRequest) {
       customerBoxDims: customerBox ?? null,
       facts: factsOut,
       salesRepEmail,
+      shop,
     });
   } catch (err) {
     console.error(err);

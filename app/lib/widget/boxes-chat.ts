@@ -6,9 +6,12 @@
 //
 // Collects one box size: inside L x W x D (inches), style (RSC or mailer),
 // quantity, printing (plain, or 1-4 colors with spot/flood for each color and
-// one or two sides), then name and email. The widget hands the facts to Start
+// one or two sides), then name and email. Step 37G: the board grade too, when
+// the buyer says one ("32 ECT", "200#", "double wall"; optional). The widget hands the facts to Start
 // Quote (Boxes only, review step), where the buyer checks them and can add
 // compare quantities, artwork or more sizes before getting the price.
+
+import { parseGradeText } from "@/lib/corrugated/grade-match";
 
 export type BoxStyle = "rsc" | "mailer";
 export type Coverage = "spot" | "flood";
@@ -24,6 +27,8 @@ export type BoxChatFacts = {
   printColorCount?: "1" | "2" | "3" | "4" | null;
   printColors?: Coverage[] | null;
   printSides?: "1" | "2" | null;
+  /** Step 37G: board grade in the buyer's words, tidied ("32 ECT C"); optional. */
+  boardGrade?: string | null;
   customerName?: string | null;
   customerEmail?: string | null;
   notes?: string | null;
@@ -177,7 +182,10 @@ export function extractBoxFacts(userText: string, f: BoxChatFacts): Partial<BoxC
     // "500 12x10x8 boxes": one other whole number besides the size is the quantity.
     const rest = t
       .replace(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/gi, " ")
-      .replace(/\b\d+\s*(?:colou?rs?|sides?|in(?:ch(?:es)?)?|")/gi, " ");
+      .replace(/\b\d+\s*(?:colou?rs?|sides?|in(?:ch(?:es)?)?|")/gi, " ")
+      // Step 37G: a board grade ("32 ECT", "200#") isn't a quantity
+      .replace(/\b\d{2,3}\s*-?\s*ect\b/gi, " ")
+      .replace(/\b\d{3}\s*(?:#|lbs?\b)/gi, " ");
     const nums = rest.match(/(?<![\d.])\d[\d,]*(?![\d.])/g) || [];
     if (nums.length === 1 && BOX_WORDS.test(t) && Number(nums[0].replace(/,/g, "")) > 0) next.qty = nums[0].replace(/,/g, "");
   }
@@ -211,6 +219,10 @@ export function extractBoxFacts(userText: string, f: BoxChatFacts): Partial<BoxC
       }
     }
   }
+
+  // Step 37G: board grade ("32 ECT", "44 ECT BC", "200#", "double wall")
+  const grade = parseGradeText(t);
+  if (grade) next.boardGrade = grade.label;
 
   if (/\b(two|2|both)\s*sides?\b/i.test(t)) next.printSides = "2";
   else if (/\b(one|1|single)\s*sides?\b/i.test(t)) next.printSides = "1";
@@ -248,7 +260,7 @@ function normalize(f: BoxChatFacts): BoxChatFacts {
 
 const PRESERVE: (keyof BoxChatFacts)[] = [
   "boxL", "boxW", "boxD", "boxStyle", "qty", "printed", "printColorCount", "printColors", "printSides",
-  "customerName", "customerEmail", "notes",
+  "customerName", "customerEmail", "notes", "boardGrade",
 ];
 
 async function callOpenAIBoxes(args: {
@@ -279,8 +291,11 @@ async function callOpenAIBoxes(args: {
     "- printColors: one entry per color, each 'spot' (text, lines, logos) or 'flood' (large solid areas), length = printColorCount. " +
     "'both spot' with 2 colors -> ['spot','spot']; '1 spot 1 flood' -> ['spot','flood']. Leave null until they answer.\n" +
     "- printSides: '1' (one side) or '2' (two sides).\n" +
+    "- boardGrade: the board grade if they say one, short form: '32 ECT', '44 ECT C', '48 ECT BC', '200#', 'double wall'. " +
+    "Optional: never ask for it; leave null when not mentioned (the shop recommends one).\n" +
     "- customerName, customerEmail.\n" +
-    "- notes: anything else important they say (e.g. 'need by March', 'kraft color').\n" +
+    "- notes: anything else important they say, including ink colors ('black ink'), " +
+    "kraft or white board, and timing ('need by March'). Don't repeat the board grade here.\n" +
     "When printed is false, leave printColorCount, printColors and printSides null.\n" +
     "Set done=true only when every field above (except notes) is known; then invite them to open their quote to check it and get the price.";
 
@@ -311,7 +326,7 @@ async function callOpenAIBoxes(args: {
         additionalProperties: false,
         required: [
           "boxL", "boxW", "boxD", "boxStyle", "qty", "printed", "printColorCount", "printColors", "printSides",
-          "customerName", "customerEmail", "notes",
+          "boardGrade", "customerName", "customerEmail", "notes",
         ],
         properties: {
           boxL: { type: ["string", "null"] },
@@ -323,6 +338,7 @@ async function callOpenAIBoxes(args: {
           printColorCount: nullable({ type: "string", enum: ["1", "2", "3", "4"] }),
           printColors: nullable({ type: "array", items: { type: "string", enum: ["spot", "flood"] }, maxItems: 4 }),
           printSides: nullable({ type: "string", enum: ["1", "2"] }),
+          boardGrade: { type: ["string", "null"] },
           customerName: { type: ["string", "null"] },
           customerEmail: { type: ["string", "null"] },
           notes: { type: ["string", "null"] },

@@ -24,6 +24,7 @@ import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
 import { QUOTE_TYPE_LABELS } from "@/lib/quote-types";
 import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } from "@/lib/box-styles";
+import { matchGrade } from "@/lib/corrugated/grade-match";
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -400,6 +401,8 @@ export default function StartQuoteModal({
   type GradeOption = { id: number; name: string; flute: string; ect_label: string; is_default: boolean };
   const [boxGrades, setBoxGrades] = React.useState<GradeOption[]>([]);
   const [boxGradeId, setBoxGradeId] = React.useState<string>((searchParams.get("box_grade") || "").trim());
+  // Step 37G: the board grade the buyer named in the chat, waiting for the shop's grades to load.
+  const [pendingGrade, setPendingGrade] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (quoteType !== "complete_pack" && quoteType !== "boxes_only") return;
     let cancelled = false;
@@ -415,6 +418,18 @@ export default function StartQuoteModal({
       cancelled = true;
     };
   }, [quoteType, searchParams]);
+  // Step 37G: pick the shop grade the buyer named in the chat; if the shop has
+  // no match, keep their words in the notes so the shop sees them.
+  React.useEffect(() => {
+    if (!pendingGrade || !boxGrades.length) return;
+    const id = matchGrade(pendingGrade, boxGrades);
+    if (id != null) setBoxGradeId(String(id));
+    else {
+      const line = `Board grade asked for: ${pendingGrade}`;
+      setCustomerNotes((n) => (n.includes(line) ? n : [n.trim(), line].filter(Boolean).join("\n")));
+    }
+    setPendingGrade(null);
+  }, [pendingGrade, boxGrades]);
   // Step 27: every custom boxes-only style is engine-priced with a grade;
   // foam + box keeps the grade picker for RSC only (as before).
   const customRscBox = !prefillPackagingSku.trim() && (quoteType === "boxes_only" || boxStyle === "rsc");
@@ -485,6 +500,11 @@ export default function StartQuoteModal({
       if (typeof prefillData.customerEmail === "string" && prefillData.customerEmail.trim()) {
         setBoEmail(prefillData.customerEmail.trim());
       }
+      // Step 37G: the chat's notes, and its board grade (matched once the shop's grades load).
+      if (typeof prefillData.notes === "string" && prefillData.notes.trim()) {
+        setCustomerNotes(prefillData.notes.trim());
+      }
+      if (typeof b.grade === "string" && b.grade.trim()) setPendingGrade(b.grade.trim());
       prefillStepRef.current = { type: "boxes_only", step: "rev", done: ["type", "box"] };
       if (quoteType === "boxes_only") {
         // Step 14: already Boxes only (e.g. ?quote_type=boxes_only), so the type
