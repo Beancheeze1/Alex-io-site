@@ -17,6 +17,7 @@ import {
   shopClock,
   staffDigestEmail,
 } from "../app/lib/reminders-core";
+import { renderQuoteEmail } from "../app/lib/email/quoteTemplate";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -144,6 +145,41 @@ check("digest '...and N more'", de.html.includes("and 2 more"), true);
 check("digest escapes brand", de.html.includes("M-Line <Packaging>"), false);
 check("digest has news", digestHasNews(dig), true);
 check("empty digest is skipped", digestHasNews({ toConfirm: [], newCount: 0, expiring: [] }), false);
+
+// Step 36E: the quote email (same style as the status emails)
+{
+  const base = {
+    quoteNumber: "Q-A-1",
+    status: "applied",
+    plainLinks: true,
+    specs: { L_in: 10, W_in: 8, H_in: 2, qty: 1, density_pcf: 1.7, foam_family: "Polyethylene" },
+    material: { name: "EPE", density_lbft3: 1.7 },
+    pricing: { total: 1369.63 },
+    missing: [],
+    grandTotal: 1369.63,
+    quotePageUrl: "https://api.alex-io.com/quote?quote_no=Q-A-1",
+  };
+  const h = renderQuoteEmail({ ...base, brand: "Acme <Foam>", buyerName: "Pat", primaryColor: "#123456", shippingEstimate: 136.96, roughShipPct: 10, shippingCapUsd: 200 });
+  check("quote email: total is the quote total", h.includes('data-quote-total>$1,369.63<'), true);
+  check("quote email: shipping not added in", h.includes("1,506.59"), false);
+  check("quote email: rough shipping as its own line", h.includes("Estimated shipping, not included: about $136.96 (10% of the order)"), true);
+  check("quote email: brand escaped", h.includes("Acme &lt;Foam&gt;") && !h.includes("Acme <Foam>"), true);
+  check("quote email: shop color", h.includes("#123456"), true);
+  check("quote email: no old Powered by header", h.includes("Powered by"), false);
+  check("quote email: no internal status", /applied/i.test(h.replace(/data-[a-z-]+/g, "")), false);
+  check("quote email: no sales@alex-io.com", h.includes("sales@alex-io.com"), false);
+  check("quote email: greets buyer", h.includes("Hi Pat,"), true);
+  check("quote email: reply footer", h.includes("Reply to this email with any questions."), true);
+  const h2 = renderQuoteEmail({ ...base, buyerName: "Customer", revisionLabel: "B", primaryColor: "red;x" });
+  check("quote email: generic name -> there", h2.includes("Hi there,"), true);
+  check("quote email: released revision shown", h2.includes("(revision B)"), true);
+  check("quote email: bad color dropped", h2.includes("red;x"), false);
+  check("quote email: default brand", h2.includes(">Alex-IO<"), true);
+  check("quote email: no shipping line without estimate", h2.includes("data-rough-shipping"), false);
+  const h3 = renderQuoteEmail({ ...base, lineItems: [{ id: 1, label: "Box <b>", dims: "1 × 1 × 1 in", qty: 2, unitPrice: 1, lineTotal: 2 }], printLabel: "Packaging &ndash; Plates", printingUpcharge: 50 });
+  check("quote email: line label escaped", h3.includes("Box &lt;b&gt;"), true);
+  check("quote email: existing entity kept", h3.includes("Packaging &ndash; Plates"), true);
+}
 
 if (failed) {
   console.log(`\n${failed} FAILED`);

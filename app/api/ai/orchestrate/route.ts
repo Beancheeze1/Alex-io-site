@@ -60,7 +60,7 @@ import { internalHeaders, internalOrStaff } from "@/lib/internal-call";
 import { resolveTenantNumericId } from "@/lib/material-prices";
 import { extractQuoteNoFromText } from "@/lib/quote-no";
 import { newUniqueQuoteNo } from "@/lib/quote-no-server";
-import { logQuoteEmail } from "@/app/lib/quote-mail";
+import { logQuoteEmail, shopSender } from "@/app/lib/quote-mail";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -2902,6 +2902,20 @@ if (merged.dims) {
       })(),
       facts: merged,
     };
+
+    // Step 36E: the quote email carries the shop's name, logo and color.
+    if (pricingTenantId != null) {
+      const shop = await shopSender(pricingTenantId).catch(() => null);
+      if (shop) {
+        Object.assign(templateInput, {
+          brand: shop.brand,
+          primaryColor: shop.primaryColor,
+          onPrimary: shop.onPrimary,
+          logoUrl: shop.logoUrl,
+          buyerName: merged.customerName || merged.customer_name || null,
+        });
+      }
+    }
 
     let htmlBody = "";
     try {

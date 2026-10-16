@@ -4,6 +4,7 @@
 // (staff): freight terms, ship-to address and the freight it gives
 // (POST /api/quote/ship-to). With prepaid & add the freight is part of the
 // quote total. Staff can also type the freight (override).
+// Step 36E: buyers see no terms / address form while freight isn't set up.
 // Step 34B: "Saved addresses" from the buyer's other quotes at this shop
 // (GET / POST /api/quote/ship-to/saved) fill the address fields.
 
@@ -220,7 +221,8 @@ export default function ShipToCard({
         ) : null}
       </div>
 
-      {canEdit ? (
+      {/* Step 36E: until the shop sets up freight, buyers only see "quoted separately" (staff keep the form) */}
+      {canEdit && (staff || freight?.status !== "not_set_up") ? (
         <div style={{ marginTop: 10 }} data-ship-form>
           <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
             {allowed.map((t) => (

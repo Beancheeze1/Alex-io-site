@@ -5,6 +5,11 @@
 // The types here are aligned with app/api/ai/orchestrate/route.ts.
 // Only HTML / styling and simple display helpers should be edited here.
 //
+// Step 36E: restyled to match the status emails (light card, the shop's logo /
+// name and color, "Reply to this email" footer). The headline is the quote
+// total; a rough shipping estimate is its own "not included" line. The
+// revision shows only once the quote is released (caller passes revisionLabel).
+//
 // Step 21: the quote page and layout editor links in the email are the
 // buyer's private edit links (editLinkUrl): opening one lets that browser
 // change the quote. A bare quote number only lets someone view it.
@@ -109,6 +114,13 @@ export type TemplateInput = {
   validUntil?: string | null; // e.g. "Nov 14, 2026"
   leadTime?: string | null;
   freightNote?: string | null; // Step 30: e.g. "Customer pickup (no freight)"
+  // Step 36E: the shop's look (same as the status emails); revision only once released
+  brand?: string | null;
+  primaryColor?: string | null;
+  onPrimary?: string | null;
+  logoUrl?: string | null;
+  buyerName?: string | null;
+  revisionLabel?: string | null;
 };
 
 function fmtInchesTriple(L: number, W: number, H: number): string {
@@ -123,7 +135,8 @@ function fmtNumber(n: number | null | undefined, decimals = 2): string {
 
 function fmtMoney(n: number | null | undefined): string {
   if (n == null || isNaN(Number(n))) return "$0.00";
-  return `$${Number(n).toFixed(2)}`;
+  // Step 36E: thousands separators, like the status emails ($1,369.63)
+  return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtPercent(n: number | null | undefined): string {
@@ -714,220 +727,104 @@ export function renderQuoteEmail(input: TemplateInput): string {
   if (input.leadTime) termsParts.push(`Lead time: ${escText(input.leadTime)}`);
   // Step 30: freight terms when the freight isn't a priced line.
   if (input.freightNote) termsParts.push(escText(input.freightNote));
-  const displayTotal = hasShipping && baseTotal != null ? baseTotal + shippingEstimateAmt : baseTotal;
   void showHowBuilt; // retained for potential future use
+
+  // ── Step 36E: same light, shop-branded style as the status emails ──
+  // The headline total is the quote total (what the buyer accepts). A rough
+  // shipping estimate (shops without freight set up) is its own line, NOT in it.
+  const brand = (input.brand && String(input.brand).trim()) || "Alex-IO";
+  const HEX = /^#[0-9a-fA-F]{6}$/;
+  const primary = input.primaryColor && HEX.test(input.primaryColor) ? input.primaryColor : "#2B2B28";
+  const onPrimary = input.onPrimary && HEX.test(input.onPrimary) ? input.onPrimary : "#FFFFFF";
+  // Escapes text; existing entities (e.g. "&ndash;" from older callers) are kept.
+  const t = (v: unknown) =>
+    String(v ?? "").replace(/&(?!#?[a-zA-Z0-9]+;)/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const logo =
+    input.logoUrl && /^https:\/\//i.test(input.logoUrl)
+      ? `<img src="${t(input.logoUrl)}" alt="${t(brand)}" style="max-height:40px;max-width:200px;display:block">`
+      : `<div style="font-size:16px;font-weight:700;color:#1c1c1a">${t(brand)}</div>`;
+  const rev = input.revisionLabel && String(input.revisionLabel).trim() ? String(input.revisionLabel).trim() : null;
+  const name = input.buyerName && String(input.buyerName).trim() && String(input.buyerName).trim() !== "Customer" ? String(input.buyerName).trim() : null;
+  const cell = "padding:8px 0;border-bottom:1px solid #eeeeea;vertical-align:top";
+  const lineRow = (label: string, sub: string[], amount: string) =>
+    `<tr><td style="${cell}"><div style="font-size:13px;font-weight:600;color:#1c1c1a">${label}</div>${sub
+      .filter(Boolean)
+      .map((x) => `<div style="font-size:12px;color:#6b6b66;margin-top:1px">${x}</div>`)
+      .join("")}</td><td style="${cell};text-align:right;white-space:nowrap;font-size:13px;font-weight:600;color:#1c1c1a">${amount}</td></tr>`;
+  const rows: string[] = [];
+  for (const li of lineItems) {
+    rows.push(
+      lineRow(
+        t(li.label),
+        [li.sublabel ? t(li.sublabel) : "", `${t(li.dims)} &middot; Qty ${t(li.qty)}`],
+        li.lineTotal != null ? fmtMoney(li.lineTotal) : li.isIncluded ? "Included" : "&mdash;",
+      ),
+    );
+  }
+  if (hasPrinting) rows.push(lineRow(t(input.printLabel ?? "Packaging &ndash; Print upcharge"), [t(input.printSublabel ?? "")], fmtMoney(printingUpchargeAmt as number)));
+  if (processLinesVal.length > 0) {
+    for (const l of processLinesVal) {
+      rows.push(lineRow(t(l.label), [l.note ? t(l.note) : ""], fmtMoney(Number(l.amount) || 0)));
+    }
+  } else if (hasDieCutting) {
+    rows.push(
+      lineRow(
+        "Die-cutting charge",
+        [`Applied at qty ${dieCutTriggerQtyVal && dieCutTriggerQtyVal > 0 ? `&ge; ${dieCutTriggerQtyVal}` : "threshold"}`],
+        fmtMoney(dieCuttingChargeAmt as number),
+      ),
+    );
+  }
+  const totalRow =
+    baseTotal != null
+      ? `<tr><td style="padding:10px 0 2px;font-size:14px;font-weight:700;color:#1c1c1a">Quote total</td><td style="padding:10px 0 2px;text-align:right;font-size:16px;font-weight:700;color:#1c1c1a" data-quote-total>${fmtMoney(baseTotal)}</td></tr>`
+      : `<tr><td style="padding:10px 0 2px;font-size:14px;font-weight:700;color:#1c1c1a">Quote total</td><td style="padding:10px 0 2px;text-align:right;font-size:14px;color:#6b6b66">Pending</td></tr>`;
+  const shipRow = hasShipping
+    ? `<tr><td colspan="2" style="padding:4px 0 0;font-size:12px;color:#6b6b66" data-rough-shipping>Estimated shipping, not included: about ${fmtMoney(shippingEstimateAmt as number)}${
+        shippingIsCappedVal ? ` (capped at ${fmtMoney(shippingCapUsdVal)})` : roughShipPctVal != null ? ` (${Number(roughShipPctVal)}% of the order)` : ""
+      }. For planning only; freight is quoted separately.</td></tr>`
+    : "";
+  const facts2: [string, string][] = [
+    ["Size", outsideSize],
+    ["Quantity", qty],
+    ["Material", `${t(specsMaterialLabel)}${matDensity !== "—" ? `, ${t(matDensity)}` : ""}`],
+  ];
+  const factRows = facts2
+    .filter(([, v]) => v && v !== "—")
+    .map(([k, v]) => `<tr><td style="padding:3px 12px 3px 0;color:#6b6b66;font-size:13px;white-space:nowrap">${k}</td><td style="padding:3px 0;font-size:13px;color:#1c1c1a;font-weight:600">${v}</td></tr>`)
+    .join("");
+  void showHowBuilt; // retained for potential future use
+  void statusLabel;
+  void logoUrl;
 
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Your quote is ready${quoteNumber ? " — " + quoteNumber : ""}</title>
+    <title>${t(brand)}: quote ${t(quoteNumber)}</title>
   </head>
-  <body style="margin:0;padding:0;background:#111827;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#111827;padding:24px 0;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#0f172a;border-radius:18px;border:1px solid #1f2937;overflow:hidden;box-shadow:0 22px 45px rgba(15,23,42,0.55);">
-
-            <!-- Header -->
-            <tr>
-              <td style="padding:20px 28px 16px 28px;background:linear-gradient(135deg,#0ea5e9 0%,#0ea5e9 40%,#0f172a 100%);">
-                <div style="font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#e0f2fe;opacity:0.9;">Powered by</div>
-                <div style="font-size:22px;font-weight:800;color:#f9fafb;line-height:1.2;margin-top:2px;">Alex-IO</div>
-                <div style="margin-top:5px;font-size:12px;color:#e0f2fe;">
-                  Quote${quoteNumber ? ` &middot; <strong style="color:#f9fafb;">${quoteNumber}</strong>` : ""}
-                  &nbsp;&middot;&nbsp;
-                  <span style="text-transform:capitalize;">${statusLabel}</span>
-                </div>
-                <div style="display:none;">${logoUrl}</div>
-              </td>
-            </tr>
-
-            <!-- Intro copy -->
-            <tr>
-              <td style="padding:24px 28px 0 28px;">
-                <p style="margin:0;font-size:15px;font-weight:600;color:#f9fafb;line-height:1.4;">Your foam packaging quote is ready.</p>
-                <p style="margin:10px 0 0 0;font-size:13px;color:#9ca3af;line-height:1.6;">
-                  Click below to view your full interactive quote — including specs, pricing, line items, and the layout editor where you can place cavity locations and sizes.
-                </p>
-              </td>
-            </tr>
-
-            <!-- Key facts card -->
-            <tr>
-              <td style="padding:20px 28px 0 28px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:12px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
-                  <tr>
-                    <td style="padding:10px 16px;border-bottom:1px solid #1f2937;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;background:rgba(56,189,248,0.06);">
-                      Quote summary
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:14px 16px;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                        <tr>
-                          <td style="width:33%;vertical-align:top;padding-right:12px;">
-                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Dimensions</div>
-                            <div style="font-size:14px;font-weight:700;color:#f9fafb;">${outsideSize}</div>
-                          </td>
-                          <td style="width:14%;vertical-align:top;padding-right:12px;">
-                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Qty</div>
-                            <div style="font-size:14px;font-weight:700;color:#f9fafb;">${qty}</div>
-                          </td>
-                          <td style="width:30%;vertical-align:top;padding-right:12px;">
-                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Material</div>
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${specsMaterialLabel}</div>
-                            ${matDensity !== "—" ? `<div style="font-size:11px;color:#6b7280;margin-top:2px;">${matDensity}</div>` : ""}
-                          </td>
-                          <td style="width:23%;vertical-align:top;text-align:right;">
-                            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;margin-bottom:4px;">Est. total</div>
-                            <div style="font-size:16px;font-weight:800;color:#f97316;">${displayTotal != null ? fmtMoney(displayTotal) : "Pending"}</div>
-                            ${hasPackaging || hasPrinting || hasDieCutting || hasShipping ? `<div style="font-size:10px;color:#6b7280;margin-top:2px;">foam${hasPackaging ? " + pkg" : ""}${hasPrinting ? " + print" : ""}${hasDieCutting ? " + cutting" : ""}${hasShipping ? " + ship" : ""}</div>` : ""}
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <!-- Itemized breakdown -->
-            ${hasLineItems || hasPrinting || hasDieCutting || hasShipping ? `<tr>
-              <td style="padding:20px 28px 0 28px;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-radius:12px;border:1px solid #1f2937;background:#020617;overflow:hidden;">
-                  <tr>
-                    <td style="padding:10px 16px;border-bottom:1px solid #1f2937;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;background:rgba(56,189,248,0.06);">
-                      Itemized breakdown
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:4px 16px 8px 16px;">
-                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                        ${lineItems.map((li) => `<tr>
-                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${li.label}</div>
-                            ${li.sublabel ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">${li.sublabel}</div>` : ""}
-                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">${li.dims} &middot; Qty ${li.qty}</div>
-                          </td>
-                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
-                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${li.lineTotal != null ? fmtMoney(li.lineTotal) : li.isIncluded ? "Included" : "&mdash;"}</div>
-                          </td>
-                        </tr>`).join("")}
-                        ${hasPrinting ? `<tr>
-                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${input.printLabel ?? "Packaging &ndash; Print upcharge"}</div>
-                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">${input.printSublabel ?? "Custom printed mailer / box"}</div>
-                          </td>
-                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
-                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(printingUpchargeAmt as number)}</div>
-                          </td>
-                        </tr>` : ""}
-                        ${processLinesVal.length > 0 ? processLinesVal.map((l) => `<tr>
-                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">${l.key === "box_die" ? "Packaging" : l.key === "freight" ? "Shipping" : "Machining"} &ndash; ${escText(l.label)}</div>
-                            ${l.note ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">${escText(l.note)}</div>` : ""}
-                          </td>
-                          <td style="padding:8px 0;border-bottom:1px solid #1f2937;text-align:right;vertical-align:top;white-space:nowrap;">
-                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(Number(l.amount) || 0)}</div>
-                          </td>
-                        </tr>`).join("") : hasDieCutting ? `<tr>
-                          <td style="padding:8px 0;${hasShipping ? "border-bottom:1px solid #1f2937;" : ""}vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Machining &ndash; Die-cutting charge</div>
-                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">Applied at qty ${dieCutTriggerQtyVal && dieCutTriggerQtyVal > 0 ? `&ge; ${dieCutTriggerQtyVal}` : "threshold"}</div>
-                          </td>
-                          <td style="padding:8px 0;${hasShipping ? "border-bottom:1px solid #1f2937;" : ""}text-align:right;vertical-align:top;white-space:nowrap;">
-                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(dieCuttingChargeAmt as number)}</div>
-                          </td>
-                        </tr>` : ""}
-                        ${hasShipping ? `<tr>
-                          <td style="padding:8px 0;vertical-align:top;">
-                            <div style="font-size:13px;font-weight:600;color:#f9fafb;">Shipping &ndash; rough estimate</div>
-                            <div style="font-size:11px;color:#6b7280;margin-top:1px;">
-                              ${shippingIsCappedVal
-                                ? `Capped at ${fmtMoney(shippingCapUsdVal)}`
-                                : `${roughShipPctVal != null ? fmtPercent(roughShipPctVal) : ""} of foam + packaging`} &middot; for planning only
-                            </div>
-                          </td>
-                          <td style="padding:8px 0;text-align:right;vertical-align:top;white-space:nowrap;">
-                            <div style="font-size:13px;font-weight:700;color:#f9fafb;">${fmtMoney(shippingEstimateAmt as number)}</div>
-                          </td>
-                        </tr>` : ""}
-                      </table>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>` : ""}
-
-            <!-- Primary CTA -->
-            <tr>
-              <td style="padding:28px 28px 0 28px;text-align:center;">
-                ${quotePageUrl
-                  ? `<a href="${quotePageUrl}" style="display:inline-block;padding:15px 40px;border-radius:999px;background:#0ea5e9;color:#0f172a;font-size:15px;font-weight:700;text-decoration:none;letter-spacing:0.01em;">View your full quote &rarr;</a>`
-                  : ""}
-              </td>
-            </tr>
-
-            <!-- Secondary: layout editor -->
-            ${layoutUrl ? `<tr>
-              <td style="padding:14px 28px 0 28px;text-align:center;">
-                <p style="margin:0;font-size:12px;color:#6b7280;">
-                  Ready to place cavity locations?&nbsp;
-                  <a href="${layoutUrl}" style="color:#38bdf8;text-decoration:none;font-weight:600;">Open the layout editor &rarr;</a>
-                </p>
-              </td>
-            </tr>` : ""}
-
-            <!-- Divider -->
-            <tr><td style="padding:24px 28px 0 28px;"><div style="border-top:1px solid #1f2937;"></div></td></tr>
-
-            <!-- What's on the quote page -->
-            <tr>
-              <td style="padding:20px 28px 0 28px;">
-                <p style="margin:0 0 10px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;">Your interactive quote includes</p>
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
-                  <tr>
-                    <td style="width:50%;vertical-align:top;padding-right:12px;padding-bottom:8px;">
-                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Full specs &amp; construction details</div>
-                    </td>
-                    <td style="width:50%;vertical-align:top;padding-bottom:8px;">
-                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Itemized line items with pricing</div>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="vertical-align:top;padding-right:12px;padding-bottom:8px;">
-                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Packaging &amp; printing breakdown</div>
-                    </td>
-                    <td style="vertical-align:top;padding-bottom:8px;">
-                      <div style="font-size:12px;color:#cbd5f5;">&#10003;&nbsp; Interactive foam layout editor</div>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-
-            <!-- Feedback -->
-            <tr>
-              <td style="padding:20px 28px 28px 28px;">
-                <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.6;">
-                  See anything that looks off?&nbsp;
-                  <a href="mailto:sales@alex-io.com?subject=Alex-IO%20quote%20question" style="color:#38bdf8;text-decoration:none;">Reply to this email</a>
-                  &nbsp;and we'll get it sorted.
-                </p>
-              </td>
-            </tr>
-
-          </table>
-
-          <!-- Footer -->
-          <div style="max-width:600px;margin-top:12px;padding:0 28px;font-size:11px;color:#4b5563;text-align:center;">
-            ${termsParts.length ? `<p style="margin:0 0 6px 0;font-size:12px;color:#9ca3af;" data-quote-terms>${termsParts.join(" &middot; ")}</p>` : ""}
-            <p style="margin:0;">This quote was generated by Alex-IO. A human will review and confirm before anything is cut. Prices are estimates and may change if specs or quantities are adjusted.</p>
-          </div>
-        </td>
-      </tr>
-    </table>
+  <body style="margin:0;padding:0;background:#f6f6f4">
+    <div style="background:#f6f6f4;padding:24px 8px;font-family:Segoe UI,Arial,Helvetica,sans-serif;color:#1c1c1a">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e4e4e0;border-radius:12px">
+      <tr><td style="padding:18px 24px;border-bottom:3px solid ${primary}">${logo}</td></tr>
+      <tr><td style="padding:24px">
+        <h1 style="font-size:19px;line-height:1.3;margin:0 0 14px;color:#1c1c1a">Your quote is ready</h1>
+        <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Hi ${name ? t(name) : "there"},</p>
+        <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Here is quote ${t(quoteNumber)}${rev ? ` (revision ${t(rev)})` : ""} from ${t(brand)}. Open it to see the full details, change the layout, or accept it.</p>
+        ${factRows ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 14px">${factRows}</table>` : ""}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px" data-quote-lines>
+          ${rows.join("")}
+          ${totalRow}
+          ${shipRow}
+        </table>
+        ${termsParts.length ? `<p style="font-size:13px;line-height:1.55;margin:0 0 16px;color:#33332f" data-quote-terms>${termsParts.join(" &middot; ")}</p>` : ""}
+        ${quotePageUrl ? `<a href="${t(quotePageUrl)}" style="display:inline-block;background:${primary};color:${onPrimary};text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px">View your quote</a>` : ""}
+        ${layoutUrl ? `<p style="font-size:13px;margin:14px 0 0;color:#6b6b66">Need to place cavities? <a href="${t(layoutUrl)}" style="color:#1c1c1a;font-weight:600">Open the layout editor</a></p>` : ""}
+        <p style="font-size:12px;line-height:1.5;margin:16px 0 0;color:#6b6b66">This is an estimate until you accept it and ${t(brand)} confirms it. Prices can change if specs or quantities change.</p>
+      </td></tr>
+      <tr><td style="padding:14px 24px;border-top:1px solid #eeeeea;font-size:12px;color:#6b6b66">${t(brand)} &middot; Quote ${t(quoteNumber)}. Reply to this email with any questions.</td></tr>
+    </table></td></tr></table></div>
   </body>
 </html>`;
 }

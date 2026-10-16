@@ -150,19 +150,26 @@ export default function FunnelPage() {
                 <div key={s.key} className="grid grid-cols-[180px_1fr_200px] items-center gap-3" data-stage={s.key}>
                   <div className="text-xs">{s.label}</div>
                   <div className="h-6 rounded bg-[var(--surface-page)]">
-                    <div
-                      className="flex h-6 items-center rounded bg-[var(--action-primary)] px-2 text-[11px] font-semibold text-white"
-                      style={{ width: `${created && s.count ? Math.max(4, (s.count / created) * 100) : 0}%`, minWidth: s.count ? 28 : 0 }}
-                    >
-                      {s.count}
-                    </div>
+                    {s.count > 0 ? (
+                      <div
+                        className="flex h-6 items-center rounded bg-[var(--action-primary)] px-2 text-[11px] font-semibold text-white"
+                        style={{ width: `${created ? Math.max(4, (s.count / created) * 100) : 0}%`, minWidth: 28 }}
+                      >
+                        {s.count}
+                      </div>
+                    ) : (
+                      // Step 36E: no bar at all for an empty stage, just the 0
+                      <div className="flex h-6 items-center px-2 text-[11px] text-[var(--text-muted)]" data-stage-empty>
+                        0
+                      </div>
+                    )}
                   </div>
                   <div className="text-right text-xs tabular-nums text-[var(--text-secondary)]">
                     {s.pct_of_previous != null ? `${pct(s.pct_of_previous)} of previous` : ""}
                     {s.value != null && (s.value > 0 || s.no_total < s.count) ? ` · ${usd(s.value)}` : ""}
                     {s.value != null && s.no_total > 0 ? (
                       <span className="block text-[11px] text-[var(--text-muted)]" data-stage-no-total>
-                        {s.no_total} without an accepted price
+                        {s.key === "accepted" ? `${s.no_total} released without the buyer accepting` : `${s.no_total} without an accepted price`}
                       </span>
                     ) : null}
                   </div>

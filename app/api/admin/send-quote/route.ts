@@ -27,6 +27,7 @@ import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { computeApproval } from "@/app/lib/quote-approval-core";
 import { logQuoteEmail, shopSender } from "@/app/lib/quote-mail";
+import { displayRevisionLabel } from "@/app/lib/revision-label";
 import { freightForQuote } from "@/app/lib/freight";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +52,7 @@ type QuoteRow = {
   phone: string | null;
   status: string;
   created_at: string;
+  locked?: boolean; // Step 36E
 };
 
 type ItemRow = {
@@ -125,7 +127,8 @@ export async function POST(req: NextRequest) {
     let quote: QuoteRow | null;
     try {
       quote = await one<QuoteRow>(
-        `SELECT id, quote_no, customer_name, email, phone, status, created_at
+        `SELECT id, quote_no, customer_name, email, phone, status, created_at,
+                COALESCE((to_jsonb(quotes) ->> 'locked')::boolean, false) AS locked
          FROM quotes
          WHERE quote_no = $1 AND tenant_id = $2
          LIMIT 1`,
@@ -480,12 +483,12 @@ export async function POST(req: NextRequest) {
       return `${baseUrl}/quote/layout?${p.toString()}`;
     })();
 
-    // 11) Subject line
-    const revisionRaw = typeof facts?.revision === "string" ? facts.revision.trim() : "";
-    const rev = revisionRaw || null;
+    // 11) Subject line. Step 36E: same pattern as the status emails; the
+    // revision only once released (never the internal staging "AS").
+    const rev = quote.locked ? displayRevisionLabel(facts || {}, true) || null : null;
     const subject = (typeof body.subject === "string" && body.subject.trim())
       ? body.subject.trim()
-      : `Quote ${quoteNo}${rev ? ` ${rev}` : ""} — ${sender.brand}`;
+      : `${sender.brand}: quote ${quoteNo}${rev ? ` (revision ${rev})` : ""}`;
 
     // 12) Render HTML
     const density_pcf = primaryItem?.density_lb_ft3 != null ? Number(primaryItem.density_lb_ft3) : null;
@@ -534,7 +537,7 @@ export async function POST(req: NextRequest) {
       printingUpchargePct: printingUpchargePct > 0 ? printingUpchargePct : null,
       printingUpchargeAmt: printingUpchargeAmt > 0 ? printingUpchargeAmt : null,
       printingUpcharge: printingUpcharge > 0 ? printingUpcharge : null,
-      printLabel: pc.printModel === "per_color" ? "Packaging &ndash; Printing plates (one time)" : null,
+      printLabel: pc.printModel === "per_color" ? "Printing plates (one time)" : null,
       printSublabel: pc.printModel === "per_color" ? pc.printSummary : null,
       dieCuttingCharge: dieCuttingCharge > 0 ? dieCuttingCharge : null,
       dieCutTriggerQty: dieCutTriggerQty > 0 ? dieCutTriggerQty : null,
@@ -550,6 +553,13 @@ export async function POST(req: NextRequest) {
       layers: emailLayers.length > 0 ? emailLayers : null,
       layoutNotes: layoutPkg?.notes || null,
       quotePageUrl,
+      // Step 36E: shop look + buyer name + released revision
+      brand: sender.brand,
+      primaryColor: sender.primaryColor,
+      onPrimary: sender.onPrimary,
+      logoUrl: sender.logoUrl,
+      buyerName: quote.customer_name,
+      revisionLabel: rev,
     });
 
     // 13) Send directly via MS Graph (no internal HTTP fetch)
