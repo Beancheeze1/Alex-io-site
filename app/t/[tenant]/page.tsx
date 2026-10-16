@@ -308,6 +308,25 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
           ) : null}
 
           <QuoteLookupCard tenantSlug={t.slug} primaryColor={t.primaryColor} onPrimary={t.onPrimary} />
+
+          {/* Step 34A: the buyer portal */}
+          <div
+            className="flex flex-col rounded-xl p-7 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+            style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
+            data-orders-card
+          >
+            <h2 className="mb-2 text-xl font-medium">Your orders</h2>
+            <p className="mb-5 flex-1" style={{ color: "var(--text-secondary)" }}>
+              See all your quotes and orders in one place: what&apos;s waiting for you, proofs, production and tracking.
+            </p>
+            <a
+              href={`/t/${encodeURIComponent(t.slug)}/orders`}
+              className="inline-flex min-h-[48px] items-center self-start rounded-md px-5 text-[15px] font-medium"
+              style={{ border: "1px solid var(--border-strong)" }}
+            >
+              Sign in to your orders
+            </a>
+          </div>
         </div>
       </section>
 

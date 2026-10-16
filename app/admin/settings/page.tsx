@@ -77,6 +77,7 @@ type PricingSettings = {
   buyer_email_accepted: boolean;
   buyer_email_confirmed: boolean;
   buyer_email_released: boolean;
+  buyer_email_shipped: boolean;
   reply_to_email: string;
 
   // Step 29B: reminders
@@ -133,11 +134,12 @@ const TIME_ZONES = [
 ];
 
 // Step 29A: buyer status emails (on/off per shop).
-type BuyerEmailKey = "buyer_email_accepted" | "buyer_email_confirmed" | "buyer_email_released";
+type BuyerEmailKey = "buyer_email_accepted" | "buyer_email_confirmed" | "buyer_email_released" | "buyer_email_shipped";
 const BUYER_EMAIL_FIELDS: { key: BuyerEmailKey; label: string; hint: string }[] = [
   { key: "buyer_email_accepted", label: "Approval received", hint: "When a buyer accepts (or re-approves) a quote." },
   { key: "buyer_email_confirmed", label: "Order confirmed", hint: "When staff confirm the order." },
   { key: "buyer_email_released", label: "In production", hint: "When staff release the quote for manufacturing." },
+  { key: "buyer_email_shipped", label: "Shipped", hint: "When staff mark a released order shipped (with the carrier and tracking)." },
 ];
 
 export default function AdminSettingsPage() {
@@ -169,6 +171,7 @@ export default function AdminSettingsPage() {
     buyer_email_accepted: true,
     buyer_email_confirmed: true,
     buyer_email_released: true,
+    buyer_email_shipped: true,
     reply_to_email: "",
 
     reminder_expiring_on: true,

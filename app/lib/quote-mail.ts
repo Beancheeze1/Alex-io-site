@@ -20,6 +20,7 @@ import { loadFacts } from "@/app/lib/memory";
 import { getPricingSettings, type PricingSettings } from "@/app/lib/pricing/settings";
 import { approvalForQuote } from "@/app/lib/quote-approval";
 import { isEmail, pickReplyTo, statusEmail, tenantBaseUrl, type StatusKind } from "@/app/lib/quote-mail-core";
+import { trackingUrl } from "@/app/lib/portal-core";
 
 export type ShopSender = {
   brand: string;
@@ -49,6 +50,7 @@ const SETTING_FOR: Partial<Record<StatusKind, keyof PricingSettings>> = {
   accepted: "buyer_email_accepted",
   confirmed: "buyer_email_confirmed",
   released: "buyer_email_released",
+  shipped: "buyer_email_shipped",
   expiring: "reminder_expiring_on",
   followup: "reminder_followup_on",
 };
@@ -145,8 +147,21 @@ export async function sendQuoteStatusEmail(opts: {
 }): Promise<MailOutcome> {
   const by = opts.by ?? null;
   try {
-    const row = await one<{ id: number; quote_no: string; tenant_id: number; email: string | null; customer_name: string | null }>(
-      `SELECT id, quote_no, tenant_id, email, customer_name FROM public.quotes WHERE id = $1`,
+    const row = await one<{
+      id: number;
+      quote_no: string;
+      tenant_id: number;
+      email: string | null;
+      customer_name: string | null;
+      shipped_carrier: string | null;
+      shipped_tracking: string | null;
+      shipped_note: string | null;
+    }>(
+      `SELECT id, quote_no, tenant_id, email, customer_name,
+              to_jsonb(q) ->> 'shipped_carrier' AS shipped_carrier,
+              to_jsonb(q) ->> 'shipped_tracking' AS shipped_tracking,
+              to_jsonb(q) ->> 'shipped_note' AS shipped_note
+         FROM public.quotes q WHERE id = $1`,
       [opts.quoteId],
     );
     if (!row) return { status: "skipped", to: null, detail: "quote not found" };
@@ -196,6 +211,10 @@ export async function sendQuoteStatusEmail(opts: {
       sentAt: opts.sentAt ?? null,
       proofVersion: opts.proofVersion ?? null,
       proofNote: opts.proofNote ?? null,
+      shippedCarrier: row.shipped_carrier,
+      shippedTracking: row.shipped_tracking,
+      shippedNote: row.shipped_note,
+      trackingUrl: opts.kind === "shipped" ? trackingUrl(row.shipped_carrier, row.shipped_tracking) : null,
       primaryColor: sender.primaryColor,
       onPrimary: sender.onPrimary,
       logoUrl: sender.logoUrl,

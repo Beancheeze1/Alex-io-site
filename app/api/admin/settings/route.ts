@@ -102,6 +102,7 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
       "buyer_email_accepted",
       "buyer_email_confirmed",
       "buyer_email_released",
+      "buyer_email_shipped",
       "reply_to_email",
       // Step 29B: reminders
       "reminder_expiring_on",
@@ -167,7 +168,12 @@ export const PATCH = adminOnly(async (req: NextRequest) => {
         }
       } else if (k === "shop_timezone") {
         error = isTimeZone(value) ? null : { field: k, message: "Time zone must be a name like America/New_York." };
-      } else if (k === "buyer_email_accepted" || k === "buyer_email_confirmed" || k === "buyer_email_released") {
+      } else if (
+        k === "buyer_email_accepted" ||
+        k === "buyer_email_confirmed" ||
+        k === "buyer_email_released" ||
+        k === "buyer_email_shipped"
+      ) {
         error = typeof value === "boolean" ? null : { field: k, message: `${k} must be true or false.` };
       } else if (k === "reply_to_email") {
         // Step 29A: blank, or one email address.

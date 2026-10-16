@@ -29,6 +29,7 @@ import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
 import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
 import ProofCard from "@/components/quote/ProofCard";
+import ShippedCard from "@/components/admin/ShippedCard";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
@@ -2562,6 +2563,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 {quoteNoValue ? (
                   <div style={{ marginBottom: 10 }}>
                     <ProofCard quoteNo={quoteNoValue} canEdit staff />
+                  </div>
+                ) : null}
+                {/* Step 34A: shipped + tracking, once released */}
+                {quoteNoValue && quoteState?.locked ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <ShippedCard quoteNo={quoteNoValue} />
                   </div>
                 ) : null}
                 {/* Step 30: ship-to, freight terms and freight (staff can override) */}

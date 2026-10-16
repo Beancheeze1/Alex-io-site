@@ -62,6 +62,7 @@ export type PricingSettings = {
   buyer_email_accepted: boolean; // "we received your approval"
   buyer_email_confirmed: boolean; // "your order is confirmed"
   buyer_email_released: boolean; // "your order is in production"
+  buyer_email_shipped: boolean; // Step 34A: "your order has shipped"
   reply_to_email: string; // replies go here ("" = the quote's sales rep, else the shop page email)
 
   // Step 29B: reminders (app/lib/reminders.ts, run hourly by GitHub Actions).
@@ -122,6 +123,7 @@ const DEFAULTS: PricingSettings = {
   buyer_email_accepted: true,
   buyer_email_confirmed: true,
   buyer_email_released: true,
+  buyer_email_shipped: true,
   reply_to_email: "",
 
   reminder_expiring_on: true,

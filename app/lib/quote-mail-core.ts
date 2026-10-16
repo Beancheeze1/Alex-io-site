@@ -7,13 +7,13 @@
 //   - isEmail() / pickReplyTo(): who the buyer's replies go to
 //   - statusEmail(kind, data): subject + HTML for accepted / confirmed /
 //     reapprove / released, and (Step 29B) the buyer reminders expiring /
-//     followup
+//     followup, (Step 34A) shipped
 // Sending, settings and the log live in app/lib/quote-mail.ts.
 
 import { escapeHtml } from "../../lib/email/send-html";
 
-export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup" | "proof";
-export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup", "proof"];
+export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup" | "proof" | "shipped";
+export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup", "proof", "shipped"];
 
 export function isStatusKind(v: unknown): v is StatusKind {
   return typeof v === "string" && (STATUS_KINDS as readonly string[]).includes(v);
@@ -66,6 +66,10 @@ export type StatusEmailData = {
   sentAt?: string | null; // Step 29B: when the quote was emailed (follow-up)
   proofVersion?: number | null; // Step 31: proof ready
   proofNote?: string | null;
+  shippedCarrier?: string | null; // Step 34A: shipped
+  shippedTracking?: string | null;
+  shippedNote?: string | null;
+  trackingUrl?: string | null; // the shipped email's button goes here when set (else the quote)
   primaryColor?: string | null;
   onPrimary?: string | null;
   logoUrl?: string | null;
@@ -107,7 +111,7 @@ function render(d: StatusEmailData, heading: string, paras: string[], facts: [st
     `<h1 style="font-size:19px;line-height:1.3;margin:0 0 14px;color:#1c1c1a">${e(heading)}</h1>`,
     ...paras.map((p) => `<p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">${e(p)}</p>`),
     factRows ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 18px">${factRows}</table>` : "",
-    `<a href="${e(d.link)}" style="display:inline-block;background:${primary};color:${onPrimary};text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px">${e(button)}</a>`,
+    `<a href="${e(button === "Track your shipment" && d.trackingUrl ? d.trackingUrl : d.link)}" style="display:inline-block;background:${primary};color:${onPrimary};text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px">${e(button)}</a>`,
     `</td></tr>`,
     `<tr><td style="padding:14px 24px;border-top:1px solid #eeeeea;font-size:12px;color:#6b6b66">${e(d.brand)} · Quote ${e(d.quoteNo)}. Reply to this email with any questions.</td></tr>`,
     `</table></td></tr></table></div>`,
@@ -169,6 +173,26 @@ export function statusEmail(kind: StatusKind, d: StatusEmailData): { subject: st
         ],
         [["Quote total", usd(d.total)]],
         "Review the proof",
+      ),
+    };
+  }
+  if (kind === "shipped") {
+    return {
+      subject: `${d.brand}: your order ${qn} has shipped`,
+      html: render(
+        d,
+        "Your order has shipped",
+        [
+          hi,
+          `Your order on quote ${qn} has shipped${d.shippedCarrier ? ` by ${d.shippedCarrier}` : ""}.`,
+          ...(d.shippedNote ? [`From ${d.brand}: ${d.shippedNote}`] : []),
+        ],
+        [
+          ["Carrier", d.shippedCarrier || ""],
+          ["Tracking", d.shippedTracking || ""],
+          ["PO", d.po || ""],
+        ],
+        d.trackingUrl ? "Track your shipment" : "View your order",
       ),
     };
   }
