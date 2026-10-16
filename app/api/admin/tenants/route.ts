@@ -205,7 +205,9 @@ export const POST = adminOnly(async (req: NextRequest) => {
 
   // ── Plan gate: creating additional tenants requires Shop plan ──────────
   // (The owner's own tenant is already created — this gates adding more.)
-  if (user?.tenant_id) {
+  // Step 37G: the platform owner (the only one who gets this far) is not
+  // held to their own demo shop's plan.
+  if (user?.tenant_id && !isPlatformOwner(user)) {
     const currentPlan = await getPlanForTenant(user.tenant_id);
     if (!planMeets(currentPlan, "shop")) {
       return NextResponse.json(
