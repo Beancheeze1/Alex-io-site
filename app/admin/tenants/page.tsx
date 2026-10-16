@@ -205,11 +205,16 @@ export default function TenantsPage() {
   const [name, setName] = React.useState("");
   const [slug, setSlug] = React.useState("");
   const [domain, setDomain] = React.useState(""); // NEW
+  // Step 36A: the shop's own admin, invited by email
+  const [ownerEmail, setOwnerEmail] = React.useState("");
+  const [ownerName, setOwnerName] = React.useState("");
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [createdCreds, setCreatedCreds] = React.useState<{
     slug: string;
     admin_email: string;
     temp_password: string;
+    owner_email?: string | null;
+    owner_invite?: string | null;
   } | null>(null);
 
   async function loadWhoAmI() {
@@ -284,6 +289,8 @@ export default function TenantsPage() {
         name,
         slug,
         domain: domain.trim(), // NEW (domain-only)
+        owner_email: ownerEmail.trim() || undefined,
+        owner_name: ownerName.trim() || undefined,
       }),
     });
 
@@ -292,11 +299,15 @@ export default function TenantsPage() {
       setName("");
       setSlug("");
       setDomain(""); // NEW
+      setOwnerEmail("");
+      setOwnerName("");
       if (json?.admin_email && json?.temp_password) {
         setCreatedCreds({
           slug: String(slug || "").trim().toLowerCase(),
           admin_email: String(json.admin_email),
           temp_password: String(json.temp_password),
+          owner_email: json.owner_email ? String(json.owner_email) : null,
+          owner_invite: json.owner_invite ? String(json.owner_invite) : null,
         });
       }
       await load();
@@ -447,6 +458,24 @@ export default function TenantsPage() {
             homepage.
           </div>
 
+          {/* Step 36A: invite the shop's own admin */}
+          <input
+            className="bg-[var(--surface-card)] p-2 w-full rounded border border-[var(--border)] text-[var(--text-primary)]"
+            placeholder="Shop admin's email (they get an invite to set a password)"
+            value={ownerEmail}
+            onChange={(e) => setOwnerEmail(e.target.value)}
+            disabled={!canWrite}
+            data-owner-email
+          />
+          <input
+            className="bg-[var(--surface-card)] p-2 w-full rounded border border-[var(--border)] text-[var(--text-primary)]"
+            placeholder="Shop admin's name"
+            value={ownerName}
+            onChange={(e) => setOwnerName(e.target.value)}
+            disabled={!canWrite}
+            data-owner-name
+          />
+
           <div className="flex items-center gap-3">
             <button
               className="bg-[var(--action-primary)] hover:bg-[var(--action-primary-hover)] text-white px-3 py-2 rounded text-sm disabled:opacity-50"
@@ -486,6 +515,14 @@ export default function TenantsPage() {
                 </span>{" "}
                 <span className="font-mono">{createdCreds.temp_password}</span>
               </div>
+              {createdCreds.owner_email ? (
+                <div data-owner-invite>
+                  <span className="text-[var(--status-success-text)]/80">Shop admin invite:</span>{" "}
+                  {createdCreds.owner_invite === "sent"
+                    ? `sent to ${createdCreds.owner_email}`
+                    : `not sent to ${createdCreds.owner_email} (resend from the dashboard's user list)`}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

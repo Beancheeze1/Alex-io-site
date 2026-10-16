@@ -13,6 +13,8 @@ import { q, withTxn } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { getPlanForTenant, planMeets } from "@/lib/plan";
 import { adminOnly, isPlatformOwner } from "@/lib/admin-auth";
+import { cleanInvite } from "@/app/lib/onboarding-core";
+import { sendAccessEmail, unusablePasswordHash } from "@/lib/user-invites";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -228,6 +230,14 @@ export const POST = adminOnly(async (req: NextRequest) => {
   const slug = body?.slug?.trim()?.toLowerCase();
   const domain = body?.domain; // domain-only (e.g. acme.com)
 
+  // Step 36A: optionally invite the shop's own admin by email.
+  let owner: { email: string; name: string } | null = null;
+  if (typeof body?.owner_email === "string" && body.owner_email.trim()) {
+    const c = cleanInvite({ email: body.owner_email, name: body?.owner_name || `${name || "Shop"} Admin`, role: "admin" });
+    if (!c.ok) return bad("invalid_owner", c.message);
+    owner = { email: c.value.email, name: c.value.name };
+  }
+
   if (!name || !slug) {
     return bad("invalid_input", "name and slug required");
   }
@@ -281,8 +291,30 @@ export const POST = adminOnly(async (req: NextRequest) => {
         [admin_email, `${name} Admin`, tenant.id, password_hash],
       );
 
-      return { tenant };
+      // Step 36A: the shop's own admin, invited by email (set-password link).
+      let ownerId: number | null = null;
+      if (owner) {
+        const o = await tx.query(
+          `insert into users (email, name, role, tenant_id, password_hash) values ($1, $2, 'admin', $3, $4) returning id`,
+          [owner.email, owner.name, tenant.id, await unusablePasswordHash()],
+        );
+        ownerId = Number(o.rows?.[0]?.id) || null;
+      }
+
+      return { tenant, ownerId };
     });
+
+    // Step 36A: send the invite after the shop exists (never fails the create).
+    let owner_invite: string | null = null;
+    if (owner && result.ownerId) {
+      const sent = await sendAccessEmail({
+        userId: result.ownerId,
+        tenantId: Number(result.tenant.id),
+        kind: "invite",
+        by: String((user as { name?: string | null } | null)?.name || "Alex-IO"),
+      }).catch((e) => ({ status: "failed" as const, detail: String(e) }));
+      owner_invite = sent.status;
+    }
 
     // Return temp password ONCE (owner-only endpoint). UI should show it immediately.
     return ok({
@@ -290,6 +322,8 @@ export const POST = adminOnly(async (req: NextRequest) => {
       tenant: result.tenant,
       admin_email,
       temp_password,
+      owner_email: owner?.email ?? null,
+      owner_invite,
     });
   } catch (e: any) {
     const msg = String(e?.message || e);

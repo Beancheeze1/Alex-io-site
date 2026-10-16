@@ -140,6 +140,21 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
 
   const dbHealth = useHealth("/api/health/db");
 
+  // Step 36A: "Finish setting up" banner until the Get started checklist is complete.
+  const [setup, setSetup] = React.useState<{ done: number; total: number } | null>(null);
+  React.useEffect(() => {
+    let active = true;
+    fetch("/api/admin/onboarding", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (active && j?.ok && j.checklist && !j.checklist.complete) setSetup({ done: Number(j.checklist.done), total: Number(j.checklist.total) });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const hubspotHealth = useHealth("/api/health/hubspot");
   const emailHealth = useHealth("/api/health/email");
 
@@ -155,6 +170,20 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
             Internal tools for quotes, layouts, pricing &amp; foam data.
           </p>
         </header>
+
+        {setup ? (
+          <Link
+            href="/admin/get-started"
+            className="mb-8 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--action-primary)] bg-[var(--surface-card)] px-4 py-3 text-sm"
+            data-setup-banner
+          >
+            <span className="font-medium text-[var(--text-primary)]">Finish setting up your shop</span>
+            <span className="text-[var(--text-secondary)]">
+              {setup.done} of {setup.total} done
+            </span>
+            <span className="ml-auto font-medium text-[var(--action-primary)]">Get started →</span>
+          </Link>
+        ) : null}
 
         {/* System health row */}
         <section className="mb-10">
@@ -1082,12 +1111,52 @@ function UsersAndRolesCard() {
     const emailTrim = email.trim();
     const nameTrim = name.trim();
 
-    if (!emailTrim || !nameTrim || !password) {
-      setError("Email, name, and password are required.");
+    if (!emailTrim || !nameTrim) {
+      setError("Email and name are required.");
       return;
     }
 
     setSaving(true);
+
+    // Step 36A: no password = invite them by email (they set their own).
+    if (!password) {
+      try {
+        const res = await fetch("/api/admin/users/invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: emailTrim,
+            name: nameTrim,
+            role,
+            sales_slug: salesSlug.trim() || null,
+            tenant_id: viewTenantId.trim() || undefined,
+          }),
+        });
+        const json = (await res.json().catch(() => null)) as
+          | { ok?: boolean; message?: string; email?: string; user: { email: string; role: string } }
+          | null;
+        if (!res.ok || !json?.ok) {
+          setError(json?.message || "Failed to invite user.");
+        } else {
+          setOkMsg(
+            json.email === "sent"
+              ? `Invited ${json.user.email} (${json.user.role}): they'll get an email to set their password.`
+              : `Created ${json.user.email}, but the invite email didn't go out. Use "Invite" in the list to resend.`,
+          );
+          setEmail("");
+          setName("");
+          setSalesSlug("");
+          await loadUsers();
+        }
+      } catch (e) {
+        console.error("Failed to invite user:", e);
+        setError("Failed to invite user.");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     try {
       const res = await fetch("/api/admin/users", {
         method: "POST",
@@ -1189,7 +1258,7 @@ function UsersAndRolesCard() {
           </label>
 
           <label className="block">
-            <div className="mb-1 text-[11px] text-[var(--text-muted)]">Password</div>
+            <div className="mb-1 text-[11px] text-[var(--text-muted)]">Password (leave blank to email them an invite)</div>
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -1220,7 +1289,7 @@ function UsersAndRolesCard() {
             disabled={saving}
             className="inline-flex items-center rounded-full bg-[var(--action-primary)] px-3 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--action-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saving ? "Creating…" : "Create user"}
+            {saving ? "Saving…" : password ? "Create user" : "Invite by email"}
           </button>
 
           <button
@@ -1409,6 +1478,28 @@ function UsersAndRolesCard() {
                         title="Reset password (sets a new temporary password)"
                       >
                         {resettingId === u.id ? "Resetting" : "Reset"}
+                      </button>{" "}
+                      {/* Step 36A: email them a set-password link */}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setError(null);
+                          setOkMsg(null);
+                          const r = await fetch("/api/admin/users/invite", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ user_id: u.id, resend: true, tenant_id: viewTenantId.trim() || undefined }),
+                          }).catch(() => null);
+                          const j = (r ? await r.json().catch(() => null) : null) as { ok?: boolean; message?: string } | null;
+                          if (r && r.ok && j?.ok) setOkMsg(`Invite sent to ${u.email}.`);
+                          else setError(j?.message || "Couldn't send the invite.");
+                        }}
+                        disabled={deletingId === u.id || saving || loading}
+                        className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Email a link to set their password (7 days)"
+                        data-user-invite={u.id}
+                      >
+                        Invite
                       </button>
                     </td>
                     <td className="py-1 pr-0 text-right">

@@ -132,6 +132,13 @@ const next = searchParams.get("next");
           </button>
         </form>
 
+        {/* Step 36A */}
+        <p className="mt-3 text-center text-xs">
+          <a href="/forgot-password" className="text-[var(--text-muted)] underline" data-forgot-link>
+            Forgot password?
+          </a>
+        </p>
+
         {/* Optional build marker – now in the JSX where it belongs */}
         <p className="mt-4 text-center text-xs text-[var(--text-faint)]">
           Build: 2025-12-05 login-debug
