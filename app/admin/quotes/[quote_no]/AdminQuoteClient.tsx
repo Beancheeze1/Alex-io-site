@@ -30,6 +30,7 @@ import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
 import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
 import ProofCard from "@/components/quote/ProofCard";
 import ShippedCard from "@/components/admin/ShippedCard";
+import ReorderButton from "@/components/quote/ReorderButton";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
@@ -2390,6 +2391,25 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     >
                       Job ticket
                     </a>
+                  ) : null}
+
+                  {/* Step 34B: reorder the released job for the customer */}
+                  {quoteNoValue && quoteState?.locked ? (
+                    <ReorderButton
+                      quoteNo={quoteNoValue}
+                      endpoint="/api/admin/quotes/reorder"
+                      label="Reorder for customer"
+                      buttonStyle={{
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        border: "1px solid var(--border-strong)",
+                        background: "var(--surface-card)",
+                        color: "var(--text-primary)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    />
                   ) : null}
 
 

@@ -27,6 +27,7 @@ const KIND_LABEL: Record<string, string> = {
   needs_review: "Needs review",
   accepted: "Accepted",
   proof: "Proof",
+  reorder: "Reorder",
 };
 
 function timeAgo(iso: string): string {

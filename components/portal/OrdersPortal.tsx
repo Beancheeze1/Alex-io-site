@@ -7,10 +7,12 @@
 //               the timeline, documents and tracking. "Open" goes through
 //               /api/portal/open, which lets this browser accept / answer
 //               proofs / add a ship-to on the quote page.
+//               Step 34B: "Reorder" on orders that went into production.
 "use client";
 
 import * as React from "react";
 import type { PortalOrder } from "@/app/lib/portal";
+import ReorderButton from "@/components/quote/ReorderButton";
 
 const day = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
@@ -195,8 +197,16 @@ export default function OrdersPortal({
                   </span>
                 </div>
 
-                {o.actions.length ? (
+                {o.actions.length || o.stage === "in_production" || o.stage === "shipped" ? (
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {o.stage === "in_production" || o.stage === "shipped" ? (
+                      <ReorderButton
+                        quoteNo={o.quote_no}
+                        endpoint="/api/portal/reorder"
+                        buttonClassName="inline-flex min-h-[40px] items-center rounded-md px-4 text-sm font-medium"
+                        buttonStyle={{ border: "1px solid var(--border-strong)" }}
+                      />
+                    ) : null}
                     {o.actions.map((a) => (
                       <a
                         key={a.key}

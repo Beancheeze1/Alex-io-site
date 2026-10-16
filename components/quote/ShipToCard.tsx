@@ -4,10 +4,13 @@
 // (staff): freight terms, ship-to address and the freight it gives
 // (POST /api/quote/ship-to). With prepaid & add the freight is part of the
 // quote total. Staff can also type the freight (override).
+// Step 34B: "Saved addresses" from the buyer's other quotes at this shop
+// (GET / POST /api/quote/ship-to/saved) fill the address fields.
 
 "use client";
 
 import * as React from "react";
+import type { SavedAddress } from "@/app/lib/reorder-core";
 
 export type FreightView = {
   status: "pickup" | "not_set_up" | "needs_zip" | "nothing_to_ship" | "estimated" | "free" | "override";
@@ -105,6 +108,48 @@ export default function ShipToCard({
   const [override, setOverride] = React.useState(st?.override_usd != null ? String(st.override_usd) : "");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [saved, setSaved] = React.useState<SavedAddress[]>([]);
+  const [picked, setPicked] = React.useState("");
+
+  React.useEffect(() => {
+    if (!canEdit) return;
+    let alive = true;
+    fetch(`/api/quote/ship-to/saved?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j?.ok && Array.isArray(j.addresses)) setSaved(j.addresses as SavedAddress[]);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [canEdit, quoteNo]);
+
+  const pick = (key: string) => {
+    setPicked(key);
+    const a = saved.find((x) => x.key === key);
+    if (!a) return;
+    setZip(a.zip || "");
+    setName(a.name || "");
+    setCompany(a.company || "");
+    setLine1(a.line1 || "");
+    setLine2(a.line2 || "");
+    setCity(a.city || "");
+    setState(a.state || "");
+  };
+
+  const forget = async () => {
+    if (!picked) return;
+    const r = await fetch("/api/quote/ship-to/saved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quote_no: quoteNo, hide: picked }),
+    }).catch(() => null);
+    if (r && r.ok) {
+      setSaved((list) => list.filter((x) => x.key !== picked));
+      setPicked("");
+    }
+  };
 
   if (!options && !freight) return null;
   const allowed = options?.allowed?.length ? options.allowed : (["prepaid_add", "fob_origin", "pickup"] as FreightView["terms"][]);
@@ -185,6 +230,29 @@ export default function ShipToCard({
               </label>
             ))}
           </div>
+          {terms !== "pickup" && saved.length ? (
+            <div style={{ marginBottom: 8 }} data-saved-addresses>
+              <div style={muted}>Saved addresses</div>
+              <select style={input} aria-label="Saved addresses" value={picked} onChange={(e) => pick(e.target.value)} data-saved-address-select>
+                <option value="">Pick one you&apos;ve used before…</option>
+                {saved.map((a) => (
+                  <option key={a.key} value={a.key}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+              {picked ? (
+                <button
+                  type="button"
+                  onClick={() => void forget()}
+                  data-saved-address-remove
+                  style={{ marginTop: 4, background: "none", border: "none", padding: 0, fontSize: 12, color: "var(--text-muted)", textDecoration: "underline", cursor: "pointer" }}
+                >
+                  Remove from saved addresses
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {terms !== "pickup" ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
               {field("Ship-to ZIP", zip, setZip, 10, "zip")}

@@ -14,7 +14,7 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 
 // Step 22: "needs_review" = a quote line was priced from a material with no price.
-export type AdminAlertKind = "new_quote" | "artwork" | "buyer_change" | "spec_request" | "needs_review" | "accepted" | "proof";
+export type AdminAlertKind = "new_quote" | "artwork" | "buyer_change" | "spec_request" | "needs_review" | "accepted" | "proof" | "reorder";
 
 const MERGE_KINDS = new Set<AdminAlertKind>(["artwork", "buyer_change", "needs_review", "accepted", "proof"]);
 
