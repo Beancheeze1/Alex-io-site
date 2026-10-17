@@ -37,6 +37,7 @@ import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
+import { sendNewBoxQuoteEmail } from "@/app/lib/send-quote-email";
 import { tenantOffersQuoteType } from "@/lib/quote-types-server";
 import { parseCustomBoxInput, type CustomBoxInput } from "@/lib/box-styles";
 import {
@@ -350,6 +351,13 @@ export async function POST(req: NextRequest) {
           .filter(Boolean)
           .join(" · "),
       });
+    }
+
+    // Step 37J: email the buyer their quote (with their private link to
+    // accept it), the way a foam quote is emailed. Not for rep-made quotes;
+    // never fails the request.
+    if (!isStaff && createdQuoteHere && email) {
+      await sendNewBoxQuoteEmail(quote.quote_no, tenantId);
     }
 
     const done = json({ ok: true, quote_no: quote.quote_no, url: `/quote?quote_no=${encodeURIComponent(quote.quote_no)}` });

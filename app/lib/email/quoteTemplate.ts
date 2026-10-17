@@ -751,12 +751,18 @@ export function renderQuoteEmail(input: TemplateInput): string {
       .filter(Boolean)
       .map((x) => `<div style="font-size:12px;color:#6b6b66;margin-top:1px">${x}</div>`)
       .join("")}</td><td style="${cell};text-align:right;white-space:nowrap;font-size:13px;font-weight:600;color:#1c1c1a">${amount}</td></tr>`;
+  // Step 37J: a boxes-only quote has no foam: no foam size / quantity /
+  // material facts and no layout editor link.
+  const boxesOnly =
+    String(facts.pack_type || "") === "boxes_only" || (lineItems.length > 0 && lineItems.every((li) => li.isPackaging));
+  const qtyText = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v).toLocaleString("en-US") : t(v as string));
+  const buyerNotes = typeof facts.customer_notes === "string" && facts.customer_notes.trim() ? facts.customer_notes.trim().slice(0, 1000) : null;
   const rows: string[] = [];
   for (const li of lineItems) {
     rows.push(
       lineRow(
         t(li.label),
-        [li.sublabel ? t(li.sublabel) : "", `${t(li.dims)} &middot; Qty ${t(li.qty)}`],
+        [li.sublabel ? t(li.sublabel) : "", `${t(li.dims)} &middot; Qty ${qtyText(li.qty)}`],
         li.lineTotal != null ? fmtMoney(li.lineTotal) : li.isIncluded ? "Included" : "&mdash;",
       ),
     );
@@ -789,7 +795,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
     ["Quantity", qty],
     ["Material", `${t(specsMaterialLabel)}${matDensity !== "—" ? `, ${t(matDensity)}` : ""}`],
   ];
-  const factRows = facts2
+  const factRows = (boxesOnly ? [] : facts2)
     .filter(([, v]) => v && v !== "—")
     .map(([k, v]) => `<tr><td style="padding:3px 12px 3px 0;color:#6b6b66;font-size:13px;white-space:nowrap">${k}</td><td style="padding:3px 0;font-size:13px;color:#1c1c1a;font-weight:600">${v}</td></tr>`)
     .join("");
@@ -811,16 +817,17 @@ export function renderQuoteEmail(input: TemplateInput): string {
       <tr><td style="padding:24px">
         <h1 style="font-size:19px;line-height:1.3;margin:0 0 14px;color:#1c1c1a">Your quote is ready</h1>
         <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Hi ${name ? t(name) : "there"},</p>
-        <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Here is quote ${t(quoteNumber)}${rev ? ` (revision ${t(rev)})` : ""} from ${t(brand)}. Open it to see the full details, change the layout, or accept it.</p>
+        <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Here is quote ${t(quoteNumber)}${rev ? ` (revision ${t(rev)})` : ""} from ${t(brand)}. Open it to see the full details, ${boxesOnly ? "compare quantities" : "change the layout"}, or accept it.</p>
         ${factRows ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 14px">${factRows}</table>` : ""}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px" data-quote-lines>
           ${rows.join("")}
           ${totalRow}
           ${shipRow}
         </table>
+        ${buyerNotes ? `<p style="font-size:13px;line-height:1.55;margin:0 0 12px;color:#33332f;white-space:pre-wrap" data-quote-notes><strong>Your notes:</strong> ${t(buyerNotes)}</p>` : ""}
         ${termsParts.length ? `<p style="font-size:13px;line-height:1.55;margin:0 0 16px;color:#33332f" data-quote-terms>${termsParts.join(" &middot; ")}</p>` : ""}
         ${quotePageUrl ? `<a href="${t(quotePageUrl)}" style="display:inline-block;background:${primary};color:${onPrimary};text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px">View your quote</a>` : ""}
-        ${layoutUrl ? `<p style="font-size:13px;margin:14px 0 0;color:#6b6b66">Need to place cavities? <a href="${t(layoutUrl)}" style="color:#1c1c1a;font-weight:600">Open the layout editor</a></p>` : ""}
+        ${layoutUrl && !boxesOnly ? `<p style="font-size:13px;margin:14px 0 0;color:#6b6b66">Need to place cavities? <a href="${t(layoutUrl)}" style="color:#1c1c1a;font-weight:600">Open the layout editor</a></p>` : ""}
         <p style="font-size:12px;line-height:1.5;margin:16px 0 0;color:#6b6b66">This is an estimate until you accept it and ${t(brand)} confirms it. Prices can change if specs or quantities change.</p>
       </td></tr>
       <tr><td style="padding:14px 24px;border-top:1px solid #eeeeea;font-size:12px;color:#6b6b66">${t(brand)} &middot; Quote ${t(quoteNumber)}. Reply to this email with any questions.</td></tr>

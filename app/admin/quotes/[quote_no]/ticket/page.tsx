@@ -41,6 +41,12 @@ export default function JobTicketPage() {
     };
   }, [quoteNo]);
 
+  // Step 37J: the tab shows the job ticket, not the marketing title
+  // (also the default file name when printing to PDF).
+  React.useEffect(() => {
+    if (quoteNo) document.title = `Job ticket ${quoteNo}${ticket?.shop ? ` | ${ticket.shop}` : ""}`;
+  }, [quoteNo, ticket?.shop]);
+
   const day = (v: string | null) => ticketDate(v, tz);
   const enc = encodeURIComponent(quoteNo);
   const cell = "border-b border-[var(--border)] px-2 py-1.5 align-top";
