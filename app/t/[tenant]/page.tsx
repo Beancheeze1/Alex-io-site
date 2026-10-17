@@ -14,6 +14,7 @@ import SplashChatWidget from "@/components/SplashChatWidget";
 import TenantLogo from "@/components/tenant/TenantLogo";
 import QuoteLookupCard from "@/components/tenant/QuoteLookupCard";
 import { loadTenantPage, PRODUCT_INFO, type ProductKey } from "@/lib/tenant-page";
+import { tenantQuoteTypes } from "@/lib/quote-types-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,6 +114,9 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
   const hasContactStrip = !!(t.phone || t.email || t.address || t.hours);
 
   const primaryBtn = { background: t.primaryColor, color: t.onPrimary };
+  // Step 37M: a boxes-only shop has no foam layout to promise.
+  const quoteTypes = await tenantQuoteTypes(t.id);
+  const boxesOnlyShop = quoteTypes.length > 0 && quoteTypes.every((k) => k === "boxes_only");
   const bannerText = t.heroImageUrl ? "#FFFFFF" : t.onSecondary;
 
   const monogram = (
@@ -246,12 +250,13 @@ export default async function TenantQuoteCenter({ params, searchParams }: PagePr
             style={{
               background: "var(--surface-card)",
               border: "1px solid var(--border)",
-              borderTop: `4px solid ${t.primaryColor}`,
             }}
           >
+            {/* Step 37M: same plain border as the other cards (the 4px top band
+                pushed this card's title down); the dark button carries the emphasis. */}
             <h2 className="mb-2 text-xl font-medium">Quote online</h2>
             <p className="mb-5 flex-1" style={{ color: "var(--text-secondary)" }}>
-              Build a quote for {t.quoteScope} yourself. You’ll get a layout and pricing, saved under a quote number.
+              Build a quote for {t.quoteScope} yourself. You’ll get {boxesOnlyShop ? "prices at the quantities you pick" : "a layout and pricing"}, saved under a quote number.
             </p>
             <a
               href={startQuotePath}
