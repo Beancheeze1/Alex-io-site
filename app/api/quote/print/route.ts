@@ -38,7 +38,8 @@ import { foamChargeLines, latestLayoutJson, quoteFoamGeometry, quoteReviewFlags 
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { addAdminAlert } from "@/lib/admin-alerts";
-import { safeUrl } from "@/lib/tenant-page";
+import { safeHex, safeUrl } from "@/lib/tenant-page";
+import { boxStyleLabel } from "@/lib/box-styles";
 import { buyerMayEdit } from "@/lib/quote-edit";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { buyerCanAccept, computeApproval } from "@/app/lib/quote-approval-core";
@@ -802,10 +803,22 @@ export async function GET(req: NextRequest) {
     // Step 27: one-time cutting dies for die-cut boxes, as their own line.
     const boxToolingTotal =
       Math.round(packagingLinesForDisplay.reduce((s, l) => s + (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0), 0) * 100) / 100;
+    // Step 37I: say which sizes the die is for.
+    const dieSizes = packagingLinesForDisplay
+      .filter((l) => (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0) > 0)
+      .map((l) => {
+        const r = l as { inside_length_in?: unknown; inside_width_in?: unknown; inside_height_in?: unknown; style?: unknown };
+        const d = [r.inside_length_in, r.inside_width_in, r.inside_height_in].map((v) => Number(v));
+        const dims = d.every((v) => Number.isFinite(v) && v > 0) ? `${d.join(" × ")} in` : "";
+        return [dims, boxStyleLabel(r.style).toLowerCase()].filter(Boolean).join(" ");
+      });
+    const dieNote = dieSizes.length
+      ? `Steel-rule die to cut the ${dieSizes.join(" and the ")}. Charged once, not per box.`
+      : null;
     const processLines = [
       ...proc.lines,
       ...(boxToolingTotal > 0
-        ? [{ key: "box_die", label: "Box cutting die (one time)", amount: boxToolingTotal, note: null }]
+        ? [{ key: "box_die", label: "Box cutting die (one time)", amount: boxToolingTotal, note: dieNote }]
         : []),
     ];
     // Kept for older screens: the whole cutting / lamination (+ box die) total.
@@ -825,6 +838,8 @@ export async function GET(req: NextRequest) {
       "printed",
       "pack_type",
       "notes",
+      // Step 37I: the buyer's own notes from the box chat / quote form
+      "customer_notes",
       "customer_box_in",
       "print_spec",
       "print_mode",
@@ -865,6 +880,8 @@ export async function GET(req: NextRequest) {
     const shop = {
       name: shopBrand || String(shopRow?.name || "").trim() || null,
       logoUrl: safeUrl(shopTheme.logoUrl) || null,
+      // Step 37I: the shop color for the quote page's Accept card
+      primaryColor: safeHex(shopTheme.primaryColor, "") || null,
     };
 
     const factsObj = (facts || {}) as Record<string, unknown>;

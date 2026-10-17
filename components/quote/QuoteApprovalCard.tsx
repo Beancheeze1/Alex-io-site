@@ -74,9 +74,15 @@ export default function QuoteApprovalCard({ quoteNo, approval }: { quoteNo: stri
     }
   };
 
+  // Step 37I: when the buyer can accept, the card stands out in the shop's color.
+  const actionable = !!a.can_accept && !a.expired;
+  const brand = "var(--tenant-primary, var(--action-primary))";
   const box: React.CSSProperties = {
     borderRadius: 16,
-    border: `1px solid ${a.stage === "confirmed" ? "var(--status-success-text)" : reapprove ? "var(--attention)" : "var(--border)"}`,
+    border: actionable
+      ? `2px solid ${reapprove ? "var(--attention)" : brand}`
+      : `1px solid ${a.stage === "confirmed" ? "var(--status-success-text)" : reapprove ? "var(--attention)" : "var(--border)"}`,
+    boxShadow: actionable ? `0 0 0 4px color-mix(in srgb, ${reapprove ? "var(--attention)" : brand} 14%, transparent)` : undefined,
     background: "var(--surface-card)",
     padding: "12px 14px",
     marginTop: 4,
@@ -94,7 +100,9 @@ export default function QuoteApprovalCard({ quoteNo, approval }: { quoteNo: stri
 
   return (
     <div style={box} data-quote-approval={a.stage}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>{TITLE[a.stage]}</div>
+      <div style={{ fontSize: actionable ? 16 : 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }} data-approval-title>
+        {actionable && a.stage === "estimate" ? "Accept this quote" : TITLE[a.stage]}
+      </div>
 
       <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
         {a.stage === "estimate" ? (
@@ -153,8 +161,8 @@ export default function QuoteApprovalCard({ quoteNo, approval }: { quoteNo: stri
             style={{
               marginTop: 8,
               borderRadius: 8,
-              border: "1px solid var(--action-primary)",
-              background: "var(--action-primary)",
+              border: `1px solid ${brand}`,
+              background: brand,
               color: "#fff",
               padding: "8px 14px",
               fontSize: 13,

@@ -238,7 +238,9 @@ export async function buildJobTicket(quoteNo: string, tenantId: number): Promise
   const t = effectiveTerms(shipTo, freightSettings);
   const kept = (lockRow?.l && typeof lockRow.l === "object" ? (lockRow.l.result as Record<string, unknown> | undefined) : undefined) || null;
   const approved = proofs ? [...proofs.versions].filter((v) => v.status === "approved").sort((a, b) => b.version - a.version)[0] : undefined;
-  const notes = typeof facts.notes === "string" && facts.notes.trim() ? facts.notes.trim().slice(0, 2000) : null;
+  // Step 37I: box quotes keep the buyer's notes in facts.customer_notes
+  const rawNotes = [facts.notes, facts.customer_notes].find((v) => typeof v === "string" && v.trim());
+  const notes = typeof rawNotes === "string" ? rawNotes.trim().slice(0, 2000) : null;
   const timeZone = String((settings as { shop_timezone?: unknown } | null)?.shop_timezone || "") || "America/New_York";
 
   const ticket: JobTicket = {

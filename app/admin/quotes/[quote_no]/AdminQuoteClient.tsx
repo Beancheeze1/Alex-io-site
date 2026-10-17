@@ -1219,6 +1219,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   // admin-gated endpoint, NOT /api/quote/print — that response is shared
   // with the customer-facing print page and must never carry this field.
   const [internalNotes, setInternalNotes] = React.useState<string | null>(null);
+  // Step 37I: what the buyer wrote (box chat / quote form), from facts
+  const [customerNotes, setCustomerNotes] = React.useState<string | null>(null);
   const [internalNotesLoading, setInternalNotesLoading] = React.useState<boolean>(false);
   const [internalNotesError, setInternalNotesError] = React.useState<string | null>(null);
 
@@ -1446,6 +1448,16 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
             });
             setCustomerBoxDims((json as ApiOk)?.customerBoxDims ?? null);
             setCustomerBoxMatch((json as ApiOk)?.customerBoxMatch ?? null);
+            {
+              // Step 37I: buyer notes + a tab title that isn't the marketing one
+              const fx = ((json as ApiOk)?.facts || {}) as Record<string, unknown>;
+              const cn = [fx.customer_notes, fx.notes].find((v) => typeof v === "string" && v.trim());
+              setCustomerNotes(typeof cn === "string" ? cn.trim() : null);
+              const sn = (json as { shop?: { name?: unknown } | null })?.shop?.name;
+              if (typeof document !== "undefined") {
+                document.title = `Quote ${quoteNoValue} | ${typeof sn === "string" && sn.trim() ? sn.trim() : "Admin"}`;
+              }
+            }
 
             // REV: prefer json.quote.revision -- computed server-side by
             // pickDisplayRevision in /api/quote/print, which strips a
@@ -2548,6 +2560,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       </div>
                     ) : null}
                   </div>
+                  {customerNotes ? (
+                    <div data-admin-customer-notes>
+                      <div style={labelStyle}>Customer notes</div>
+                      <div style={{ whiteSpace: "pre-wrap" }}>{customerNotes}</div>
+                    </div>
+                  ) : null}
                   {(internalNotes || internalNotesLoading || internalNotesError) && (
                     <div>
                       <div style={labelStyle}>Internal notes</div>

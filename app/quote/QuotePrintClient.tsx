@@ -142,7 +142,7 @@ type ApiOk = {
   reviewFlags?: { code: string; message: string }[];
   grandTotal: number;
   // Step 37G: the shop's name and logo for the header
-  shop?: { name?: string | null; logoUrl?: string | null } | null;
+  shop?: { name?: string | null; logoUrl?: string | null; primaryColor?: string | null } | null;
   // Step 28: estimate -> accepted -> confirmed, expiry, lead time
   approval?: QuoteApprovalView | null;
   // Step 30: freight (in grandTotal when prepaid & add), options, ship-to
@@ -880,7 +880,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
   const [reviewFlags, setReviewFlags] = React.useState<{ code: string; message: string }[]>([]);
   const [approval, setApproval] = React.useState<QuoteApprovalView | null>(null);
   // Step 37G: shop branding for the header and the browser tab.
-  const [shop, setShop] = React.useState<{ name: string | null; logoUrl: string | null } | null>(null);
+  const [shop, setShop] = React.useState<{ name: string | null; logoUrl: string | null; primaryColor?: string | null } | null>(null);
   const [logoFailed, setLogoFailed] = React.useState(false);
   React.useEffect(() => {
     if (typeof document === "undefined" || !quote?.quote_no) return;
@@ -1142,6 +1142,10 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
             ? {
                 name: typeof asOk.shop.name === "string" && asOk.shop.name.trim() ? asOk.shop.name.trim() : null,
                 logoUrl: typeof asOk.shop.logoUrl === "string" && /^https?:\/\//i.test(asOk.shop.logoUrl) ? asOk.shop.logoUrl : null,
+                primaryColor:
+                  typeof asOk.shop.primaryColor === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(asOk.shop.primaryColor)
+                    ? asOk.shop.primaryColor
+                    : null,
               }
             : null,
         );
@@ -1166,8 +1170,10 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
 
   // Remove handler for carton selections
   const handleRemoveCarton = React.useCallback(
-    async (selectionId: number) => {
+    async (selectionId: number, confirmText?: string) => {
       if (!quoteNo || !selectionId) return;
+      // Step 37I: removing is a real change to the quote, so ask first.
+      if (confirmText && typeof window !== "undefined" && !window.confirm(confirmText)) return;
 
       try {
         setRemovingBoxId(selectionId);
@@ -1667,6 +1673,27 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
 
   const effectivePackagingSubtotal = packagingSubtotal > 0 ? packagingSubtotal : derivedPackagingSubtotal;
   const canEditQuote = !!approval?.buyer_can_edit && !quote?.locked; // Step 37A
+  // Step 37I: once accepted or confirmed, sizes and quantities are fixed
+  // (artwork and the proof still work). Ask the shop to change the order.
+  const orderLocked = approval?.stage === "accepted" || approval?.stage === "confirmed";
+  const canChangeOrder = canEditQuote && !orderLocked;
+  // Step 37I: partitions are priced per set, pads per pad.
+  const nounFor = (styles: (string | null | undefined)[]) => {
+    const s = styles.map((x) => String(x || "").toLowerCase()).filter(Boolean);
+    if (s.length && s.every((x) => x === "partition")) return { per: "Per set", many: "Sets", total: "Total sets" };
+    if (s.length && s.every((x) => x === "pad")) return { per: "Per pad", many: "Pads", total: "Total pads" };
+    if (s.some((x) => x === "partition" || x === "pad")) return { per: "Each", many: "Packaging", total: "Total pieces" };
+    return { per: "Per box", many: "Boxes", total: "Total boxes" };
+  };
+  const quoteNoun = nounFor(requestedBoxes.map((r) => r.style));
+  const anyGroupTooling = boxBreakGroups.some((g) => g.breaks.some((b) => b.plates_usd > 0 || (b.tooling_usd ?? 0) > 0));
+  const anySingleTooling = boxBreaks.some((b) => b.plates_usd > 0 || (b.tooling_usd ?? 0) > 0);
+  const nounForSelection = (id: number) => nounFor([requestedBoxes.find((r) => r.id === id)?.style]);
+  const customerNotesText = (() => {
+    const f = (facts || {}) as Record<string, unknown>;
+    const v = [f.customer_notes, f.notes].find((x) => typeof x === "string" && x.trim());
+    return typeof v === "string" ? v.trim() : null;
+  })();
 
   const effectiveGrandSubtotal = grandSubtotal > 0 ? grandSubtotal : foamSubtotal + effectivePackagingSubtotal;
   const effectivePrintingUpcharge = printingUpcharge > 0 ? printingUpcharge : 0;
@@ -1877,6 +1904,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
     <div
       className="qp-page"
       style={{
+        // Step 37I: the shop's color (Accept card)
+        ...(shop?.primaryColor ? ({ "--tenant-primary": shop.primaryColor } as React.CSSProperties) : {}),
         fontFamily: "Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
         background: "var(--surface-page)",
         minHeight: embedded ? undefined : "100vh",
@@ -3175,7 +3204,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                   </div>
                                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                                    {isIncludedLayer && canEditQuote && (
+                                    {isIncludedLayer && canChangeOrder && (
                                       <button
                                         type="button"
                                         onClick={() => handleRemoveIncludedLayer(item.id)}
@@ -3320,10 +3349,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   <div style={{ fontWeight: 500 }}>{mainLabel}</div>
                                   {subLabel && <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
-                                {canEditQuote ? (
+                                {/* Step 37I: not after Accept; a boxes-only quote keeps its last size */}
+                                {canChangeOrder && (!isBoxesOnly || requestedBoxes.length > 1) ? (
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoveCarton(rb.id)}
+                                  data-remove-carton
+                                  onClick={() =>
+                                    handleRemoveCarton(
+                                      rb.id,
+                                      `Remove ${dimsText ? `the ${dimsText} size` : "this size"} from this quote? The total updates right away.`,
+                                    )
+                                  }
                                   disabled={isRemoving}
                                   style={{
                                     padding: "4px 10px",
@@ -3337,7 +3373,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     whiteSpace: "nowrap",
                                   }}
                                 >
-                                  {isRemoving ? "Removing…" : "✕ Remove"}
+                                  {isRemoving ? "Removing…" : isBoxesOnly ? "✕ Remove this size" : "✕ Remove"}
                                 </button>
                                 ) : null}
                               </div>
@@ -3573,6 +3609,11 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             {isBoxesOnly && boxBreakGroups.length > 0 && (
               <div style={{ marginTop: 4 }}>
                 <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Price by quantity</div>
+                {orderLocked ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 0 }} data-order-locked>
+                    This quote is accepted, so its sizes and quantities are set. Contact the shop to change them.
+                  </p>
+                ) : null}
                 {boxBreakGroups.map((g) => (
                   <div key={g.id} style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 12 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>
@@ -3582,11 +3623,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       <thead>
                         <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
                           <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Quantity</th>
-                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per box</th>
-                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>{nounForSelection(g.id).per}</th>
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>{nounForSelection(g.id).many}</th>
+                          {/* Step 37I: no plates column when nothing on the quote has plates or a die */}
+                          {anyGroupTooling && (
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>
                             {boxBreakGroups.some((g) => g.breaks.some((b) => (b.tooling_usd ?? 0) > 0)) ? "Plates + die (one time)" : "Plates (one time)"}
                           </th>
+                          )}
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Total</th>
                           <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }} />
                         </tr>
@@ -3601,14 +3645,16 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                 {b.unit_usd == null ? "—" : `$${b.unit_usd.toFixed(4)}`}
                               </td>
                               <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.boxes_usd)}</td>
+                              {anyGroupTooling && (
                               <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                                 {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
                               </td>
+                              )}
                               <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(b.total_usd)}</td>
                               <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
                                 {isCurrent ? (
                                   <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
-                                ) : boxBreaksLocked || !canEditQuote ? null : (
+                                ) : boxBreaksLocked || !canChangeOrder ? null : (
                                   <button
                                     type="button"
                                     onClick={() => switchToBoxBreak(b.qty, g.id)}
@@ -3659,18 +3705,26 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
             {isBoxesOnly && boxBreaks.length > 1 && (
               <div style={{ marginTop: 4 }}>
                 <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Price by quantity</div>
+                {orderLocked ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 0 }} data-order-locked>
+                    This quote is accepted, so its quantity is set. Contact the shop to change it.
+                  </p>
+                ) : null}
                 <div style={{ ...cardBase, background: "var(--surface-card)" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
                         <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Quantity</th>
                         {boxBreaks.some((b) => b.unit_usd != null) && (
-                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per box</th>
+                          <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>{quoteNoun.per}</th>
                         )}
-                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Boxes</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>{quoteNoun.many}</th>
+                        {/* Step 37I: no plates column when no quantity has plates or a die */}
+                        {anySingleTooling && (
                         <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>
                           {boxBreaks.some((b) => (b.tooling_usd ?? 0) > 0) ? "Plates + die (one time)" : "Plates (one time)"}
                         </th>
+                        )}
                         <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Total</th>
                         <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }} />
                       </tr>
@@ -3691,16 +3745,18 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                               {formatUsd(b.boxes_usd)}
                             </td>
+                            {anySingleTooling && (
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                               {b.plates_usd > 0 ? formatUsd(b.plates_usd) : "—"}
                             </td>
+                            )}
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
                               {formatUsd(b.total_usd)}
                             </td>
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
                               {isCurrent ? (
                                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
-                              ) : boxBreaksLocked || !canEditQuote ? null : (
+                              ) : boxBreaksLocked || !canChangeOrder ? null : (
                                 <button
                                   type="button"
                                   onClick={() => switchToBoxBreak(b.qty)}
@@ -3817,7 +3873,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right", whiteSpace: "nowrap" }}>
                               {isCurrent ? (
                                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>On this quote</span>
-                              ) : foamBreaksInfo.locked || !canEditQuote ? null : (
+                              ) : foamBreaksInfo.locked || !canChangeOrder ? null : (
                                 <button
                                   type="button"
                                   onClick={() => switchToFoamBreak(b.qty)}
@@ -4227,7 +4283,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 {/* Step 37G: quote summary (moved out of the line items card) */}
                 <div style={{ ...cardBase, background: "var(--surface-card)" }} data-quote-summary>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>Summary</div>
-                  <SummaryRow label={isBoxesOnly ? "Total boxes" : "Total quantity"} value={Number(overallQty).toLocaleString("en-US")} />
+                  <SummaryRow label={isBoxesOnly ? quoteNoun.total : "Total quantity"} value={Number(overallQty).toLocaleString("en-US")} />
                   {anyPricing && (
                     <>
                       {/* Foam subtotal (not shown on boxes-only quotes) */}
@@ -4238,7 +4294,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                           instead, so they're not counted twice on screen. */}
                       {(effectivePackagingSubtotal > 0 || effectivePrintingUpcharge > 0) && (
                         <SummaryRow
-                          label={isBoxesOnly ? "Boxes" : "Packaging"}
+                          label={isBoxesOnly ? quoteNoun.many : "Packaging"}
                           value={formatUsd(effectivePackagingSubtotal + (printModel === "per_color" ? 0 : effectivePrintingUpcharge))}
                         />
                       )}
@@ -4261,12 +4317,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         <>
                           <SummaryRow
                             strong
-                            label="Estimated total"
+                            label={approval?.stage === "confirmed" ? "Order total" : "Estimated total"}
                             value={formatUsd(effectiveGrandTotal > 0 ? effectiveGrandTotal : effectiveGrandSubtotal + effectivePrintingUpcharge + effectiveDieCuttingCharge)}
                           />
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                             {isBoxesOnly
-                              ? `Boxes${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${effectiveDieCuttingCharge > 0 ? " + cutting die" : ""}${freightLine ? " + freight" : ""}`
+                              ? `${quoteNoun.many}${effectivePrintingUpcharge > 0 ? " + printing plates" : ""}${effectiveDieCuttingCharge > 0 ? " + cutting die" : ""}${freightLine ? " + freight" : ""}`
                               : `Foam + packaging${effectivePrintingUpcharge > 0 ? (printModel === "per_color" ? " + printing plates" : " + printing") : ""}${effectiveDieCuttingCharge > 0 ? " + cutting" : ""}${freightLine ? " + freight" : ""}`}
                           </div>
                         </>
@@ -4274,6 +4330,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </>
                   )}
                 </div>
+                {/* Step 37I: the buyer's own notes, so they can see the shop has them */}
+                {customerNotesText ? (
+                  <div style={{ ...cardBase, background: "var(--surface-card)" }} data-quote-notes>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 6 }}>Your notes</div>
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                      {customerNotesText}
+                    </div>
+                  </div>
+                ) : null}
                 {/* Step 28: estimate / accepted / confirmed, with Accept for the buyer */}
                 {/* Step 31: artwork proof (approve / request changes) */}
                 {quoteNo ? <ProofCard quoteNo={quoteNo} canEdit={!!approval?.buyer_can_edit && !quote?.locked} /> : null}
