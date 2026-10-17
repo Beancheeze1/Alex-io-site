@@ -9,7 +9,8 @@
 //      on purpose); packed in the shop's standard carton at its fill %.
 //      Boxes ship flat: approximate blank area by style (RSC ~ (2L + 2W +
 //      1.5) x (W + H)), x caliper for volume, x board weight per sq ft by
-//      flute; bundled into the same cartons.
+//      flute. Step 37K: flat boxes are bundled straight onto the pallet, not
+//      packed into cartons (for parcel they count as carton-sized bundles).
 //   2. Zone: straight-line miles between the 3-digit ZIP centres of the
 //      shop and the ship-to, into the shop's 7 distance bands.
 //   3. Parcel when the shipment fits the shop's parcel limits (billable
@@ -225,9 +226,10 @@ export function blankAreaIn2(b: Pick<BoxPiece, "l" | "w" | "h" | "style">): numb
 export type PackResult = {
   foam_lb: number;
   box_lb: number;
-  cartons: number;
+  cartons: number; // foam cartons only (Step 37K)
+  bundles: number; // Step 37K: flat-box bundles, carton-sized, no carton
   actual_lb: number; // product + cartons
-  volume_in3: number; // cartons
+  volume_in3: number; // cartons + flat board
 };
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -254,14 +256,16 @@ export function packLoad(foam: FoamPiece[], boxes: BoxPiece[], s: FreightSetting
     boxLb += (areaIn2 / 144) * fluteLbPerSqft(b.flute) * b.qty;
   }
   const foamCartons = foamVol > 0 ? Math.ceil(foamVol / (cartonVol * fill)) : 0;
-  const boxCartons = boxVol > 0 ? Math.ceil(boxVol / (cartonVol * 0.9)) : 0;
-  const cartons = foamCartons + boxCartons;
+  // Step 37K: boxes ship as flat bundles, no shipping carton around them.
+  // The bundle count (carton-sized) only matters for the parcel limits.
+  const bundles = boxVol > 0 ? Math.ceil(boxVol / (cartonVol * 0.9)) : 0;
   return {
     foam_lb: r1(foamLb),
     box_lb: r1(boxLb),
-    cartons,
-    actual_lb: r1(foamLb + boxLb + cartons * s.carton_weight_lb),
-    volume_in3: cartons * cartonVol,
+    cartons: foamCartons,
+    bundles,
+    actual_lb: r1(foamLb + boxLb + foamCartons * s.carton_weight_lb),
+    volume_in3: foamCartons * cartonVol + boxVol,
   };
 }
 
@@ -352,7 +356,8 @@ export function estimateFreight(args: {
   if (!to || miles == null) return { ...base, status: "needs_zip", note: "Add a ship-to ZIP to see freight." };
 
   const pack = packLoad(args.foam, args.boxes, s);
-  if (pack.cartons === 0) return { ...base, status: "nothing_to_ship", miles, note: "Nothing to ship yet." };
+  const pieces = pack.cartons + pack.bundles; // Step 37K
+  if (pieces === 0) return { ...base, status: "nothing_to_ship", miles, note: "Nothing to ship yet." };
 
   const zone = zoneFor(miles, s.zone_miles);
   const dimLb = pack.volume_in3 / s.dim_divisor;
@@ -361,9 +366,9 @@ export function estimateFreight(args: {
   let cost: number;
   let pallets = 0;
   let actual = pack.actual_lb;
-  if (pack.cartons <= s.parcel_max_cartons && billable <= s.parcel_max_lb) {
+  if (pieces <= s.parcel_max_cartons && billable <= s.parcel_max_lb) {
     mode = "parcel";
-    cost = billable * s.parcel_per_lb[zone - 1] + pack.cartons * s.parcel_per_carton_usd;
+    cost = billable * s.parcel_per_lb[zone - 1] + pieces * s.parcel_per_carton_usd;
   } else {
     mode = "ltl";
     const palletVol = s.pallet_l_in * s.pallet_w_in * s.pallet_max_h_in * 0.85;
@@ -376,7 +381,12 @@ export function estimateFreight(args: {
   const free = prepaid && s.free_over_usd > 0 && args.subtotal >= s.free_over_usd;
   const what =
     mode === "parcel"
-      ? `${pack.cartons} carton${pack.cartons === 1 ? "" : "s"}, ${billable} lb billable, zone ${zone} (~${miles} mi)`
+      ? `${[
+          pack.cartons ? `${pack.cartons} carton${pack.cartons === 1 ? "" : "s"}` : "",
+          pack.bundles ? `${pack.bundles} bundle${pack.bundles === 1 ? "" : "s"}` : "",
+        ]
+          .filter(Boolean)
+          .join(" + ")}, ${billable} lb billable, zone ${zone} (~${miles} mi)`
       : `${pallets} pallet${pallets === 1 ? "" : "s"} LTL, ${Math.round(actual)} lb, zone ${zone} (~${miles} mi)`;
   return {
     ...base,

@@ -57,7 +57,10 @@ check("pad blank area 12x10", blankAreaIn2({ l: 12, w: 10, h: 0, style: "pad" })
 const boxes500 = [{ l: 12, w: 10, h: 8, qty: 500, style: "rsc", flute: "C" }];
 const p2 = packLoad([], boxes500, S);
 check("500 RSC C-flute weight", p2.box_lb, 341.3);
-check("500 RSC flat -> cartons", p2.cartons, 10);
+check("500 RSC flat -> no cartons (Step 37K)", p2.cartons, 0);
+check("500 RSC flat -> 10 bundles", p2.bundles, 10);
+check("flat boxes: no carton weight", p2.actual_lb, 341.3);
+check("flat boxes: board volume", p2.volume_in3, 65520);
 
 // LTL: foam 250 pcs to Chicago (zone 2) = 1 pallet x $225
 const ltl = estimateFreight({ s: S, terms: "prepaid_add", toZip: "60601", foam: foam250, boxes: [], subtotal: 1000 });
@@ -104,9 +107,32 @@ check("override with collect not in total", estimateFreight({ s: S, terms: "fob_
 
 // Mixed foam + boxes
 const mix = estimateFreight({ s: S, terms: "prepaid_add", toZip: "10001", foam: small, boxes: boxes500, subtotal: 900 });
-check("foam + boxes cartons add up", mix.cartons, 11);
+check("foam + boxes: 1 carton", mix.cartons, 1);
+check("foam + boxes: 1 carton + 10 bundles = 11 pieces, over the parcel limit", packLoad(small, boxes500, S).bundles + mix.cartons, 11);
 check("mixed goes LTL", mix.mode, "ltl");
 check("New York = zone 3", mix.zone, 3);
+
+// Step 37K: flat boxes go straight onto pallets (Q-A-261017-09234, Oct 17:
+// was 39 cartons on 4 pallets, $700 at $175/pallet)
+{
+  const twoSizes = [
+    { l: 10, w: 10, h: 10, qty: 1000, style: "rsc", flute: "C", caliper_in: 0.1875 },
+    { l: 12, w: 12, h: 12, qty: 500, style: "rsc", flute: "C", caliper_in: 0.1875 },
+  ];
+  const pk = packLoad([], twoSizes, S);
+  check("37K: board weight 692 + 495", pk.box_lb, 1186.7);
+  check("37K: no cartons", pk.cartons, 0);
+  check("37K: no carton weight", pk.actual_lb, 1186.7);
+  const f = estimateFreight({ s: S, terms: "prepaid_add", toZip: "60601", foam: [], boxes: twoSizes, subtotal: 1809.15 });
+  check("37K: LTL", f.mode, "ltl");
+  check("37K: 3 pallets (was 4)", f.pallets, 3);
+  check("37K: weight incl. 3 pallets", f.actual_lb, 1306.7);
+  // a small box order still goes parcel, as bundles
+  const few = [{ l: 12, w: 10, h: 8, qty: 50, style: "rsc", flute: "C" }];
+  const fp = estimateFreight({ s: S, terms: "prepaid_add", toZip: "60601", foam: [], boxes: few, subtotal: 100 });
+  check("37K: 50 boxes parcel", fp.mode, "parcel");
+  check("37K: parcel note says bundle", /1 bundle,/.test(fp.note), true);
+}
 
 // Step 30B: kept freight key
 const k = freightLockKey("prepaid_add", "60601-1234", null, 857.94);
