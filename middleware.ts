@@ -9,6 +9,8 @@
 // - For TENANT.api.alex-io.com, attach request header: x-tenant-slug=TENANT
 // - For api.alex-io.com (core host), no tenant slug header.
 //
+// Step 37L: TENANT.api.alex-io.com/ shows that shop's page (/t/TENANT).
+//
 // NEW (Path A): /admin requires a session cookie present.
 // Tenant correctness is enforced server-side by lib/auth.ts (Host->tenant match).
 
@@ -67,6 +69,17 @@ export function middleware(req: NextRequest) {
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     const token = req.cookies.get(SESSION_COOKIE_NAME)?.value || "";
     if (!token) return redirectToLogin(req);
+  }
+
+  // Step 37L: a shop's own address with no path (TENANT.api.alex-io.com/)
+  // shows that shop's page, the same as /t/TENANT. A rewrite, not a
+  // redirect: the address bar keeps the short address, and anything after
+  // "?" (e.g. ?sales_rep_slug=) rides along. Rep links (/q/REP) and every
+  // other path are untouched; the core host keeps the Alex-IO home page.
+  if (pathname === "/" && tenantSlug && tenantSlug !== "default" && /^[a-z0-9-]{1,63}$/.test(tenantSlug)) {
+    const url = req.nextUrl.clone();
+    url.pathname = `/t/${tenantSlug}`;
+    return NextResponse.rewrite(url, { request: { headers: requestHeaders } });
   }
 
   return NextResponse.next({
