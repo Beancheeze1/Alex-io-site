@@ -57,8 +57,19 @@ export type Coverage = "spot" | "flood";
 
 export type PrintSpec = {
   colors: Coverage[]; // one entry per color; [] = unprinted
+  /** Step 37N: 1 = printed on the outside, 2 = outside + inside (a second pass). */
   sides: 1 | 2;
+  /** Step 37N: panels printed (1-4), recorded only; doesn't change the price. */
+  panels?: 1 | 2 | 3 | 4;
 };
+
+/** Step 37N: "1 panel" / "2 panels" / "all 4 panels". */
+export function panelsText(n: unknown): string | null {
+  const p = Number(n);
+  if (p === 4) return "all 4 panels";
+  if (p === 1 || p === 2 || p === 3) return `${p} panel${p === 1 ? "" : "s"}`;
+  return null;
+}
 
 export type BoxSettings = CorrugatedRates & {
   joint_type: JointType;
@@ -370,28 +381,39 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
 /** Cleans a stored / posted print spec. Not an object with a colors array → null. */
 export function parsePrintSpec(raw: unknown): PrintSpec | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const r = raw as { colors?: unknown; sides?: unknown };
+  const r = raw as { colors?: unknown; sides?: unknown; panels?: unknown };
   if (!Array.isArray(r.colors)) return null;
   const colors = r.colors
     .filter((c): c is Coverage => c === "spot" || c === "flood")
     .slice(0, MAX_COLORS);
   const sides: 1 | 2 = Number(r.sides) === 2 ? 2 : 1;
+  const p = Number(r.panels);
+  // Step 37N: panels kept only when printed and 1-4
+  if (colors.length > 0 && (p === 1 || p === 2 || p === 3 || p === 4)) return { colors, sides, panels: p };
   return { colors, sides };
 }
 
+/** Step 37N: where it's printed: "outside" or "outside + inside" (sides 1 / 2). */
+export function printFaceText(sides: unknown): string {
+  return Number(sides) === 2 ? "outside + inside" : "outside";
+}
+
 /**
- * "2-color print (1 spot, 1 flood), two sides" — or "No print". Step 15: with
- * method "digital", "Digital print, two sides" (full color, no plates).
+ * "2-color print (1 spot, 1 flood), outside + inside, 2 panels" — or "No
+ * print". Step 15: with method "digital", "Digital print, outside" (full
+ * color, no plates). Step 37N: "outside" / "outside + inside" instead of
+ * "one side" / "two sides", and the panels when known.
  */
 export function describePrintSpec(p: PrintSpec | null, method?: RunMethod | null): string {
   if (!p || p.colors.length === 0) return "No print";
-  if (method === "digital") return `Digital print, ${p.sides === 2 ? "two sides" : "one side"}`;
+  const tail = [printFaceText(p.sides), panelsText(p.panels)].filter(Boolean).join(", ");
+  if (method === "digital") return `Digital print, ${tail}`;
   const spot = p.colors.filter((c) => c === "spot").length;
   const flood = p.colors.length - spot;
   const parts: string[] = [];
   if (spot) parts.push(`${spot} spot`);
   if (flood) parts.push(`${flood} flood`);
-  return `${p.colors.length}-color print (${parts.join(", ")}), ${p.sides === 2 ? "two sides" : "one side"}`;
+  return `${p.colors.length}-color print (${parts.join(", ")}), ${tail}`;
 }
 
 export type PrintAdderResult = {

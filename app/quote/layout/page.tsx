@@ -1892,7 +1892,7 @@ function LayoutEditorHostReady(props: {
   // Per-color printing (Corrugated Step 3B). Set when the quote is on the
   // per-color model: from the Start Quote / rep URL (print_colors,
   // print_sides) or from the quote's saved print_spec. null = legacy flag only.
-  const [printSpec, setPrintSpec] = React.useState<{ colors: ("spot" | "flood")[]; sides: 1 | 2 } | null>(null);
+  const [printSpec, setPrintSpec] = React.useState<{ colors: ("spot" | "flood")[]; sides: 1 | 2; panels?: 1 | 2 | 3 | 4 } | null>(null);
   const persistPrinted = React.useCallback(
     (next: boolean) => {
       const key = hasRealQuoteNo ? quoteNo.trim() : "";
@@ -2006,7 +2006,13 @@ function LayoutEditorHostReady(props: {
           .filter((c): c is "spot" | "flood" => c === "spot" || c === "flood")
           .slice(0, 4);
         const sides: 1 | 2 = url.searchParams.get("print_sides") === "2" ? 2 : 1;
-        setPrintSpec({ colors, sides });
+        // Step 37N: panels printed (recorded only), so the saved spec matches
+        const pn = Number(url.searchParams.get("print_panels"));
+        setPrintSpec(
+          colors.length > 0 && (pn === 1 || pn === 2 || pn === 3 || pn === 4)
+            ? { colors, sides, panels: pn as 1 | 2 | 3 | 4 }
+            : { colors, sides },
+        );
         setIsPrinted(colors.length > 0);
       }
 
@@ -5632,9 +5638,9 @@ const tenantCssVars = React.useMemo(() => {
                       <div className="text-[10px] text-[var(--text-muted)]">
                         {printSpec
                           ? printSpec.colors.length
-                            ? `${printSpec.colors.length} color${printSpec.colors.length > 1 ? "s" : ""} (${printSpec.colors.join(", ")}), ${printSpec.sides === 2 ? "two sides" : "one side"} · priced per color on Apply`
+                            ? `${printSpec.colors.length} color${printSpec.colors.length > 1 ? "s" : ""} (${printSpec.colors.join(", ")}), ${printSpec.sides === 2 ? "outside + inside" : "outside"} · priced per color on Apply`
                             : "Not printed"
-                          : "Check to price 1 spot color, one side (the shop can change it)."}
+                          : "Check to price 1 spot color, outside (the shop can change it)."}
                       </div>
                     </div>
 

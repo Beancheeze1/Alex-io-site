@@ -303,15 +303,15 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
                 </label>
                 {draft.colors.length > 0 ? (
                   <label>
-                    <div style={label}>Sides</div>
+                    <div style={label}>Printed on</div>
                     <select
                       style={input}
                       aria-label="Print sides"
                       value={String(draft.sides)}
                       onChange={(e) => set({ sides: e.target.value === "2" ? 2 : 1 })}
                     >
-                      <option value="1">One side</option>
-                      <option value="2">Two sides</option>
+                      <option value="1">Outside</option>
+                      <option value="2">Outside + inside</option>
                     </select>
                   </label>
                 ) : null}

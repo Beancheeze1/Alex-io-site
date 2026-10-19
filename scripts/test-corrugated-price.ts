@@ -154,7 +154,7 @@ check(
 check("parsePrintSpec rejects non-specs", parsePrintSpec("x") === null && parsePrintSpec({}) === null);
 check(
   "describePrintSpec",
-  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }) === "2-color print (1 spot, 1 flood), two sides",
+  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }) === "2-color print (1 spot, 1 flood), outside + inside",
   describePrintSpec({ colors: ["spot", "flood"], sides: 2 }),
 );
 
@@ -206,7 +206,7 @@ const dp = pricePrintAdder(20, { colors: ["spot"], sides: 1 }, sr, { method: "pl
 check("adder with plates choice", dp.method === "plates" && dp.plates_line_usd === 195, dp);
 check(
   "describePrintSpec digital",
-  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }, "digital") === "Digital print, two sides",
+  describePrintSpec({ colors: ["spot", "flood"], sides: 2 }, "digital") === "Digital print, outside + inside",
 );
 
 // 7. Step 26: board bought as sheets

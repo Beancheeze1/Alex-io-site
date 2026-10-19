@@ -112,7 +112,7 @@ export function describeExtraSize(s: ExtraBoxSize, grades: BoxGradeOption[], gra
   }
   parts.push(
     s.colors.length
-      ? `${s.colors.length} color${s.colors.length > 1 ? "s" : ""} (${s.colors.join(", ")}), ${s.sides === 2 ? "two sides" : "one side"}`
+      ? `${s.colors.length} color${s.colors.length > 1 ? "s" : ""} (${s.colors.join(", ")}), ${s.sides === 2 ? "outside + inside" : "outside"}`
       : "No print",
   );
   parts.push(`Qty ${s.qty || "?"}`);
@@ -289,15 +289,15 @@ export default function BoxSizesEditor({
               </label>
               {s.colors.length > 0 ? (
                 <label className="block">
-                  <div className={labelCls}>SIDES</div>
+                  <div className={labelCls}>PRINTED ON</div>
                   <select
                     value={String(s.sides)}
                     aria-label={`Size ${n} print sides`}
                     onChange={(e) => update(i, { sides: e.target.value === "2" ? 2 : 1 })}
                     className={inputCls}
                   >
-                    <option value="1" style={optStyle}>One side</option>
-                    <option value="2" style={optStyle}>Two sides</option>
+                    <option value="1" style={optStyle}>Outside</option>
+                    <option value="2" style={optStyle}>Outside + inside</option>
                   </select>
                 </label>
               ) : null}

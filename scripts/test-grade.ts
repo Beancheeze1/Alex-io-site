@@ -5,7 +5,8 @@
 // Run: npm run test:grade   (= npx --yes tsx scripts/test-grade.ts)
 
 import { matchGrade, parseGradeText, type GradeChoice } from "../lib/corrugated/grade-match";
-import { extractBoxFacts } from "../app/lib/widget/boxes-chat";
+import { extractBoxFacts, nextBoxQuestion, isBoxesReady, GRADE_RECOMMEND } from "../app/lib/widget/boxes-chat";
+import { describePrintSpec, parsePrintSpec } from "../lib/corrugated-price";
 
 let failed = 0;
 function check(name: string, got: unknown, want: unknown) {
@@ -61,9 +62,46 @@ check("match: no default -> C", matchGrade("32 ECT", G.map((g) => ({ ...g, is_de
   check("chat: qty still 2500", f.qty, "2500");
   check("chat: size", `${f.boxL}x${f.boxW}x${f.boxD}`, "18x12x10");
   check("chat: rsc", f.boxStyle, "rsc");
-  check("chat: two sides", f.printSides, "2");
+  // Step 37N: "two sides" of a box = two panels, not inside + outside
+  check("chat: two sides = 2 panels", f.printPanels, "2");
+  check("chat: two sides doesn't set inside/outside", f.printSides, undefined);
   check("chat: no grade said", extractBoxFacts("500 mailers 10x8x4", {}).boardGrade, undefined);
 }
+
+// ---- Step 37N: board grade asked; outside / inside; panels
+{
+  const base = { boxL: "18", boxW: "12", boxD: "10", boxStyle: "rsc" as const, qty: "2500" };
+  check("37N: asks grade after qty", /board grade/.test(nextBoxQuestion(base).assistantMessage), true);
+  check("37N: grade quick replies", nextBoxQuestion(base).quickReplies.join("|"), "32 ECT|44 ECT|Double wall|Not sure");
+  check("37N: 'Not sure' -> recommend", extractBoxFacts("Not sure", base).boardGrade, GRADE_RECOMMEND);
+  check("37N: '44 ECT' answer", extractBoxFacts("44 ECT", base).boardGrade, "44 ECT");
+  check("37N: 'not sure' ignored when not asking grade", extractBoxFacts("not sure", { ...base, boardGrade: "32 ECT" }).boardGrade, undefined);
+  const g = { ...base, boardGrade: "32 ECT", printed: true, printColorCount: "1" as const, printColors: ["spot" as const] };
+  check("37N: asks outside / inside", nextBoxQuestion(g).assistantMessage, "Printed on the outside of the box only, or outside and inside?");
+  check("37N: 'Outside only'", extractBoxFacts("Outside only", g).printSides, "1");
+  check("37N: 'Outside + inside'", extractBoxFacts("Outside + inside", g).printSides, "2");
+  check("37N: 'printed on the outside'", extractBoxFacts("printed on the outside", base).printSides, "1");
+  check("37N: dims 'inside' isn't print", extractBoxFacts("2500 boxes 18x12x10 inside, printed 1 color", {}).printSides, undefined);
+  check("37N: 'outside dimensions' isn't print", extractBoxFacts("outside dimensions 12x10x8", {}).printSides, undefined);
+  const h = { ...g, printSides: "1" as const };
+  check("37N: asks panels", /4 side panels/.test(nextBoxQuestion(h).assistantMessage), true);
+  check("37N: 'All 4 panels'", extractBoxFacts("All 4 panels", h).printPanels, "4");
+  check("37N: 'front and back'", extractBoxFacts("front and back", h).printPanels, "2");
+  check("37N: '3 panels'", extractBoxFacts("3 panels", h).printPanels, "3");
+  check("37N: '1 panel'", extractBoxFacts("1 panel", h).printPanels, "1");
+  check("37N: not ready without panels", isBoxesReady({ ...h, customerName: "Pat", customerEmail: "p@x.com" }), false);
+  check("37N: ready with panels", isBoxesReady({ ...h, printPanels: "2", customerName: "Pat", customerEmail: "p@x.com" }), true);
+  check("37N: not ready without grade", isBoxesReady({ ...h, printPanels: "2", boardGrade: null, customerName: "Pat", customerEmail: "p@x.com" }), false);
+  check("37N: plain box skips print questions", /full name/.test(nextBoxQuestion({ ...base, boardGrade: "recommend", printed: false }).assistantMessage), true);
+}
+
+// ---- Step 37N: print wording and panels in the print spec
+check("37N: outside", describePrintSpec({ colors: ["spot"], sides: 1 }), "1-color print (1 spot), outside");
+check("37N: outside + inside, 2 panels", describePrintSpec({ colors: ["spot"], sides: 2, panels: 2 }), "1-color print (1 spot), outside + inside, 2 panels");
+check("37N: all 4 panels", describePrintSpec({ colors: ["flood"], sides: 1, panels: 4 }), "1-color print (1 flood), outside, all 4 panels");
+check("37N: panels kept", parsePrintSpec({ colors: ["spot"], sides: 1, panels: 3 })?.panels, 3);
+check("37N: bad panels dropped", parsePrintSpec({ colors: ["spot"], sides: 1, panels: 7 })?.panels, undefined);
+check("37N: no panels when unprinted", parsePrintSpec({ colors: [], sides: 1, panels: 2 })?.panels, undefined);
 
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
 process.exit(failed ? 1 : 0);

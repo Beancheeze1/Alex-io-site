@@ -372,6 +372,20 @@ export default function StartQuoteModal({
       : [],
   );
   const [printSides, setPrintSides] = React.useState<1 | 2>(1);
+  // Step 37N: panels printed (recorded on the quote and job ticket; not priced).
+  const [printPanels, setPrintPanels] = React.useState<1 | 2 | 3 | 4>(2);
+  const printSpecOut = () =>
+    printColors.length > 0
+      ? { colors: printColors, sides: printSides, panels: printPanels }
+      : { colors: printColors, sides: printSides };
+  // Step 37N: the panels also go in the buyer's notes, so they reach the job
+  // ticket on every kind of quote.
+  const notesOut = () => {
+    const base = customerNotes.trim();
+    if (printColors.length === 0) return base || null;
+    const line = `Printed panels: ${printPanels === 4 ? "all 4" : printPanels}`;
+    return [base, line].filter(Boolean).join("\n");
+  };
   const setPrintColorCount = (n: number) => {
     setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
     setPrinted(n > 0);
@@ -494,6 +508,10 @@ export default function StartQuoteModal({
       setPrintColors(colors);
       setPrinted(colors.length > 0);
       setPrintSides(prefillData.print?.sides === 2 ? 2 : 1);
+      {
+        const pn = Number(prefillData.print?.panels);
+        if (pn === 1 || pn === 2 || pn === 3 || pn === 4) setPrintPanels(pn);
+      }
       if (typeof prefillData.customerName === "string" && prefillData.customerName.trim()) {
         setBoName(prefillData.customerName.trim());
       }
@@ -1307,6 +1325,7 @@ export default function StartQuoteModal({
       }
       p.set("print_colors", printColors.join(","));
       p.set("print_sides", String(printSides));
+      if (printColors.length > 0) p.set("print_panels", String(printPanels)); // Step 37N
       p.set("printed", printColors.length > 0 ? "1" : "0");
       p.set("pack_type", "complete_pack");
       p.set("foam_config", foamConfig);
@@ -1324,14 +1343,17 @@ export default function StartQuoteModal({
             quote_no,
             box: { L: boxLNum, W: boxWNum, H: boxDNum, style: boxStyle },
             printed: printColors.length > 0 ? 1 : 0,
-            print_spec: { colors: printColors, sides: printSides },
+            print_spec: printSpecOut(),
           }),
         }).catch(() => null);
       }
     }
 
     // Internal hints (fit tips, box suggestions) are stored in internalHints, not notes.
-    if (customerNotes.trim()) p.set("notes", customerNotes.trim());
+    {
+      const n = notesOut();
+      if (n) p.set("notes", n);
+    }
 
     router.push(`/quote/layout?${p.toString()}`);
   };
@@ -1387,12 +1409,12 @@ export default function StartQuoteModal({
                 quote_source: quoteSource || null,
                 sales_rep_slug: salesSlug || null,
                 customer: boCustomer,
-                notes: customerNotes.trim() || null,
+                notes: notesOut(),
                 boxes: [
                   {
                     qty: qtyNum,
                     ...size1Box,
-                    print_spec: { colors: printColors, sides: printSides },
+                    print_spec: printSpecOut(),
                     qty_breaks: size1Breaks,
                   },
                   ...extraSizes.map(extraSizePayload),
@@ -1410,9 +1432,9 @@ export default function StartQuoteModal({
                 customer: boCustomer,
                 qty: qtyNum,
                 box: size1Box,
-                print_spec: { colors: printColors, sides: printSides },
+                print_spec: printSpecOut(),
                 qty_breaks: size1Breaks,
-                notes: customerNotes.trim() || null,
+                notes: notesOut(),
               }),
             });
       const j = await res.json().catch(() => null);
@@ -1881,7 +1903,7 @@ export default function StartQuoteModal({
                             Print on the box? Choose the colors. Spot is text, lines and logos; flood covers large
                             solid areas.
                           </div>
-                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                             <label className="block">
                               <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
                                 COLORS
@@ -1902,7 +1924,7 @@ export default function StartQuoteModal({
                             {printColors.length > 0 ? (
                               <label className="block">
                                 <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                                  SIDES
+                                  PRINTED ON
                                 </div>
                                 <select
                                   aria-label="Print sides"
@@ -1910,8 +1932,30 @@ export default function StartQuoteModal({
                                   onChange={(e) => setPrintSides(e.target.value === "2" ? 2 : 1)}
                                   className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                                 >
-                                  <option value="1">One side</option>
-                                  <option value="2">Two sides</option>
+                                  <option value="1">Outside</option>
+                                  <option value="2">Outside + inside</option>
+                                </select>
+                              </label>
+                            ) : null}
+                            {/* Step 37N: how many panels carry print */}
+                            {printColors.length > 0 ? (
+                              <label className="block">
+                                <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                                  PANELS PRINTED
+                                </div>
+                                <select
+                                  aria-label="Panels printed"
+                                  value={String(printPanels)}
+                                  onChange={(e) => {
+                                    const v = Number(e.target.value);
+                                    setPrintPanels(v === 1 || v === 3 || v === 4 ? v : 2);
+                                  }}
+                                  className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                >
+                                  <option value="1">1 panel</option>
+                                  <option value="2">2 panels</option>
+                                  <option value="3">3 panels</option>
+                                  <option value="4">All 4 panels</option>
                                 </select>
                               </label>
                             ) : null}
@@ -2386,7 +2430,7 @@ export default function StartQuoteModal({
                               k="Printing"
                               v={
                                 printColors.length
-                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
+                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "outside + inside" : "outside"}, ${printPanels === 4 ? "all 4 panels" : printPanels === 1 ? "1 panel" : `${printPanels} panels`}`
                                   : "No print"
                               }
                             />
@@ -2598,7 +2642,7 @@ export default function StartQuoteModal({
                                   k="Printing"
                                   v={
                                     printColors.length
-                                      ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
+                                      ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "outside + inside" : "outside"}, ${printPanels === 4 ? "all 4 panels" : printPanels === 1 ? "1 panel" : `${printPanels} panels`}`
                                       : "No print"
                                   }
                                 />

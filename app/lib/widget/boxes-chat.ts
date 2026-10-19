@@ -7,7 +7,10 @@
 // Collects one box size: inside L x W x D (inches), style (RSC or mailer),
 // quantity, printing (plain, or 1-4 colors with spot/flood for each color and
 // one or two sides), then name and email. Step 37G: the board grade too, when
-// the buyer says one ("32 ECT", "200#", "double wall"; optional). The widget hands the facts to Start
+// the buyer says one ("32 ECT", "200#", "double wall"; optional). Step 37N:
+// the board grade is asked ("Not sure" = the shop recommends one), printing
+// asks outside / outside + inside, then how many panels (1-4, recorded only).
+// The widget hands the facts to Start
 // Quote (Boxes only, review step), where the buyer checks them and can add
 // compare quantities, artwork or more sizes before getting the price.
 
@@ -26,7 +29,10 @@ export type BoxChatFacts = {
   printed?: boolean | null;
   printColorCount?: "1" | "2" | "3" | "4" | null;
   printColors?: Coverage[] | null;
+  /** Step 37N: "1" = printed on the outside, "2" = outside + inside. */
   printSides?: "1" | "2" | null;
+  /** Step 37N: panels printed, "1"-"4" (recorded only, not priced). */
+  printPanels?: "1" | "2" | "3" | "4" | null;
   /** Step 37G: board grade in the buyer's words, tidied ("32 ECT C"); optional. */
   boardGrade?: string | null;
   customerName?: string | null;
@@ -83,14 +89,24 @@ function printSettled(f: BoxChatFacts): boolean {
   if (f.printed === false) return true;
   if (f.printed !== true) return false;
   const n = colorCount(f);
-  return n > 0 && Array.isArray(f.printColors) && f.printColors.length === n && (f.printSides === "1" || f.printSides === "2");
+  return (
+    n > 0 &&
+    Array.isArray(f.printColors) &&
+    f.printColors.length === n &&
+    (f.printSides === "1" || f.printSides === "2") &&
+    ["1", "2", "3", "4"].includes(String(f.printPanels || ""))
+  );
 }
+
+/** Step 37N: the buyer said they're not sure of the grade: the shop recommends one. */
+export const GRADE_RECOMMEND = "recommend";
 
 export function isBoxesReady(f: BoxChatFacts): boolean {
   return (
     hasDims(f) &&
     (f.boxStyle === "rsc" || f.boxStyle === "mailer") &&
     Number(f.qty) > 0 &&
+    !isBlank(f.boardGrade) &&
     printSettled(f) &&
     !!String(f.customerName || "").trim() &&
     EMAIL_RE.test(String(f.customerEmail || "").trim())
@@ -122,6 +138,14 @@ export function nextBoxQuestion(f: BoxChatFacts): { assistantMessage: string; qu
   if (!(Number(f.qty) > 0)) {
     return { assistantMessage: "How many boxes?", quickReplies: ["Qty 250", "Qty 500", "Qty 1000"], done: false };
   }
+  // Step 37N: always ask the board grade ("Not sure" = the shop recommends one)
+  if (isBlank(f.boardGrade)) {
+    return {
+      assistantMessage: "What board grade do you need? If you're not sure, we'll recommend one.",
+      quickReplies: ["32 ECT", "44 ECT", "Double wall", "Not sure"],
+      done: false,
+    };
+  }
   if (f.printed == null) {
     return { assistantMessage: "Plain boxes, or printed?", quickReplies: ["Plain (no print)", "Printed"], done: false };
   }
@@ -145,7 +169,18 @@ export function nextBoxQuestion(f: BoxChatFacts): { assistantMessage: string; qu
       };
     }
     if (f.printSides !== "1" && f.printSides !== "2") {
-      return { assistantMessage: "Print on one side of the box, or two?", quickReplies: ["One side", "Two sides"], done: false };
+      return {
+        assistantMessage: "Printed on the outside of the box only, or outside and inside?",
+        quickReplies: ["Outside only", "Outside + inside"],
+        done: false,
+      };
+    }
+    if (!["1", "2", "3", "4"].includes(String(f.printPanels || ""))) {
+      return {
+        assistantMessage: "How many of the box's 4 side panels get printed?",
+        quickReplies: ["1 panel", "2 panels", "3 panels", "All 4 panels"],
+        done: false,
+      };
     }
   }
   if (!String(f.customerName || "").trim()) {
@@ -224,8 +259,35 @@ export function extractBoxFacts(userText: string, f: BoxChatFacts): Partial<BoxC
   const grade = parseGradeText(t);
   if (grade) next.boardGrade = grade.label;
 
-  if (/\b(two|2|both)\s*sides?\b/i.test(t)) next.printSides = "2";
-  else if (/\b(one|1|single)\s*sides?\b/i.test(t)) next.printSides = "1";
+  // Step 37N: "not sure" when the chat is asking for the grade
+  if (
+    !grade &&
+    isBlank(f.boardGrade) &&
+    /board grade/.test(nextBoxQuestion(f).assistantMessage) &&
+    /\b(not sure|unsure|no idea|don'?t know|recommend|you (?:pick|choose)|whatever)\b/i.test(t)
+  ) {
+    next.boardGrade = GRADE_RECOMMEND;
+  }
+
+  // Step 37N: where it's printed. "inside" on its own is the box size
+  // ("18x12x10 inside"), so only printing phrases count.
+  // Only when talking about print ("outside dimensions" isn't a print answer).
+  const printTalk = /\bprint/i.test(t) || /outside of the box only/.test(nextBoxQuestion(f).assistantMessage);
+  if (printTalk) {
+    if (
+      /\b(inside and (?:the )?outside|outside and (?:the )?inside|outside\s*(?:\+|&)\s*inside|inside\s*(?:\+|&)\s*outside|in and out|both inside|print(?:ed|ing)? (?:on )?(?:the )?inside)\b/i.test(t)
+    ) {
+      next.printSides = "2";
+    } else if (/\boutside\b(?!\s*(?:dim|size|measure))/i.test(t)) {
+      next.printSides = "1";
+    }
+  }
+
+  // Step 37N: panels printed ("two sides", "front and back" = 2; "all four sides" = 4)
+  if (/\b(?:all\s*(?:four|4)?\s*(?:panels|sides)|(?:four|4)\s*(?:panels|sides)|all\s*around)\b/i.test(t)) next.printPanels = "4";
+  else if (/\b(?:three|3)\s*(?:panels|sides)\b/i.test(t)) next.printPanels = "3";
+  else if (/\b(?:(?:two|2|both)\s*(?:panels|sides)|front and back)\b/i.test(t)) next.printPanels = "2";
+  else if (/\b(?:one|1|single)\s*(?:panel|side)\b/i.test(t)) next.printPanels = "1";
 
   const em = t.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
   if (em) next.customerEmail = em[0].replace(/[.,;]+$/, "");
@@ -249,18 +311,23 @@ function normalize(f: BoxChatFacts): BoxChatFacts {
     out.printColorCount = null;
     out.printColors = null;
     out.printSides = null;
+    out.printPanels = null;
   }
   const n = colorCount(out);
   if (n && Array.isArray(out.printColors)) {
     out.printColors = out.printColors.filter((c) => c === "spot" || c === "flood").slice(0, n);
   }
   if (n && !out.printed) out.printed = true;
+  // Step 37N: "not sure" from the AI means the shop recommends a grade
+  if (typeof out.boardGrade === "string" && /^(not sure|unsure|recommend(?:ed)?|no idea|don'?t know)$/i.test(out.boardGrade.trim())) {
+    out.boardGrade = GRADE_RECOMMEND;
+  }
   return out;
 }
 
 const PRESERVE: (keyof BoxChatFacts)[] = [
   "boxL", "boxW", "boxD", "boxStyle", "qty", "printed", "printColorCount", "printColors", "printSides",
-  "customerName", "customerEmail", "notes", "boardGrade",
+  "printPanels", "customerName", "customerEmail", "notes", "boardGrade",
 ];
 
 async function callOpenAIBoxes(args: {
@@ -290,13 +357,16 @@ async function callOpenAIBoxes(args: {
     "- printColorCount: '1'-'4' when printed. More than 4 colors: set '4' and say the shop will confirm extra colors.\n" +
     "- printColors: one entry per color, each 'spot' (text, lines, logos) or 'flood' (large solid areas), length = printColorCount. " +
     "'both spot' with 2 colors -> ['spot','spot']; '1 spot 1 flood' -> ['spot','flood']. Leave null until they answer.\n" +
-    "- printSides: '1' (one side) or '2' (two sides).\n" +
-    "- boardGrade: the board grade if they say one, short form: '32 ECT', '44 ECT C', '48 ECT BC', '200#', 'double wall'. " +
-    "Optional: never ask for it; leave null when not mentioned (the shop recommends one).\n" +
+    "- printSides: where the print goes: '1' = outside of the box only, '2' = outside and inside. " +
+    "'Two sides' or 'both sides' of a box means two PANELS (printPanels), not inside and outside.\n" +
+    "- printPanels: how many of the box's 4 side panels are printed, '1'-'4'. 'two sides', 'front and back' -> '2'; " +
+    "'all four sides', 'all around' -> '4'.\n" +
+    "- boardGrade: the board grade, short form: '32 ECT', '44 ECT C', '48 ECT BC', '200#', 'double wall'. " +
+    "Ask for it (after the quantity). If they're not sure or want a recommendation, set 'recommend'.\n" +
     "- customerName, customerEmail.\n" +
     "- notes: anything else important they say, including ink colors ('black ink'), " +
     "kraft or white board, and timing ('need by March'). Don't repeat the board grade here.\n" +
-    "When printed is false, leave printColorCount, printColors and printSides null.\n" +
+    "When printed is false, leave printColorCount, printColors, printSides and printPanels null.\n" +
     "Set done=true only when every field above (except notes) is known; then invite them to open their quote to check it and get the price.";
 
   const context =
@@ -326,7 +396,7 @@ async function callOpenAIBoxes(args: {
         additionalProperties: false,
         required: [
           "boxL", "boxW", "boxD", "boxStyle", "qty", "printed", "printColorCount", "printColors", "printSides",
-          "boardGrade", "customerName", "customerEmail", "notes",
+          "printPanels", "boardGrade", "customerName", "customerEmail", "notes",
         ],
         properties: {
           boxL: { type: ["string", "null"] },
@@ -338,6 +408,7 @@ async function callOpenAIBoxes(args: {
           printColorCount: nullable({ type: "string", enum: ["1", "2", "3", "4"] }),
           printColors: nullable({ type: "array", items: { type: "string", enum: ["spot", "flood"] }, maxItems: 4 }),
           printSides: nullable({ type: "string", enum: ["1", "2"] }),
+          printPanels: nullable({ type: "string", enum: ["1", "2", "3", "4"] }),
           boardGrade: { type: ["string", "null"] },
           customerName: { type: ["string", "null"] },
           customerEmail: { type: ["string", "null"] },

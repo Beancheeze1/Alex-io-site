@@ -65,6 +65,7 @@ type WidgetFacts = {
   printColorCount?: "1" | "2" | "3" | "4" | null;
   printColors?: ("spot" | "flood")[] | null;
   printSides?: "1" | "2" | null;
+  printPanels?: "1" | "2" | "3" | "4" | null; // Step 37N
   boardGrade?: string | null; // Step 37G: "32 ECT C", "200#"...
 };
 
@@ -168,11 +169,13 @@ function buildPrefillPayload(facts: WidgetFacts) {
       w: facts.boxW ?? "",
       d: facts.boxD ?? "",
       style: facts.boxStyle ?? "",
-      grade: facts.boardGrade ?? "",
+      // Step 37N: "recommend" = not sure; the form keeps "Not sure — recommend one"
+      grade: facts.boardGrade && facts.boardGrade !== "recommend" ? facts.boardGrade : "",
     },
     print: {
       colors: Array.isArray(facts.printColors) ? facts.printColors : [],
       sides: facts.printSides === "2" ? 2 : 1,
+      panels: Number(facts.printPanels) || null, // Step 37N
     },
   };
 }
@@ -187,7 +190,9 @@ function summarizeBoxFacts(facts: WidgetFacts): string[] {
     facts.printed === false
       ? "Plain (no print)"
       : facts.printed && colors.length
-        ? `${colors.length} color${colors.length > 1 ? "s" : ""} (${colors.join(", ")}), ${facts.printSides === "2" ? "two sides" : "one side"}`
+        ? `${colors.length} color${colors.length > 1 ? "s" : ""} (${colors.join(", ")}), ${facts.printSides === "2" ? "outside + inside" : "outside"}${
+            facts.printPanels ? `, ${facts.printPanels === "4" ? "all 4 panels" : facts.printPanels === "1" ? "1 panel" : `${facts.printPanels} panels`}` : ""
+          }`
         : facts.printed
           ? "Printed (details not set)"
           : "(printing not set)";
@@ -195,7 +200,7 @@ function summarizeBoxFacts(facts: WidgetFacts): string[] {
     `Box: ${size}`,
     `Style: ${style}`,
     `Quantity: ${facts.qty ? facts.qty : "(qty not set)"}`,
-    facts.boardGrade ? `Board grade: ${facts.boardGrade}` : null,
+    facts.boardGrade ? `Board grade: ${facts.boardGrade === "recommend" ? "shop to recommend" : facts.boardGrade}` : null,
     `Printing: ${printing}`,
     facts.customerName ? `Name: ${facts.customerName}` : null,
     facts.customerEmail ? `Email: ${facts.customerEmail}` : null,

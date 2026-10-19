@@ -1463,14 +1463,14 @@ export default function RepStartQuoteModal({
                               </select>
                             </Field>
                             {printColors.length > 0 ? (
-                              <Field label="Sides">
+                              <Field label="Printed on">
                                 <select
                                   value={String(printSides)}
                                   onChange={(e) => setPrintSides(e.target.value === "2" ? 2 : 1)}
                                   className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                                 >
-                                  <option value="1" style={{ color: "#0f172a", backgroundColor: "#fff" }}>One side</option>
-                                  <option value="2" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Two sides</option>
+                                  <option value="1" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Outside</option>
+                                  <option value="2" style={{ color: "#0f172a", backgroundColor: "#fff" }}>Outside + inside</option>
                                 </select>
                               </Field>
                             ) : null}
@@ -1916,7 +1916,7 @@ export default function RepStartQuoteModal({
                               label="Printing"
                               value={
                                 printColors.length
-                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "two sides" : "one side"}`
+                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "outside + inside" : "outside"}`
                                   : "No print"
                               }
                             />

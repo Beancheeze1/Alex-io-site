@@ -1295,15 +1295,15 @@ export default function CorrugatedSettingsPage() {
               </select>
             </label>
             <label className={FIELD_LABEL}>
-              <span className="text-[var(--text-primary)]">Sides</span>
+              <span className="text-[var(--text-primary)]">Printed on</span>
               <select
                 className={INPUT}
                 disabled={pcColors.length === 0}
                 value={String(pcSides)}
                 onChange={(e) => setPcSides(e.target.value === "2" ? 2 : 1)}
               >
-                <option value="1">One side</option>
-                <option value="2">Two sides</option>
+                <option value="1">Outside</option>
+                <option value="2">Outside + inside</option>
               </select>
             </label>
             <label className={FIELD_LABEL}>
@@ -1367,7 +1367,7 @@ export default function CorrugatedSettingsPage() {
                     ? ` · blank ${fi(pcResult.blank.length_in)} × ${fi(pcResult.blank.width_in)} in · ${pcResult.blank.sqft_each_with_waste.toFixed(3)} sq ft per box with waste`
                     : ""}
                   {pcResult.colors
-                    ? ` · ${pcResult.colors} color${pcResult.colors > 1 ? "s" : ""}, ${pcResult.sides === 2 ? "two sides" : "one side"}`
+                    ? ` · ${pcResult.colors} color${pcResult.colors > 1 ? "s" : ""}, ${pcResult.sides === 2 ? "outside + inside" : "outside"}`
                     : " · no print"}
                   {pcResult.sheet
                     ? ` · sheet ${fi(pcResult.sheet.length_in)} × ${fi(pcResult.sheet.width_in)} in, ${pcResult.sheet.up} up`
