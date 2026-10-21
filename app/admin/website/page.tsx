@@ -8,7 +8,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { resolveTenantFromHost } from "@/lib/tenant";
-import EmbedSnippetCard, { buildEmbedHost } from "@/components/admin/EmbedSnippetCard";
+import EmbedSnippetCard from "@/components/admin/EmbedSnippetCard";
+import { buildEmbedHost } from "@/lib/embed-host"; // Step 38D2: shared, not from the client file
 
 export const dynamic = "force-dynamic";
 

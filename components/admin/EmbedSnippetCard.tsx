@@ -6,14 +6,9 @@
 "use client";
 
 import * as React from "react";
+import { buildEmbedHost } from "@/lib/embed-host";
 
 type EmbedMode = "quote-form" | "quote-viewer" | "chat";
-
-export function buildEmbedHost(slug: string): string {
-  // "default" is the core/root tenant slug (no subdomain prefix) — same
-  // convention used by lib/tenant.ts for resolving the core host.
-  return slug === "default" ? "api.alex-io.com" : `${slug}.api.alex-io.com`;
-}
 
 function buildEmbedSnippet(slug: string, mode: EmbedMode): string {
   if (mode === "chat") {
