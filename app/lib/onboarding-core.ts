@@ -83,7 +83,7 @@ export const STEPS: readonly StepDef[] = [
     key: "website",
     label: "Link it from your website",
     detail: "Add a \"Get a quote\" link to your shop page, or the quote widget, on your own website.",
-    href: "/t/{slug}",
+    href: "/admin/website", // Step 38D
     manual: "Done",
   },
   {

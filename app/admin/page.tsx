@@ -1,21 +1,20 @@
 // app/admin/page.tsx
 //
-// Admin home dashboard (tenant-aware title).
+// Admin Home (tenant-aware title). Step 38D: loads "Needs you today" on the
+// server for admins (cs and sales are sent to Quotes by AdminHomeClient).
 
 import { headers } from "next/headers";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { tenantQuoteTypes } from "@/lib/quote-types-server";
 import { offersFoam } from "@/lib/quote-types";
+import { loadAdminToday, type AdminToday } from "@/app/lib/admin-today";
 import AdminHomeClient from "./AdminHomeClient";
 
-// Step 38A2: same owner allowlist as app/admin/layout.tsx (owner-only cards).
-const OWNER_EMAILS = new Set<string>(["25thhourdesign@gmail.com"]);
+export const dynamic = "force-dynamic";
 
 export default async function AdminHomePage() {
   let dashboardTitle = "Alex-IO Admin";
-  let tenantSlug: string | null = null;
-  let landingChatEnabled = false;
 
   try {
     const h = await headers();
@@ -30,30 +29,24 @@ export default async function AdminHomePage() {
 
       const name = (brandName || tenant.name || tenant.slug || "Tenant").trim();
       dashboardTitle = `${name} Admin`;
-      tenantSlug = tenant.slug;
-      landingChatEnabled = tenant.theme_json?.landingChatEnabled === true;
     }
   } catch {
     dashboardTitle = "Alex-IO Admin";
   }
 
-  // Step 38A2: what the shop sells (foam / box cards) and whether this is the
-  // platform owner (System Health).
+  // Step 38A2: what the shop sells (foam / box cards).
   const user = await getCurrentUserFromCookies().catch(() => null);
-  const types = user ? await tenantQuoteTypes(Number(user.tenant_id)).catch(() => null) : null;
+  const tenantId = user ? Number(user.tenant_id) : NaN;
+  const types = user ? await tenantQuoteTypes(tenantId).catch(() => null) : null;
   const sellsFoam = types ? offersFoam(types) : true;
   const sellsBoxes = types ? types.includes("boxes_only") || types.includes("complete_pack") : true;
-  const isOwner =
-    !!user && String(user.role || "").toLowerCase() === "admin" && OWNER_EMAILS.has(String(user.email || "").trim().toLowerCase());
 
-  return (
-    <AdminHomeClient
-      dashboardTitle={dashboardTitle}
-      tenantSlug={tenantSlug}
-      landingChatEnabled={landingChatEnabled}
-      sellsFoam={sellsFoam}
-      sellsBoxes={sellsBoxes}
-      isOwner={isOwner}
-    />
-  );
+  // Step 38D: today's work, for admins only.
+  const isAdmin = !!user && String(user.role || "").toLowerCase() === "admin";
+  let today: AdminToday | null = null;
+  if (isAdmin && Number.isInteger(tenantId) && tenantId > 0) {
+    today = await loadAdminToday(tenantId).catch(() => null);
+  }
+
+  return <AdminHomeClient dashboardTitle={dashboardTitle} today={today} sellsFoam={sellsFoam} sellsBoxes={sellsBoxes} />;
 }

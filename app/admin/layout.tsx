@@ -99,7 +99,7 @@ export default async function AdminLayout({ children }: Props) {
           items: [
             { href: "/admin/team", label: "Team & users" },
             { href: "/admin/settings/terms", label: "Quote terms & buyer emails" },
-            { href: "/admin#widget", label: "Website & chat widget" },
+            { href: "/admin/website", label: "Website & chat widget" },
             { href: "/admin/get-started", label: "Setup checklist" },
             { href: "/admin/cleanup", label: "Data cleanup" },
           ],
@@ -133,6 +133,7 @@ export default async function AdminLayout({ children }: Props) {
         label: "Alex-IO",
         items: [
           { href: "/admin/tenants", label: "Shops" },
+          { href: "/admin/system-health", label: "System health" },
           { href: "/admin/traffic", label: "Website traffic" },
           { href: "/admin/leads", label: "Demo leads" },
           { href: "/admin/cleanup", label: "Test quote cleanup" },
