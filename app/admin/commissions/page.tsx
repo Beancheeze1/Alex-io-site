@@ -177,7 +177,7 @@ export default function AdminCommissionsPage() {
             {isAdmin && (
               <p className="mt-1 text-sm text-[var(--text-muted)]">
                 RFM quotes only. Set rates in{" "}
-                <Link href="/admin" className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline">Admin → Users</Link>.
+                <Link href="/admin/team" className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:underline">Shop settings → Team &amp; users</Link>.
               </p>
             )}
           </div>

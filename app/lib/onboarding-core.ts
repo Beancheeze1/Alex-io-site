@@ -76,7 +76,7 @@ export const STEPS: readonly StepDef[] = [
     key: "staff",
     label: "Your team",
     detail: "Invite your sales, customer service and admin staff. Each gets an email to set their password.",
-    href: "/admin",
+    href: "/admin/team", // Step 38B
     manual: "It's just me",
   },
   {
