@@ -282,7 +282,7 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
         </section>
 
         {/* Rough shipping estimate knob - moved under Admin Areas */}
-        <section className="mb-10">
+        <section className="mb-10 scroll-mt-16" id="shipping">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Rough Shipping Estimate
           </h2>
@@ -291,8 +291,8 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
           </div>
         </section>
 
-        {/* Embeddable widget snippet generator */}
-        <section className="mb-10">
+        {/* Embeddable widget snippet generator (Step 38A: menu Shop settings → Website & chat widget) */}
+        <section className="mb-10 scroll-mt-16" id="widget">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Embeddable Widget
           </h2>
@@ -301,8 +301,8 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
           </div>
         </section>
 
-        {/* Users & Roles (Admin-only via API enforcement) */}
-        <section className="mb-10">
+        {/* Users & Roles (Admin-only via API enforcement) (Step 38A: menu Shop settings → Team & users) */}
+        <section className="mb-10 scroll-mt-16" id="team">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Users &amp; Roles
           </h2>

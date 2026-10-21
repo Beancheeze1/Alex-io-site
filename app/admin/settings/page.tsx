@@ -188,6 +188,19 @@ export default function AdminSettingsPage() {
     cushion_family_order: ["EPE", "PU", "PE", "EVA"],
   });
 
+  // Step 38A: the admin menu links to sections here (#foam-rates,
+  // #quote-terms, #freight); they exist only after the settings load.
+  React.useEffect(() => {
+    if (loading) return;
+    const go = () => {
+      const id = window.location.hash.slice(1);
+      if (id) document.getElementById(id)?.scrollIntoView({ block: "start" });
+    };
+    go();
+    window.addEventListener("hashchange", go);
+    return () => window.removeEventListener("hashchange", go);
+  }, [loading]);
+
   React.useEffect(() => {
     let active = true;
 
@@ -446,8 +459,8 @@ export default function AdminSettingsPage() {
             <p className="text-xs text-[var(--text-secondary)]">Loading…</p>
           ) : (
             <div className="space-y-5">
-              {/* Skiving & base rates */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
+              {/* Skiving & base rates (Step 38A: menu Pricing → Foam cutting rates) */}
+              <div className="scroll-mt-16 rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" id="foam-rates">
                 <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">
                   Skiving &amp; base rates
                 </h2>
@@ -700,7 +713,7 @@ export default function AdminSettingsPage() {
               </div>
 
               {/* Step 28: quote terms */}
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-quote-terms>
+              <div className="scroll-mt-16 rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4" data-quote-terms id="quote-terms">
                 <h2 className="mb-3 text-sm font-medium text-[var(--text-primary)]">Quote terms</h2>
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="flex flex-col gap-1 text-xs">
@@ -895,8 +908,10 @@ export default function AdminSettingsPage() {
                 </p>
               </div>
 
-              {/* Step 30: freight */}
-              <FreightSettingsEditor value={settings.freight} onChange={(f) => setSettings((s) => ({ ...s, freight: f }))} />
+              {/* Step 30: freight (Step 38A: menu Pricing → Freight & shipping) */}
+              <div className="scroll-mt-16" id="freight">
+                <FreightSettingsEditor value={settings.freight} onChange={(f) => setSettings((s) => ({ ...s, freight: f }))} />
+              </div>
 
               {/* Cushion family order */}
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4">
