@@ -17,6 +17,11 @@ type AdminHomeClientProps = {
   dashboardTitle: string;
   tenantSlug: string | null;
   landingChatEnabled: boolean;
+  /** Step 38A2: foam cards only for foam shops, corrugated for box shops. */
+  sellsFoam?: boolean;
+  sellsBoxes?: boolean;
+  /** Step 38A2: System Health is the platform owner's, not the shop's. */
+  isOwner?: boolean;
 };
 
 
@@ -109,7 +114,7 @@ function useHealth(endpoint: string) {
   return { data, loading, error };
 }
 
-export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingChatEnabled }: AdminHomeClientProps) {
+export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingChatEnabled, sellsFoam = true, sellsBoxes = true, isOwner = false }: AdminHomeClientProps) {
   const router = useRouter();
 
   // Guard: only admins should see the /admin dashboard.
@@ -167,7 +172,7 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
             {dashboardTitle}
           </h1>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            Internal tools for quotes, layouts, pricing &amp; foam data.
+            Your quotes, pricing, team and shop settings.
           </p>
         </header>
 
@@ -185,7 +190,8 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
           </Link>
         ) : null}
 
-        {/* System health row */}
+        {/* System health row (Step 38A2: platform owner only) */}
+        {isOwner ? (
         <section className="mb-10">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             System Health
@@ -217,67 +223,64 @@ export default function AdminHomeClient({ dashboardTitle, tenantSlug, landingCha
           </div>
         </section>
 
+        ) : null}
+
         {/* Main navigation tiles */}
         <section className="mb-10">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            Admin Areas
+            Shortcuts
           </h2>
 
+          {/* Step 38A2: only what this shop sells; same names as the menu */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {/* Materials & densities */}
-            <NavCard
-              href="/admin/materials"
-              title="Materials & densities"
-              description="Manage foam materials, families, densities, and active status used for quoting."
-            />
-
-            {/* Cushion curves */}
-            <NavCard
-              href="/admin/cushion-curves"
-              title="Cushion curves"
-              description="Review and maintain cushion curve data that powers the foam advisor and recommendations."
-            />
-
-            {/* Pricing / price books — hidden */}
-            {/* <NavCard
-              href="/admin/pricing"
-              title="Pricing & price books"
-              description="View price books and run pricing sandbox tests without affecting real quotes."
-            /> */}
-
-            {/* Carton pricing */}
-            <NavCard
-              href="/admin/boxes"
-              title="Carton pricing (RSC & mailers)"
-              description="Manage carton SKUs, placeholder pricing, and box price tiers used for packaging add-ons."
-            />
-
-            {/* Pricing settings & knobs */}
-            <NavCard
-              href="/admin/settings"
-              title="Pricing settings & knobs"
-              description="Tune machine rates, markup, skiving upcharge, and material-family preferences used by the engine."
-            />
-
-            {/* Quotes & layouts */}
             <NavCard
               href="/admin/quotes"
-              title="Quotes & layouts"
-              description="Engineering view of quotes, layouts, and CAD exports for internal review."
+              title="Quotes"
+              description="Every quote: status, buyer, totals. Open one to revise, release or print the job ticket."
             />
-
+            <NavCard
+              href="/admin/review"
+              title="Review queue"
+              description="New quotes, accepted orders waiting for you to confirm, proofs and price changes."
+            />
+            {sellsBoxes ? (
+              <NavCard
+                href="/admin/corrugated"
+                title="Corrugated boxes"
+                description="Board grades and $/MSF, run and print rates, box styles, scoring and a price check."
+              />
+            ) : null}
+            {sellsFoam ? (
+              <NavCard
+                href="/admin/materials"
+                title="Foam materials"
+                description="Your price per cubic inch, minimum charge and waste for each foam."
+              />
+            ) : null}
+            {sellsFoam ? (
+              <NavCard
+                href="/admin/cushion-curves"
+                title="Cushion curves"
+                description="Cushion data behind the foam advisor's recommendations."
+              />
+            ) : null}
+            {sellsFoam ? (
+              <NavCard
+                href="/admin/boxes"
+                title="Stock cartons"
+                description="Stock carton sizes and price tiers offered with foam quotes."
+              />
+            ) : null}
+            <NavCard
+              href="/admin/settings#freight"
+              title="Freight & shipping"
+              description="Ship-from ZIP, freight terms and the rate table used on every quote."
+            />
             <NavCard
               href="/admin/commissions"
               title="Commissions"
-              description="Sales rep commission rates, quote totals, and earned commission amounts."
+              description="Sales rep commission rates, quote totals and payouts."
             />
-
-            {/* Logs — hidden */}
-            {/* <NavCard
-              href="/admin/logs"
-              title="Logs & events"
-              description="Inspect webhook events, error logs, and other system diagnostics."
-            /> */}
           </div>
         </section>
 
@@ -613,8 +616,7 @@ function ShippingSettingsCard() {
 
       <p className="text-xs text-[var(--text-secondary)]">
         Controls the <span className="font-medium">rough shipping estimate</span>{" "}
-        as a percentage of the combined{" "}
-        <span className="font-mono">foam + packaging</span> subtotal.
+        as a percentage of the order subtotal. Used only when freight isn&apos;t set up (no ship-from ZIP).
       </p>
 
       {loading && (
@@ -627,7 +629,7 @@ function ShippingSettingsCard() {
         <form onSubmit={handleSave} className="mt-4 space-y-3">
           <div className="flex items-center gap-3">
             <label className="text-xs text-[var(--text-secondary)]">
-              Rough shipping (% of foam + packaging)
+              Rough shipping (% of the order)
             </label>
           </div>
           <div className="flex items-center gap-2">

@@ -498,11 +498,12 @@ export default function AdminQuotesPage() {
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">
-              Quotes &amp; layouts
+              Quotes
             </h1>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Engineering-focused view of quotes, foam layouts, and CAD
-              downloads for internal use.
+              {offersFoam(offeredTypes)
+                ? "Every quote, with foam layouts and CAD downloads for internal use."
+                : "Every quote: status, buyer and totals. Open one to revise, release or print the job ticket."}
             </p>
           </div>
 
@@ -558,7 +559,7 @@ export default function AdminQuotesPage() {
             </div>
           ) : (
             <p className="text-xs text-[var(--text-faint)]">
-              You don&apos;t have a sales link set up yet. Ask an admin to assign you one from the Users page.
+              You don&apos;t have a sales link set up yet. An admin can give you one under Shop settings → Team &amp; users.
             </p>
           )}
           <p className="mt-2 text-[11px] text-[var(--text-faint)]">
@@ -712,7 +713,8 @@ export default function AdminQuotesPage() {
             </div>
           </div>
 
-          {/* Materials used recently widget */}
+          {/* Materials used recently widget (Step 38A2: foam shops only) */}
+          {offersFoam(offeredTypes) ? (
           <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-xs text-[var(--text-secondary)]">
             <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
               Materials used recently
@@ -763,6 +765,7 @@ export default function AdminQuotesPage() {
               for a small batch of recent quote numbers.
             </p>
           </div>
+          ) : null}
 
           <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface-card)]">
             <table className="min-w-full text-left text-xs">
