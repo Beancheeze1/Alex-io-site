@@ -7,6 +7,8 @@
 import { one, q } from "@/lib/db";
 import { getPricingSettings, updatePricingSettings, type PricingSettings } from "@/app/lib/pricing/settings";
 import { loadCorrugated, saveCorrugated } from "@/lib/corrugated";
+import { tenantQuoteTypes } from "@/lib/quote-types-server";
+import { offersFoam } from "@/lib/quote-types";
 import {
   STARTER_CORRUGATED,
   STARTER_FOAM,
@@ -55,7 +57,12 @@ export async function loadChecklist(tenantId: number): Promise<{ checklist: Chec
     website: false,
     test_quote: (Number(quotes?.n) || 0) > 0,
   };
-  return { checklist: checklist(signals, new Set(marked.map((m) => m.step)), t.slug), slug: t.slug };
+  // Step 38E: only the steps for what the shop sells (box-only shops skip the foam steps).
+  const types = await tenantQuoteTypes(tenantId).catch(() => null);
+  const scope = types
+    ? { sellsFoam: offersFoam(types), sellsBoxes: types.includes("boxes_only") || types.includes("complete_pack") }
+    : {};
+  return { checklist: checklist(signals, new Set(marked.map((m) => m.step)), t.slug, scope), slug: t.slug };
 }
 
 export async function markStep(tenantId: number, step: string, done: boolean, by: string): Promise<void> {

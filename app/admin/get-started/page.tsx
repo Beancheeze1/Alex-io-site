@@ -82,7 +82,7 @@ export default function GetStartedPage() {
       const n = s.rates.length;
       setNote(
         n || s.grades
-          ? `Loaded ${n} starter corrugated rate${n === 1 ? "" : "s"} and ${s.grades} board price${s.grades === 1 ? "" : "s"}. Check them on the Corrugated page.`
+          ? `Loaded ${n} starter corrugated rate${n === 1 ? "" : "s"} and ${s.grades} board price${s.grades === 1 ? "" : "s"}. Check them in Pricing → Corrugated boxes.`
           : "Your corrugated rates were already set. Nothing changed.",
       );
     }

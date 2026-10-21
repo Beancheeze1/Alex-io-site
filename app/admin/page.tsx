@@ -1,9 +1,13 @@
 // app/admin/page.tsx
 //
 // Admin Home (tenant-aware title). Step 38D: loads "Needs you today" on the
-// server for admins (cs and sales are sent to Quotes by AdminHomeClient).
+// server. Step 38E: admins and cs get Home (cs: her queue and the quote
+// shortcuts); sales go to My quotes. This server check replaces the old
+// client-side guard (which called /api/admin/users and could bounce an
+// admin to Quotes on a slow or failed check).
 
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { resolveTenantFromHost } from "@/lib/tenant";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { tenantQuoteTypes } from "@/lib/quote-types-server";
@@ -36,17 +40,27 @@ export default async function AdminHomePage() {
 
   // Step 38A2: what the shop sells (foam / box cards).
   const user = await getCurrentUserFromCookies().catch(() => null);
-  const tenantId = user ? Number(user.tenant_id) : NaN;
-  const types = user ? await tenantQuoteTypes(tenantId).catch(() => null) : null;
+  if (!user) redirect("/login?next=/admin");
+  const role = String(user.role || "").toLowerCase();
+  if (role !== "admin" && role !== "cs") redirect("/admin/quotes");
+  const tenantId = Number(user.tenant_id);
+  const types = await tenantQuoteTypes(tenantId).catch(() => null);
   const sellsFoam = types ? offersFoam(types) : true;
   const sellsBoxes = types ? types.includes("boxes_only") || types.includes("complete_pack") : true;
 
-  // Step 38D: today's work, for admins only.
-  const isAdmin = !!user && String(user.role || "").toLowerCase() === "admin";
+  // Step 38D: today's work (Step 38E: for cs too).
   let today: AdminToday | null = null;
-  if (isAdmin && Number.isInteger(tenantId) && tenantId > 0) {
+  if (Number.isInteger(tenantId) && tenantId > 0) {
     today = await loadAdminToday(tenantId).catch(() => null);
   }
 
-  return <AdminHomeClient dashboardTitle={dashboardTitle} today={today} sellsFoam={sellsFoam} sellsBoxes={sellsBoxes} />;
+  return (
+    <AdminHomeClient
+      dashboardTitle={dashboardTitle}
+      today={today}
+      sellsFoam={sellsFoam}
+      sellsBoxes={sellsBoxes}
+      isAdmin={role === "admin"}
+    />
+  );
 }

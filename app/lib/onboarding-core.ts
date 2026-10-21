@@ -119,8 +119,16 @@ export type ChecklistItem = {
 
 export type Checklist = { items: ChecklistItem[]; done: number; total: number; complete: boolean };
 
-export function checklist(signals: Signals, marked: Set<string>, slug: string): Checklist {
-  const items = STEPS.map((s) => {
+/** Step 38E: steps for what the shop doesn't sell are left off the list. */
+export type ChecklistScope = { sellsFoam?: boolean; sellsBoxes?: boolean };
+const FOAM_STEPS: ReadonlySet<StepKey> = new Set<StepKey>(["materials", "foam_rates"]);
+const BOX_STEPS: ReadonlySet<StepKey> = new Set<StepKey>(["corrugated"]);
+
+export function checklist(signals: Signals, marked: Set<string>, slug: string, scope: ChecklistScope = {}): Checklist {
+  const steps = STEPS.filter(
+    (s) => !(scope.sellsFoam === false && FOAM_STEPS.has(s.key)) && !(scope.sellsBoxes === false && BOX_STEPS.has(s.key)),
+  );
+  const items = steps.map((s) => {
     const auto = signals[s.key] === true;
     const hand = !auto && s.manual != null && marked.has(s.key);
     return {

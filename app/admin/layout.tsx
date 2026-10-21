@@ -6,6 +6,7 @@
 // - Adds a simple top nav + user chip + log out button
 
 import { ReactNode } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
@@ -32,6 +33,22 @@ const TENANT_WRITE_EMAIL_ALLOWLIST = new Set<string>([
 function canSeeTenantsLink(user: any): boolean {
   const email = String(user?.email || "").trim().toLowerCase();
   return TENANT_WRITE_EMAIL_ALLOWLIST.has(email);
+}
+
+// Step 38E: the browser tab reads "<Shop> Admin" (it showed the Alex-IO
+// marketing title, "Foam Insert Quoting Software | ...", on every shop).
+export async function generateMetadata(): Promise<Metadata> {
+  let title = "Alex-IO Admin";
+  try {
+    const tenant = await resolveTenantFromHost((await headers()).get("host"));
+    if (tenant) {
+      const brandName = typeof tenant.theme_json?.brandName === "string" ? tenant.theme_json.brandName.trim() : "";
+      title = `${(brandName || tenant.name || tenant.slug || "Shop").trim()} Admin`;
+    }
+  } catch {
+    title = "Alex-IO Admin";
+  }
+  return { title, robots: { index: false, follow: false } };
 }
 
 export default async function AdminLayout({ children }: Props) {
@@ -78,7 +95,8 @@ export default async function AdminLayout({ children }: Props) {
       { href: "/admin/spec-requests", label: "Spec requests" },
     ],
   };
-  const navHome = isAdmin ? { href: "/admin", label: "Home" } : null;
+  // Step 38E: cs gets Home too (her queue); sales start on My quotes.
+  const navHome = isAdmin || isCS ? { href: "/admin", label: "Home" } : null;
   const navMenus: AdminNavMenu[] = isAdmin
     ? [
         quotesMenu,

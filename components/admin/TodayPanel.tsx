@@ -15,12 +15,26 @@ const TILES: { key: "new" | "to_confirm" | "reapprove" | "proofs" | "needs_revie
   { key: "needs_review", label: "Needs review" },
 ];
 
+// Step 38E: plain names for the stored statuses. "applied" stays "Applied",
+// the same word the quote page uses.
+const STATUS_TEXT: Record<string, string> = {
+  draft: "Draft",
+  lead_captured: "New lead",
+  applied: "Applied",
+  sent: "Sent",
+  accepted: "Accepted",
+  confirmed: "Confirmed",
+  engineering: "Engineering",
+  in_progress: "Engineering",
+  superseded: "Replaced",
+  rejected: "Rejected",
+};
+
 function statusText(status: string | null, locked: boolean): string {
   if (locked) return "Released";
   const s = String(status || "").toLowerCase().trim();
   if (!s) return "Draft";
-  if (s === "engineering" || s === "in_progress") return "Engineering";
-  return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+  return STATUS_TEXT[s] ?? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
 }
 
 function shortDate(iso: string): string {
@@ -44,7 +58,7 @@ export default function TodayPanel({ today }: { today: AdminToday }) {
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4" data-today-queue>
           {unknown ? (
             <p className="text-xs text-[var(--text-secondary)]">
-              Couldn&apos;t load the queue right now. <Link href="/admin/review" className="text-[var(--action-primary)] hover:underline">Open the Review queue</Link>
+              Couldn&apos;t load the queue right now. <Link href="/admin/review" prefetch={false} className="text-[var(--action-primary)] hover:underline">Open the Review queue</Link>
             </p>
           ) : waiting.length === 0 ? (
             <p className="text-sm text-[var(--text-secondary)]">
@@ -56,6 +70,7 @@ export default function TodayPanel({ today }: { today: AdminToday }) {
                 <li key={t.label}>
                   <Link
                     href={t.href}
+                    prefetch={false}
                     className="flex items-center justify-between gap-3 py-2 text-sm text-[var(--text-primary)] hover:text-[var(--action-primary)]"
                   >
                     <span>{t.label}</span>
@@ -68,10 +83,10 @@ export default function TodayPanel({ today }: { today: AdminToday }) {
             </ul>
           )}
           <div className="mt-3 flex flex-wrap gap-4 border-t border-[var(--border)] pt-3 text-xs">
-            <Link href="/admin/review" className="font-medium text-[var(--action-primary)] hover:underline">
+            <Link href="/admin/review" prefetch={false} className="font-medium text-[var(--action-primary)] hover:underline">
               Review queue →
             </Link>
-            <Link href="/admin/spec-requests" className="font-medium text-[var(--action-primary)] hover:underline">
+            <Link href="/admin/spec-requests" prefetch={false} className="font-medium text-[var(--action-primary)] hover:underline">
               Spec requests →
             </Link>
           </div>
@@ -89,6 +104,7 @@ export default function TodayPanel({ today }: { today: AdminToday }) {
                 <li key={r.quote_no}>
                   <Link
                     href={`/admin/quotes/${encodeURIComponent(r.quote_no)}`}
+                    prefetch={false}
                     className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2 text-xs hover:text-[var(--action-primary)]"
                   >
                     <span className="truncate">
@@ -104,7 +120,7 @@ export default function TodayPanel({ today }: { today: AdminToday }) {
             </ul>
           )}
           <div className="mt-3 border-t border-[var(--border)] pt-3 text-xs">
-            <Link href="/admin/quotes" className="font-medium text-[var(--action-primary)] hover:underline">
+            <Link href="/admin/quotes" prefetch={false} className="font-medium text-[var(--action-primary)] hover:underline">
               All quotes →
             </Link>
           </div>

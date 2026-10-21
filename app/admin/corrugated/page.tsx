@@ -4,7 +4,7 @@
 // scoring/layout (per-flute allowances + layout choices), with a live RSC
 // blank preview. Saves through /api/admin/corrugated (admin only).
 // Spec: "Custom Corrugated Box Pricing - Spec v1", Phase 1 Step 1.
-// Settings only: nothing here changes live quote prices yet.
+// These rates price box quotes (Step 38E: the old "settings only" note was out of date).
 
 "use client";
 
@@ -617,10 +617,10 @@ export default function CorrugatedSettingsPage() {
             <h1 className="text-2xl font-medium tracking-tight text-[var(--text-primary)]">Corrugated</h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--text-secondary)]">
               Your board grades, run and print rates, and how you score and lay out a blank. Custom-size box
-              quotes will be priced from these settings.
+              quotes are priced from these settings.
             </p>
             <p className="mt-1 text-[11px] text-[var(--text-faint)]">
-              Saving here doesn&apos;t change any live quote prices yet.
+              New box quotes use these prices as soon as you save.
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">

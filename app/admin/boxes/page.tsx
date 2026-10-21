@@ -391,11 +391,7 @@ export default function AdminBoxesPage() {
             packaging pricing when cartons are attached to quotes.
           </p>
           <p className="mt-1 text-xs text-[var(--text-faint)]">
-            Prices are stored as per-carton amounts with{" "}
-            <span className="font-medium text-[var(--text-primary)]">2 decimal places</span>{" "}
-            in the database. Leave fields blank to treat them as{" "}
-            <span className="font-medium text-[var(--text-primary)]">NULL</span> (no tier
-            price).
+            Prices are per carton, to the cent. Leave a tier blank if you don&apos;t use it.
           </p>
         </div>
 
@@ -726,9 +722,9 @@ export default function AdminBoxesPage() {
                     Min qty / unit price
                   </div>
                 </th>
-                {/* Tier 4 (future) */}
+                {/* Tier 4 (Step 38E: priced like the others; "(future)" removed) */}
                 <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">
-                  Tier 4 (future)
+                  Tier 4
                   <div className="text-[10px] font-normal text-[var(--text-faint)]">
                     Min qty / unit price
                   </div>

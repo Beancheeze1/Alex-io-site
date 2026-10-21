@@ -23,36 +23,15 @@ type AdminHomeClientProps = {
   /** Step 38A2: foam cards only for foam shops, corrugated for box shops. */
   sellsFoam?: boolean;
   sellsBoxes?: boolean;
+  /** Step 38E: cs gets Home too, with only her queue and the quote shortcuts. */
+  isAdmin?: boolean;
 };
 
-export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = true, sellsBoxes = true }: AdminHomeClientProps) {
+export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = true, sellsBoxes = true, isAdmin = true }: AdminHomeClientProps) {
   const router = useRouter();
 
-  // Guard: only admins should see the /admin dashboard.
-  // Sales/CS can still use /admin/quotes, but should not land on this hub.
-  React.useEffect(() => {
-    let active = true;
-
-    async function checkAdmin() {
-      try {
-        const res = await fetch("/api/admin/users?limit=1", { cache: "no-store" });
-
-        // /api/admin/users is admin-only. If we get 401/403, this user is not admin.
-        if (!active) return;
-        if (res.status === 401 || res.status === 403) {
-          router.replace("/admin/quotes");
-        }
-      } catch {
-        // If the check fails (network/etc), do nothing (avoid locking admin out).
-      }
-    }
-
-    checkAdmin();
-
-    return () => {
-      active = false;
-    };
-  }, [router]);
+  // Step 38E: who may see Home is decided on the server (app/admin/page.tsx);
+  // the old client-side /api/admin/users check is gone.
 
   // Step 38D: old Home anchors (bookmarks, earlier links) go to the pages
   // those sections moved to.
@@ -70,6 +49,7 @@ export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = tru
   const [setup, setSetup] = React.useState<{ done: number; total: number } | null>(null);
   React.useEffect(() => {
     let active = true;
+    if (!isAdmin) return; // the checklist is the admins' (Step 38E)
     fetch("/api/admin/onboarding", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
@@ -79,7 +59,7 @@ export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = tru
     return () => {
       active = false;
     };
-  }, []);
+  }, [isAdmin]);
 
   return (
     <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
@@ -90,7 +70,7 @@ export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = tru
             {dashboardTitle}
           </h1>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            What needs you today, and the shortcuts you use most.
+            {isAdmin ? "What needs you today, and the shortcuts you use most." : "What needs you today."}
           </p>
         </header>
 
@@ -128,6 +108,15 @@ export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = tru
               title="Review queue"
               description="New quotes, accepted orders waiting for you to confirm, proofs and price changes."
             />
+            {!isAdmin ? (
+              <NavCard
+                href="/admin/spec-requests"
+                title="Spec requests"
+                description="Drawings and files buyers sent in to be quoted."
+              />
+            ) : null}
+            {isAdmin ? (
+            <>
             {sellsBoxes ? (
               <NavCard
                 href="/admin/corrugated"
@@ -171,6 +160,8 @@ export default function AdminHomeClient({ dashboardTitle, today, sellsFoam = tru
               title="Commissions"
               description="Sales rep commission rates, quote totals and payouts."
             />
+            </>
+            ) : null}
           </div>
         </section>
 
@@ -190,6 +181,7 @@ function NavCard({ href, title, description }: NavCardProps) {
   return (
     <Link
       href={href}
+      prefetch={false}
       className="group flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 shadow-sm transition hover:border-[var(--action-primary)]/50 hover:bg-[var(--surface-card)]"
     >
       <div className="mb-2 text-sm font-medium text-[var(--text-primary)] group-hover:text-[var(--action-primary)]">
@@ -197,7 +189,7 @@ function NavCard({ href, title, description }: NavCardProps) {
       </div>
       <p className="flex-1 text-xs text-[var(--text-secondary)]">{description}</p>
       <div className="mt-3 text-[11px] text-[var(--text-faint)]">
-        Admin only – not visible to customers.
+        Staff only – not visible to customers.
       </div>
     </Link>
   );

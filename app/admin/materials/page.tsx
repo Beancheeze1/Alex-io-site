@@ -335,12 +335,8 @@ export default function AdminMaterialsPage() {
                   </li>
                 </ul>
                 <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-                  Polyethylene and Expanded Polyethylene remain separate
-                  families here; we never normalize or merge them in code. The{" "}
-                  <span className="font-mono text-[var(--text-secondary)]">
-                    material_family
-                  </span>{" "}
-                  column in the database is the source of truth.
+                  Polyethylene (PE) and Expanded Polyethylene (EPE) are kept as
+                  separate families and never merged.
                 </p>
               </>
             )}

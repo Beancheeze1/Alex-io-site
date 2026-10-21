@@ -82,6 +82,9 @@ export default function AdminQuotesPage() {
   // and /admin/expenses respectively -- see MyCommissionPanel /
   // MyExpensesPanel, which render there instead.
   const [mySalesSlug, setMySalesSlug] = React.useState<string | null>(null);
+  // Step 38E: the sales-link card is for people who sell: sales reps, and
+  // anyone (admin or cs) who has been given a referral name.
+  const [myRole, setMyRole] = React.useState<string | null>(null);
   const [linkCopied, setLinkCopied] = React.useState(false);
 
   React.useEffect(() => {
@@ -93,6 +96,7 @@ export default function AdminQuotesPage() {
         const json = await res.json().catch(() => null);
         if (active && json?.ok) {
           setMySalesSlug(json.sales_slug ?? null);
+          setMyRole(typeof json.role === "string" ? json.role : null);
         }
       } catch { /* silent -- this section is supplemental, not the main page */ }
     }
@@ -539,7 +543,8 @@ export default function AdminQuotesPage() {
           </div>
         </header>
 
-        {/* Your sales link */}
+        {/* Your sales link (Step 38E: hidden for staff without a referral name, e.g. cs) */}
+        {mySalesSlug || myRole === "sales" ? (
         <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]">
           <div className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Your sales link
@@ -566,6 +571,7 @@ export default function AdminQuotesPage() {
             Share this link with prospects. Quotes started from it are automatically credited to your seat.
           </p>
         </section>
+        ) : null}
 
         {/* Jump to quote + summary */}
         <section className="mb-6 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
@@ -575,12 +581,7 @@ export default function AdminQuotesPage() {
               Jump to quote
             </div>
             <p className="mb-3 text-xs text-[var(--text-secondary)]">
-              Type a quote number to open its internal engineering view
-              (layouts + CAD) at{" "}
-              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
-                /admin/quotes/[quote_no]
-              </span>
-              .
+              Type a quote number to open it.
             </p>
             <form
               onSubmit={handleJumpSubmit}
@@ -619,11 +620,7 @@ export default function AdminQuotesPage() {
                   <span className="font-medium text-[var(--text-primary)]">
                     {loading ? "…" : totalCount}
                   </span>{" "}
-                  quotes returned (latest from{" "}
-                  <span className="font-mono text-[11px] text-[var(--text-secondary)]">
-                    /api/quotes
-                  </span>
-                  ).
+                  quotes on this list.
                 </li>
                 <li>
                   <span className="font-medium text-[var(--text-primary)]">
@@ -640,14 +637,6 @@ export default function AdminQuotesPage() {
               </ul>
             )}
 
-            <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-              Live data source:{" "}
-              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
-                /api/quotes?limit=200
-              </span>
-              . This view is read-only; status changes still flow through your
-              existing pipelines.
-            </p>
           </div>
         </section>
 
@@ -659,8 +648,7 @@ export default function AdminQuotesPage() {
                 Recent quotes
               </div>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Live quote list from the database. Use the filters and search to
-                focus on specific statuses or customers.
+                Use the filters and search to find a quote by status or customer.
               </p>
             </div>
 
@@ -980,19 +968,7 @@ export default function AdminQuotesPage() {
           </div>
 
           <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-            All rows above are live from the{" "}
-            <span className="font-mono text-[11px] text-[var(--text-secondary)]">
-              quotes
-            </span>{" "}
-            table via{" "}
-            <span className="font-mono text-[11px] text-[var(--text-secondary)]">
-              /api/quotes
-            </span>
-            . This view remains read-only; any status changes still flow
-            through your existing pipelines.
-          </p>
-          <p className="mt-1 text-[11px] text-[var(--text-faint)]">
-            Admin only – not visible to customers.
+            Staff only – not visible to customers.
           </p>
         </section>
       </div>

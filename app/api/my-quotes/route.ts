@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       quotes: rows,
       sales_slug: repUser?.sales_slug ?? null,
+      role: String(user.role || "").toLowerCase(), // Step 38E: Quotes hides the sales-link card from cs
       commission: {
         pct: repUser?.commission_pct ?? null,
         quotes_total_usd: quotesTotalUsd,

@@ -55,6 +55,24 @@ const none: Signals = {
   check("checklist: manual how", c.items.find((i) => i.key === "staff")?.how, "manual");
 }
 {
+  // Step 38E: box-only shop (Ashtonne): no foam steps
+  const c = checklist(none, new Set(), "acme", { sellsFoam: false, sellsBoxes: true });
+  check("scope box-only: 7 steps", c.total, 7);
+  check("scope box-only: no materials", c.items.some((i) => i.key === "materials"), false);
+  check("scope box-only: no foam_rates", c.items.some((i) => i.key === "foam_rates"), false);
+  check("scope box-only: corrugated kept", c.items.some((i) => i.key === "corrugated"), true);
+  // a foam step ticked earlier no longer counts once it's off the list
+  const d = checklist({ ...none, foam_rates: true }, new Set(["materials"]), "acme", { sellsFoam: false, sellsBoxes: true });
+  check("scope box-only: hidden steps not counted", d.done, 0);
+}
+{
+  // Step 38E: foam-only shop: no corrugated step; unknown scope keeps all 9
+  const c = checklist(none, new Set(), "acme", { sellsFoam: true, sellsBoxes: false });
+  check("scope foam-only: 8 steps", c.total, 8);
+  check("scope foam-only: no corrugated", c.items.some((i) => i.key === "corrugated"), false);
+  check("scope empty: 9 steps", checklist(none, new Set(), "acme", {}).total, 9);
+}
+{
   // a hand tick on a step without a manual option is ignored
   const c = checklist(none, new Set(["shop_page", "test_quote"]), "acme");
   check("checklist: non-manual tick ignored", c.done, 0);
