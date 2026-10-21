@@ -76,7 +76,7 @@ export default function GetStartedPage() {
     if (!j) return;
     if (kind === "foam") {
       const set = (j.set as string[]) || [];
-      setNote(set.length ? `Loaded ${set.length} starter foam rate${set.length === 1 ? "" : "s"}. Check them in Settings.` : "Your foam rates were already set. Nothing changed.");
+      setNote(set.length ? `Loaded ${set.length} starter foam rate${set.length === 1 ? "" : "s"}. Check them in Pricing → Foam cutting rates.` : "Your foam rates were already set. Nothing changed.");
     } else {
       const s = (j.set as { rates: string[]; grades: number }) || { rates: [], grades: 0 };
       const n = s.rates.length;

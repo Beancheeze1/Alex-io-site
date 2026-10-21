@@ -134,7 +134,7 @@ export function staffDigestEmail(d: DigestData): { subject: string; html: string
     list("New quotes (last 24 hours)", d.newQuotes, "No new quotes.", more),
     list("Expiring in the next 3 days (not accepted)", d.expiring, "None expiring."),
     `</td></tr>`,
-    `<tr><td style="padding:14px 24px;border-top:1px solid #eeeeea;font-size:12px;color:#6b6b66">Turn this off or change the time in Admin → Settings → Reminders.</td></tr>`,
+    `<tr><td style="padding:14px 24px;border-top:1px solid #eeeeea;font-size:12px;color:#6b6b66">Turn this off or change the time in Admin → Shop settings → Quote terms &amp; buyer emails.</td></tr>`,
     `</table></td></tr></table></div>`,
   ].join("");
   return { subject, html };

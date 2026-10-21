@@ -47,8 +47,8 @@ export const STEPS: readonly StepDef[] = [
   {
     key: "foam_rates",
     label: "Foam cutting rates",
-    detail: "CNC, steel-rule die, press and lamination rates (Settings).",
-    href: "/admin/settings",
+    detail: "CNC, steel-rule die, press and lamination rates (Pricing → Foam cutting rates).",
+    href: "/admin/settings/foam", // Step 38C
     manual: "We don't cut foam",
   },
   {
@@ -61,15 +61,15 @@ export const STEPS: readonly StepDef[] = [
   {
     key: "freight",
     label: "Freight",
-    detail: "Your ship-from ZIP and freight table, so quotes can show freight (Settings → Freight).",
-    href: "/admin/settings",
+    detail: "Your ship-from ZIP and freight table, so quotes can show freight (Pricing → Freight & shipping).",
+    href: "/admin/settings/freight", // Step 38C
     manual: "We quote freight separately",
   },
   {
     key: "emails_terms",
     label: "Buyer emails and quote terms",
-    detail: "Where buyer replies go, your lead time, how long quotes stay valid and which status emails go out (Settings).",
-    href: "/admin/settings",
+    detail: "Where buyer replies go, your lead time, how long quotes stay valid and which status emails go out (Shop settings → Quote terms & buyer emails).",
+    href: "/admin/settings/terms", // Step 38C
     manual: "The defaults are fine",
   },
   {

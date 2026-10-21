@@ -89,8 +89,8 @@ export default async function AdminLayout({ children }: Props) {
             ...opt(sellsBoxes, { href: "/admin/corrugated", label: "Corrugated boxes" }),
             ...opt(sellsFoam, { href: "/admin/boxes", label: "Stock cartons" }),
             ...opt(sellsFoam, { href: "/admin/materials", label: "Foam materials" }),
-            ...opt(sellsFoam, { href: "/admin/settings#foam-rates", label: "Foam cutting rates" }),
-            { href: "/admin/settings#freight", label: "Freight & shipping" },
+            ...opt(sellsFoam, { href: "/admin/settings/foam", label: "Foam cutting rates" }),
+            { href: "/admin/settings/freight", label: "Freight & shipping" },
           ],
         },
         {
@@ -98,7 +98,7 @@ export default async function AdminLayout({ children }: Props) {
           label: "Shop settings",
           items: [
             { href: "/admin/team", label: "Team & users" },
-            { href: "/admin/settings#quote-terms", label: "Quote terms & buyer emails" },
+            { href: "/admin/settings/terms", label: "Quote terms & buyer emails" },
             { href: "/admin#widget", label: "Website & chat widget" },
             { href: "/admin/get-started", label: "Setup checklist" },
             { href: "/admin/cleanup", label: "Data cleanup" },
