@@ -5,6 +5,7 @@
 
 import {
   assemblyDescription,
+  cuttingDieNote,
   assemblyRatesFrom,
   parseAssemblyOverride,
   perDisplayOf,
@@ -67,6 +68,20 @@ check("parseAssemblyOverride keeps numbers, drops junk", JSON.stringify(parseAss
 check("parseAssemblyOverride of nothing = {}", JSON.stringify(parseAssemblyOverride(null)) === "{}");
 check("perDisplayOf default 1, keeps 4, refuses 0", perDisplayOf(null) === 1 && perDisplayOf({ per_display: 4 }) === 4 && perDisplayOf({ per_display: 0 }) === 1);
 check("description", assemblyDescription({ displays: 500, parts_per_display: 6 }) === "Assembly and packing: 500 displays, 6 parts each", assemblyDescription({ displays: 500, parts_per_display: 6 }));
+
+// Step 39D2: the cutting die note lists parts by name (not "the die-cut part from your file" x 5)
+check("die note: boxes keep the old wording", cuttingDieNote([{ part: false, text: "12 × 10 × 8 in rsc" }]) === "Steel-rule die to cut the 12 × 10 × 8 in rsc. Charged once, not per box.");
+const dn = cuttingDieNote([
+  { part: true, text: "Shipper (46.125 × 18.375 in blank)" },
+  { part: true, text: "Back (30 × 40 in blank)" },
+  { part: true, text: "Shelf (20 × 10 in blank)" },
+]);
+check("die note: parts by name", dn === "Steel-rule dies for 3 parts: Shipper (46.125 × 18.375 in blank); Back (30 × 40 in blank); Shelf (20 × 10 in blank). Charged once, not per part.", dn);
+check("die note: one part", cuttingDieNote([{ part: true, text: "20 × 10 in blank" }]) === "Steel-rule dies for the part: 20 × 10 in blank. Charged once, not per part.");
+const mixed = cuttingDieNote([{ part: false, text: "12 × 10 × 8 in rsc" }, { part: true, text: "Header (30 × 12 in blank)" }]) ?? "";
+check("die note: boxes and parts", mixed.startsWith("Steel-rule dies for the 12 × 10 × 8 in rsc, and for the part: Header"), mixed);
+check("die note: none", cuttingDieNote([]) === null);
+check("die note: never repeats the style label", !/die-cut part from your file/.test(dn ?? ""));
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

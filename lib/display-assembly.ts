@@ -132,3 +132,20 @@ export function perDisplayOf(dieline: unknown): number {
   const v = Number((dieline as { per_display?: unknown } | null)?.per_display);
   return Number.isInteger(v) && v >= 1 && v <= 10000 ? v : 1;
 }
+
+/**
+ * Step 39D2: the note under the one-time cutting die line on the quote.
+ * Boxes read "Steel-rule die to cut the 12 × 10 × 8 in rsc and the …" (as
+ * before); die line parts are listed by name, e.g. "Steel-rule dies for 5
+ * parts: Shipper (46.125 × 18.375 in blank); Back (30 × 40 in blank); …".
+ */
+export function cuttingDieNote(items: { part: boolean; text: string }[]): string | null {
+  const list = items.filter((x) => x.text.trim());
+  if (!list.length) return null;
+  const parts = list.filter((x) => x.part).map((x) => x.text);
+  const boxes = list.filter((x) => !x.part).map((x) => x.text);
+  if (!parts.length) return `Steel-rule die to cut the ${boxes.join(" and the ")}. Charged once, not per box.`;
+  const partText = parts.length === 1 ? `the part: ${parts[0]}` : `${parts.length} parts: ${parts.join("; ")}`;
+  if (!boxes.length) return `Steel-rule dies for ${partText}. Charged once, not per part.`;
+  return `Steel-rule dies for the ${boxes.join(" and the ")}, and for ${partText}. Charged once.`;
+}

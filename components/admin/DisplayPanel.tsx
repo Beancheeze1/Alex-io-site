@@ -74,6 +74,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const [perDisplayUsd, setPerDisplayUsd] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = React.useState<number | null>(null); // Step 39D2
 
   React.useEffect(() => {
     let alive = true;
@@ -126,6 +127,29 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
     }
   };
 
+  // Step 39D2: take one part off the display (two clicks: Remove, then Yes, remove).
+  const removePart = async (id: number) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/quotes/display", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNo, action: "remove_part", part_id: id }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setNote(j?.message || `Couldn't remove the part (HTTP ${res.status}).`);
+        return;
+      }
+      window.location.reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const locked = info.locked;
   const asm = info.assembly;
   const digits = (v: string) => v.replace(/[^\d]/g, "").slice(0, 8);
@@ -166,6 +190,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Qty</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Each</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Total</th>
+                {!locked ? <th style={{ padding: "4px 6px" }} /> : null}
               </tr>
             </thead>
             <tbody>
@@ -201,6 +226,24 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                     {usd(p.extended)}
                     {p.tooling ? <div style={small}>+ {usd(p.tooling)} die</div> : null}
                   </td>
+                  {!locked ? (
+                    <td style={{ padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      {confirmRemove === p.id ? (
+                        <>
+                          <button type="button" style={btn} disabled={busy} onClick={() => void removePart(p.id)} data-display-remove-yes={p.id}>
+                            Yes, remove
+                          </button>{" "}
+                          <button type="button" style={btn} disabled={busy} onClick={() => setConfirmRemove(null)}>
+                            Keep
+                          </button>
+                        </>
+                      ) : (
+                        <button type="button" style={btn} disabled={busy} onClick={() => setConfirmRemove(p.id)} data-display-remove={p.id}>
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

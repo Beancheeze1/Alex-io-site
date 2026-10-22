@@ -132,6 +132,19 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    // Step 39D2: a display's parts go together; staff remove one on the Display card.
+    if (sel) {
+      const asm = await one<{ id: number }>(
+        `SELECT id FROM public."quote_box_selections" WHERE quote_id = $1 AND custom_style = 'assembly' LIMIT 1`,
+        [quoteId],
+      );
+      if (asm) {
+        return NextResponse.json(
+          { ok: false, error: "DISPLAY_PART", message: "This is part of a display. Ask the shop to change the display." },
+          { status: 400 },
+        );
+      }
+    }
 
     const sku = sel?.sku?.trim() || null;
 

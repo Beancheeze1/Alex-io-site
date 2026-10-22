@@ -30,7 +30,7 @@
 // pricing_detail.run_method on each row.
 
 import { boxShapeIssue } from "@/lib/box-shape"; // Step 39B
-import { parseDielineBlank, type DielineBlank } from "@/lib/dieline-import"; // Step 39C
+import { dielineSizeSuspect, parseDielineBlank, type DielineBlank } from "@/lib/dieline-import"; // Step 39C, 39D2
 import {
   ASSEMBLY_STYLE,
   assemblyDescription,
@@ -376,8 +376,13 @@ export async function resolveCustomSelection(
     // than the shop's largest sheet is priced, but flagged for staff to check.
     const shape = boxShapeIssue(style, { L, W, D: H });
     const oversize = engine.warnings.some((w) => /largest sheet/i.test(w));
+    // Step 39D2: a die line read in the wrong units (a huge blank) is flagged too.
+    const unitsOdd = style === "dieline" && dielineSizeSuspect(L, W);
     const notes = [
       ...(shape ? [`Check the size: ${shape.message}`] : []),
+      ...(unitsOdd
+        ? [`Check the size: the blank is ${Math.round(L * 10) / 10} x ${Math.round(W * 10) / 10} in. Check the die line's units (Edit lines).`]
+        : []),
       ...(engine.warnings.length ? [`Check corrugated rates: ${engine.warnings.join(" ")}`] : []),
     ];
     return {
@@ -388,7 +393,7 @@ export async function resolveCustomSelection(
       board_grade_id: gradeId,
       board_grade_name: gradeName,
       pricing_source: "corrugated_engine",
-      needs_review: !!shape || oversize,
+      needs_review: !!shape || oversize || unitsOdd,
       pricing_note: notes.length ? notes.join(" ") : null,
       pricing_detail: {
         blank: engine.blank,

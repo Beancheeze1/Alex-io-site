@@ -15,6 +15,9 @@
 //     update -> sets the number of displays, each part's count per display and
 //               name, and this quote's assembly override
 //     stop   -> removes the assembly line (every line back to one quantity)
+//     remove_part { part_id } -> (Step 39D2) takes one part off the display;
+//               the assembly line follows the new parts count (the last part
+//               removed ends the display)
 //   Every change sets each part's qty = displays x per display (other lines =
 //   displays), the quote's qty and compare quantity = displays, and reprices
 //   every line at today's rates. Released (locked) quotes are refused.
@@ -167,13 +170,32 @@ export async function POST(req: NextRequest) {
         400,
       );
     }
-    const action = b.action === "start" || b.action === "stop" ? b.action : "update";
+    const action =
+      b.action === "start" || b.action === "stop" || b.action === "remove_part" ? b.action : "update";
     const asm = lines.find((l) => l.custom_style === ASSEMBLY_STYLE) ?? null;
     const parts = lines.filter((l) => l.custom_style === "dieline");
 
     const d = Number(b.displays);
     const displays = Number.isInteger(d) && d >= 1 && d <= 10_000_000 ? d : Math.max(1, Math.round(Number(facts.qty) || 1));
     const print = parsePrintSpec(facts.print_spec);
+
+    // Step 39D2: take one part off (buyers can't remove display parts on the quote page).
+    if (action === "remove_part") {
+      const line = parts.find((x) => Number(x.id) === Number(b.part_id));
+      if (!line) return json({ ok: false, error: "part_not_found", message: "That part isn't on this quote." }, 404);
+      if (lines.length <= 1) {
+        return json({ ok: false, error: "last_line", message: "A quote keeps at least one line." }, 400);
+      }
+      await q(`DELETE FROM public.quote_box_selections WHERE id = $1 AND quote_id = $2`, [line.id, quote.id]);
+      const left = parts.length - 1;
+      if (asm) {
+        // Not a display any more once its last part is gone; the other lines keep the displays count.
+        if (left === 0) await q(`DELETE FROM public.quote_box_selections WHERE id = $1 AND quote_id = $2`, [asm.id, quote.id]);
+        await setQuoteBoxQty(quote.id, Math.max(1, Math.round(Number(asm.qty) || 1)));
+      }
+      await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), print);
+      return json({ ok: true, removed: Number(line.id), is_display: !!asm && left > 0 });
+    }
 
     if (action === "stop") {
       if (asm) await q(`DELETE FROM public.quote_box_selections WHERE id = $1 AND quote_id = $2`, [asm.id, quote.id]);

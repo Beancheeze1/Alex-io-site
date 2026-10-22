@@ -1350,6 +1350,9 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
 
   const primaryItem = items[0] || null;
 
+  // Step 39D2: a display quote (it has an assembly and packing line).
+  const isDisplayQuote = requestedBoxes.some((b) => b.style === "assembly");
+
   // Path A (presentation): show set quantity (primary qty) in totals.
   const overallQty = React.useMemo(() => {
     const q0 = Number(primaryItem?.qty ?? 0);
@@ -3359,7 +3362,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   {subLabel && <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
                                 {/* Step 37I: not after Accept; a boxes-only quote keeps its last size */}
-                                {canChangeOrder && !isAsmLine && (!isBoxesOnly || requestedBoxes.length > 1) ? (
+                                {/* Step 39D2: a display's parts go together (the shop changes them) */}
+                                {canChangeOrder && !isAsmLine && !isDisplayQuote && (!isBoxesOnly || requestedBoxes.length > 1) ? (
                                 <button
                                   type="button"
                                   data-remove-carton

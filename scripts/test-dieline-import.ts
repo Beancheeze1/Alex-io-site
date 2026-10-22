@@ -4,7 +4,7 @@
 // and pricing it as a die-cut box from the file (style "dieline").
 // Run: npm run test:dieline-import   (= npx --yes tsx scripts/test-dieline-import.ts)
 
-import { analyzeDieline, autoRole, parseDielineBlank, splitDieline } from "../lib/dieline-import";
+import { analyzeDieline, autoRole, dielineSizeSuspect, parseDielineBlank, splitDieline } from "../lib/dieline-import";
 import { dielineDxf, slottedDieline } from "../lib/box-dieline";
 import { DEFAULT_FLUTES, dielineStyleBlank } from "../lib/corrugated-blank";
 import { priceRscBox, type BoxSettings } from "../lib/corrugated-price";
@@ -207,6 +207,16 @@ check("dieline nests by sheet (6 up)", p3.ok && p3.sheet !== null && p3.sheet.up
   check("stored part defaults per display to 1", parseDielineBlank({ length_in: 1, width_in: 1, cut_in: 4, crease_in: 0, perf_in: 0, rule_in: 4 })?.per_display === 1);
 }
 check("dieline style reads as a part", boxStyleInfo("dieline").label === "Die-cut part from your file");
+
+// Step 39D2: the Split hint only when Split is off; huge blanks are suspect
+{
+  const two = dxf([...rect(0, 0, 10, 10), ...rect(12, 0, 10, 10)], { insunits: 1 });
+  const off = analyzeDieline(two);
+  const on = analyzeDieline(two, { split: true });
+  check("split off: tells you to tick Split", off.ok && off.warnings.some((w) => /tick "Split"/.test(w)), off.ok && off.warnings);
+  check("split on: no tick-Split hint", on.ok && !on.warnings.some((w) => /tick "Split"/.test(w)) && on.warnings.some((w) => /each is priced as its own part/.test(w)), on.ok && on.warnings);
+  check("size suspect over 400 in", dielineSizeSuspect(508, 254) && !dielineSizeSuspect(128, 40) && !dielineSizeSuspect(400, 10));
+}
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

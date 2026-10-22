@@ -117,9 +117,15 @@ function bboxArea(pts: Pt[]): number {
   return (x1 - x0) * (y1 - y0);
 }
 
+/** Step 39D2: a blank this big (inches) is almost surely in the wrong units. */
+export const DIELINE_UNITS_CHECK_IN = 400;
+export function dielineSizeSuspect(lengthIn: number, widthIn: number): boolean {
+  return Math.max(Number(lengthIn) || 0, Number(widthIn) || 0) > DIELINE_UNITS_CHECK_IN;
+}
+
 export function analyzeDieline(
   text: string,
-  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits } = {},
+  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits; split?: boolean } = {},
 ): DielineAnalysis {
   let parsed: ReturnType<typeof parseDxfTagged>;
   try {
@@ -212,14 +218,17 @@ export function analyzeDieline(
   if (!(length_in > 0 && width_in > 0)) {
     return { ok: false, error: "flat", message: "The lines don't make a blank (no width or no length)." };
   }
-  if (Math.max(length_in, width_in) > 400) {
+  if (dielineSizeSuspect(length_in, width_in)) {
     warnings.push(`The blank is ${length_in.toFixed(1)} × ${width_in.toFixed(1)} in. Check the units.`);
   }
   if (cut_in === 0) warnings.push("No cut lines found. Check which lines are cut.");
   if (crease_in === 0) warnings.push("No crease lines found. If the box folds, mark the crease lines.");
   if (pieces > 1) {
+    // Step 39D2: the hint to tick Split only when Split is off.
     warnings.push(
-      `The cut lines make ${pieces} separate pieces. As one line they're priced as one blank holding all of them; tick "Split" to price each part on its own blank.`,
+      opts.split
+        ? `The cut lines make ${pieces} separate pieces; each is priced as its own part on its own blank.`
+        : `The cut lines make ${pieces} separate pieces. As one line they're priced as one blank holding all of them; tick "Split" to price each part on its own blank.`,
     );
   }
   if (groups.some((g) => g.role === "ignore")) {

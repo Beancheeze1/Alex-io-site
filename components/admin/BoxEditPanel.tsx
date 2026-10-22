@@ -92,6 +92,7 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
   const [grades, setGrades] = React.useState<Grade[]>([]);
   const [locked, setLocked] = React.useState(false);
   const [perBox, setPerBox] = React.useState(false);
+  const [isDisplay, setIsDisplay] = React.useState(false); // Step 39D2
   const [editing, setEditing] = React.useState<number | null>(null);
   const [draft, setDraft] = React.useState<Draft | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -107,6 +108,7 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
         setGrades(Array.isArray(j.grades) ? j.grades : []);
         setLocked(j.locked === true);
         setPerBox(j.per_box === true);
+        setIsDisplay(j.is_display === true);
       })
       .catch(() => {});
     return () => {
@@ -180,6 +182,7 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
           ? "Released quote: use Revise to change the boxes."
           : "Change a box's size, style, board grade, printing or quantity. Saving reprices that box at today's rates."}
         {!locked && !perBox ? " Printing applies to the whole quote." : ""}
+        {!locked && isDisplay ? " This quote is a display: quantities are set on the Display card." : ""}
       </div>
 
       {rows.map((r, i) => (
@@ -209,7 +212,7 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Set on the Display card</span>
             ) : !locked && editing !== r.id ? (
               <button type="button" style={btn} onClick={() => startEdit(r)} data-edit-box={r.id}>
-                {r.style === "dieline" ? "Edit qty / grade / print" : "Edit box"}
+                {isDisplay ? "Edit grade / print" : r.style === "dieline" ? "Edit qty / grade / print" : "Edit box"}
               </button>
             ) : null}
           </div>
@@ -241,8 +244,13 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
                     inputMode="numeric"
                     aria-label="Quantity"
                     value={draft.qty}
+                    disabled={isDisplay}
+                    title={isDisplay ? "Set on the Display card" : undefined}
                     onChange={(e) => set({ qty: digits(e.target.value) })}
+                    data-box-qty
                   />
+                  {/* Step 39D2: a display part's qty = displays x how many go in one */}
+                  {isDisplay ? <div style={{ ...label, marginTop: 2 }}>Set on the Display card</div> : null}
                 </label>
               </div>
 

@@ -5,6 +5,8 @@
 // this is where a revised quote's box size, style, board grade, printing and
 // quantity change.
 //   GET  ?quote_no=…  -> { ok, boxes_only, locked, per_box, rows: [...], grades: [...] }
+//   (Step 39D2: GET also returns is_display; on a display quote each line's
+//   quantity comes from the Display card, so POST refuses a new qty there.)
 //   POST { quote_no, box_id, L, W, D, style, grade_id?, qty, colors, sides,
 //          cells_across?, cells_down? }   // Step 27: any style; partitions need cells
 //        -> updates that box and reprices it
@@ -144,6 +146,7 @@ export async function GET(req: NextRequest) {
       boxes_only: true,
       locked: !!quote.locked,
       per_box: perBox,
+      is_display: rows.some((x) => x.custom_style === "assembly"), // Step 39D2
       grades: grades.map((g) => ({ id: Number(g.id), name: String(g.name), is_default: g.is_default === true })),
       rows: rows.map((row) => {
         const custom = row.kind === "custom";
@@ -220,6 +223,19 @@ export async function POST(req: NextRequest) {
     if (!Number.isInteger(qty) || qty < 1 || qty > 10_000_000) {
       return json({ ok: false, error: "invalid_qty", message: "Enter a whole-number quantity." }, 400);
     }
+    // Step 39D2: on a display, each line's qty = displays x per display (Display card).
+    const isDisplay = rows.some((x) => x.custom_style === "assembly");
+    if (isDisplay && qty !== (Number(row.qty) || 1)) {
+      return json(
+        {
+          ok: false,
+          error: "display_qty",
+          message:
+            "This quote is a display: change the number of displays, or how many of this part go in one, on the Display card.",
+        },
+        400,
+      );
+    }
     const g = Number(b.grade_id);
     const gradeId = Number.isInteger(g) && g > 0 ? g : null;
     if (gradeId !== null) {
@@ -272,8 +288,11 @@ export async function POST(req: NextRequest) {
     if (!perBox) {
       next.print_spec = print;
       next.printed = print.colors.length > 0 ? 1 : 0;
-      next.qty = qty;
-      if (Array.isArray(facts.box_qty_breaks)) next.box_qty_breaks = swapBreak(facts.box_qty_breaks, oldQty, qty);
+      // Step 39D2: a display keeps its quote qty (the number of displays).
+      if (!isDisplay) {
+        next.qty = qty;
+        if (Array.isArray(facts.box_qty_breaks)) next.box_qty_breaks = swapBreak(facts.box_qty_breaks, oldQty, qty);
+      }
       if (!stockUnchanged && !isDieline) next.customer_box_in = { L, W, H: D, style };
     } else {
       // Per-size quotes: facts.qty follows the first size; printed = any size printed.

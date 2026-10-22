@@ -212,7 +212,7 @@ export async function POST(req: NextRequest) {
 
     const roles = cleanRoles(form.get("roles"));
     const units = cleanUnits(form.get("units"));
-    const analysis = analyzeDieline(text, { roles, units });
+    const analysis = analyzeDieline(text, { roles, units, split }); // Step 39D2: split-aware hint
     if (!analysis.ok) return json({ ok: false, error: analysis.error, message: analysis.message }, 422);
 
     const m = analysis.measure;

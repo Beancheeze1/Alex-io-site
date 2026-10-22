@@ -40,6 +40,7 @@ import { computePrintCharges } from "@/app/lib/pricing/print-charges";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { safeHex, safeUrl } from "@/lib/tenant-page";
 import { boxStyleLabel } from "@/lib/box-styles";
+import { cuttingDieNote } from "@/lib/display-assembly"; // Step 39D2
 import { buyerMayEdit } from "@/lib/quote-edit";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { buyerCanAccept, computeApproval } from "@/app/lib/quote-approval-core";
@@ -741,7 +742,9 @@ export async function GET(req: NextRequest) {
         coalesce(qbs.description, b.description) as description,
         coalesce(b.inside_length_in, qbs.custom_length_in) as inside_length_in,
         coalesce(b.inside_width_in, qbs.custom_width_in) as inside_width_in,
-        coalesce(b.inside_height_in, qbs.custom_height_in) as inside_height_in
+        coalesce(b.inside_height_in, qbs.custom_height_in) as inside_height_in,
+        -- Step 39D2: a die line part's name (for the cutting die note)
+        (to_jsonb(qbs) -> 'dieline' ->> 'label') as part_label
       from quote_box_selections qbs
       left join boxes b on b.id = qbs.box_id
       where qbs.quote_id = $1
@@ -804,17 +807,28 @@ export async function GET(req: NextRequest) {
     const boxToolingTotal =
       Math.round(packagingLinesForDisplay.reduce((s, l) => s + (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0), 0) * 100) / 100;
     // Step 37I: say which sizes the die is for.
+    // Step 39D2: die line parts by name and blank size (they have no depth).
     const dieSizes = packagingLinesForDisplay
       .filter((l) => (Number((l as { tooling_usd?: unknown }).tooling_usd) || 0) > 0)
       .map((l) => {
-        const r = l as { inside_length_in?: unknown; inside_width_in?: unknown; inside_height_in?: unknown; style?: unknown };
+        const r = l as {
+          inside_length_in?: unknown;
+          inside_width_in?: unknown;
+          inside_height_in?: unknown;
+          style?: unknown;
+          part_label?: unknown;
+        };
+        if (r.style === "dieline") {
+          const lw = [r.inside_length_in, r.inside_width_in].map((v) => Number(v));
+          const blank = lw.every((v) => Number.isFinite(v) && v > 0) ? `${lw.join(" × ")} in blank` : "";
+          const name = typeof r.part_label === "string" ? r.part_label.trim() : "";
+          return { part: true, text: name && blank ? `${name} (${blank})` : name || blank || "die-cut part" };
+        }
         const d = [r.inside_length_in, r.inside_width_in, r.inside_height_in].map((v) => Number(v));
         const dims = d.every((v) => Number.isFinite(v) && v > 0) ? `${d.join(" × ")} in` : "";
-        return [dims, boxStyleLabel(r.style).toLowerCase()].filter(Boolean).join(" ");
+        return { part: false, text: [dims, boxStyleLabel(r.style).toLowerCase()].filter(Boolean).join(" ") };
       });
-    const dieNote = dieSizes.length
-      ? `Steel-rule die to cut the ${dieSizes.join(" and the ")}. Charged once, not per box.`
-      : null;
+    const dieNote = cuttingDieNote(dieSizes);
     const processLines = [
       ...proc.lines,
       ...(boxToolingTotal > 0
