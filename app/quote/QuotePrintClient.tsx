@@ -2481,6 +2481,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   background: "var(--surface-subtle)",
                   borderBottom: "1px solid var(--border)",
                   display: "flex",
+                  flexWrap: "wrap", // Step 39J: the Accept strip is a full-width row under the title
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 16,
@@ -2612,6 +2613,8 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </button>
                   </div>
                 </div>
+                {/* Step 39J: Accept (or where the quote stands) right in the header */}
+                {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} variant="header" /> : null}
               </div>
             ))}
 
@@ -4371,7 +4374,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   />
                 ) : null}
 
-                {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} /> : null}
+                {/* Step 39J: Accept moved to the header (QuoteApprovalCard variant "header") */}
             </aside>
             </div>
             {/* end .qp-grid */}
