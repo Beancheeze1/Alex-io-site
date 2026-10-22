@@ -533,5 +533,7 @@ export async function handleBoxesTurn(args: {
           ? ai.quickReplies.slice(0, 6)
           : next.quickReplies;
 
-  return { assistantMessage: ai.assistantMessage, facts: merged, done, quickReplies };
+  // Step 39E2: with a die line, the last message always says to upload the file.
+  const assistantMessage = done && merged.dieline === true ? next.assistantMessage : ai.assistantMessage;
+  return { assistantMessage, facts: merged, done, quickReplies };
 }

@@ -1231,6 +1231,8 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const svgContainerRef = React.useRef<HTMLDivElement | null>(null);
 
   const [boxSelections, setBoxSelections] = React.useState<RequestedBoxRow[] | null>(null);
+  // Step 39E2: a display quote keeps its parts, grades and lines on the Display card.
+  const isDisplayQuote = (boxSelections ?? []).some((b) => b.style === "assembly");
   const [boxSelectionsLoading, setBoxSelectionsLoading] = React.useState<boolean>(false);
   const [boxSelectionsError, setBoxSelectionsError] = React.useState<string | null>(null);
 
@@ -3051,7 +3053,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               </div>
             )}
 
-            {/* Customer requested cartons */}
+            {/* Customer requested cartons (Step 39E2: not on a display, the Display card has it) */}
+            {!isDisplayQuote ? (
             <div style={{ ...cardBase, background: "var(--surface-card)", marginBottom: 20 }}>
               <div style={cardTitleStyle}>Customer requested cartons</div>
               {boxSelectionsLoading && (
@@ -3160,6 +3163,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                 </>
               )}
             </div>
+            ) : null}
 
             {quoteNoValue && <QuoteAttachmentsPanel quoteNo={quoteNoValue} />}
 

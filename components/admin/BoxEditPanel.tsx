@@ -117,6 +117,8 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
   }, [quoteNo]);
 
   if (!rows || rows.length === 0) return null;
+  // Step 39E2: on a display, grade and printing are changed on the Display card.
+  if (isDisplay) return null;
 
   const startEdit = (r: Row) => {
     setEditing(r.id);

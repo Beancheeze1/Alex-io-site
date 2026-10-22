@@ -748,6 +748,7 @@ export async function GET(req: NextRequest) {
       from quote_box_selections qbs
       left join boxes b on b.id = qbs.box_id
       where qbs.quote_id = $1
+      order by qbs.id -- Step 39E2: same order every load (lines and the die note)
       `,
       [quote.id],
     );

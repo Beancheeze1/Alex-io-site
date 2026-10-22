@@ -10,6 +10,9 @@
 // by sheet when the shop buys sheets; the die and the CAD table time from
 // the rule). A box already priced from a file can be re-read (Edit lines).
 // Backed by /api/admin/quotes/dieline. Renders nothing on other quotes.
+// Step 39E2: on a display quote the card itself is hidden; the Display card
+// opens it inside a part's row (embedded "edit": that part's lines) or under
+// the parts table (embedded "add": a new part from a file).
 
 "use client";
 
@@ -98,7 +101,15 @@ const select: React.CSSProperties = {
   fontSize: 12,
 };
 
-export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
+export default function DielineImportCard({
+  quoteNo,
+  embedded,
+  onClose,
+}: {
+  quoteNo: string;
+  embedded?: { mode: "edit"; boxId: number } | { mode: "add" };
+  onClose?: () => void;
+}) {
   const [rows, setRows] = React.useState<Row[]>([]);
   const [show, setShow] = React.useState(false);
   const [locked, setLocked] = React.useState(false);
@@ -128,6 +139,18 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
         setLocked(!!j.locked);
         setShow(true);
         if (j.rows?.length) setBoxId(Number(j.rows[0].id));
+        // Step 39E2: opened from the Display card
+        if (embedded?.mode === "add") setTarget("add");
+        if (embedded?.mode === "edit") {
+          const r = ((j.rows || []) as Row[]).find((x) => Number(x.id) === embedded.boxId);
+          if (r) {
+            setBoxId(r.id);
+            setRoles((r.dieline?.roles as Record<string, Role>) || {});
+            setUnits(r.dieline?.units || "auto");
+            setAttachmentId(r.dieline?.attachment_id ?? null);
+            if (!r.dieline?.attachment_id) setNote("This part's die line file isn't on the quote any more. Upload it again.");
+          }
+        }
       })
       .catch(() => {});
     return () => {
@@ -190,6 +213,8 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
   }, [file, attachmentId, boxId]);
 
   if (!show || rows.length === 0) return null;
+  // Step 39E2: a display's parts are worked on inside the Display card.
+  if (!embedded && rows.some((r) => r.style === "assembly")) return null;
 
   const setRole = (key: string, role: Role) => {
     const next = { ...roles, [key]: role };
@@ -232,8 +257,33 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
     }
   };
 
+  const editRowLabel =
+    embedded?.mode === "edit" ? rows.find((r) => r.id === embedded.boxId)?.dieline?.label || "this part" : "";
+
   return (
-    <div style={card} data-dieline-card>
+    <div
+      style={
+        embedded
+          ? { border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface-subtle)", padding: 12, margin: "6px 0" }
+          : card
+      }
+      data-dieline-card
+      data-dieline-embedded={embedded ? embedded.mode : undefined}
+    >
+      {embedded ? (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+            {embedded.mode === "edit" ? `Lines for ${editRowLabel}` : "Add a part from a die line file"}
+          </div>
+          {onClose ? (
+            <button type="button" style={btn} onClick={onClose} data-dieline-close>
+              Close
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {!embedded ? (
+      <>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Price from a die line</div>
       <div style={{ ...small, marginBottom: 10 }}>
         Upload the buyer&apos;s die line (DXF) for a box, a display part or any die-cut piece. Cut, crease and perforation lines are read from the layer names,
@@ -241,8 +291,10 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
         on your sheets when you buy sheets), the cutting die from the rule inches on press runs, and CAD table time from the
         same inches on short runs.
       </div>
+      </>
+      ) : null}
 
-      {toCheck.length && !locked ? (
+      {toCheck.length && !locked && !embedded ? (
         <div
           style={{ marginBottom: 10, padding: 10, borderRadius: 8, border: "1px solid var(--attention-border)", background: "var(--attention-bg)", fontSize: 12 }}
           data-dieline-check
@@ -259,7 +311,7 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
         </div>
       ) : null}
 
-      {rows.some((r) => r.style === "dieline") ? (
+      {rows.some((r) => r.style === "dieline") && !embedded ? (
         <div style={{ marginBottom: 10 }} data-dieline-stored>
           {rows
             .filter((r) => r.style === "dieline")
@@ -285,7 +337,8 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
         <div style={small}>Released quote: use Revise to change the boxes.</div>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          {rows.length > 1 ? (
+          {embedded?.mode === "edit" ? <span style={small}>Or a new file for this part:</span> : null}
+          {rows.length > 1 && !embedded ? (
             <label style={small}>
               Box{" "}
               <select style={select} value={boxId ?? ""} onChange={(e) => setBoxId(Number(e.target.value))} aria-label="Box">
@@ -399,7 +452,7 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
           ) : null}
 
           {/* Step 39D: several parts in one file can be split into one line each */}
-          {m.pieces > 1 ? (
+          {m.pieces > 1 && embedded?.mode !== "edit" ? (
             <label style={{ display: "block", marginTop: 10, fontSize: 12, color: "var(--text-primary)" }} data-dieline-split>
               <input
                 type="checkbox"
@@ -431,6 +484,7 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
             </table>
           ) : null}
 
+          {!embedded ? (
           <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 12 }}>
             <label>
               <input type="radio" checked={target === "replace" && !split} disabled={split} onChange={() => setTarget("replace")} />{" "}
@@ -440,6 +494,7 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
               <input type="radio" checked={target === "add" || split} onChange={() => setTarget("add")} /> Add as a new part
             </label>
           </div>
+          ) : null}
           {target === "add" || split ? (
             <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }}>
               <label style={small}>
@@ -478,9 +533,13 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
             ) : (
               <>
                 <button type="button" style={primary} disabled={busy} onClick={() => void send("apply")} data-dieline-apply>
-                  Price this box from the file
+                  {embedded?.mode === "edit" ? "Save this part's lines" : "Price this box from the file"}
                 </button>
-                <span style={{ ...small, marginLeft: 8 }}>Replaces this box&apos;s size and style; quantity, grade and printing stay.</span>
+                <span style={{ ...small, marginLeft: 8 }}>
+                  {embedded?.mode === "edit"
+                    ? "Reprices this part from what's read above; its name, count, grade and printing stay."
+                    : "Replaces this box's size and style; quantity, grade and printing stay."}
+                </span>
               </>
             )}
           </div>

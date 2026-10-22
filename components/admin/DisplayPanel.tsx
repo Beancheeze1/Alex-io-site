@@ -7,9 +7,17 @@
 // packing" line is priced from the shop's rates (Pricing → Corrugated boxes →
 // Displays and multi-part jobs). Backed by /api/admin/quotes/display.
 
+// Step 39E2: on a display, this card is where the parts are worked on: each
+// part's board grade, its die lines (Lines opens the die line reader in the
+// row), Remove, "Add a part from a file", the quote's printing, and the
+// buyer-upload check ("The lines look right"). The Boxes on this quote,
+// Price from a die line and Customer requested cartons cards are hidden on
+// a display to save room.
+
 "use client";
 
 import * as React from "react";
+import DielineImportCard from "@/components/admin/DielineImportCard";
 
 type Part = {
   id: number;
@@ -66,6 +74,9 @@ const input: React.CSSProperties = {
 const btn: React.CSSProperties = { ...input, border: "1px solid var(--border-strong)", padding: "4px 10px", cursor: "pointer" };
 const primary: React.CSSProperties = { ...btn, background: "var(--action-primary)", borderColor: "var(--action-primary)", color: "#fff" };
 
+type BoxRow = { id: number; L: number | null; W: number | null; style: string; grade_id: number | null; qty: number; colors: ("spot" | "flood")[]; sides: 1 | 2 };
+type Grade = { id: number; name: string; is_default: boolean };
+
 export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const [info, setInfo] = React.useState<Info | null>(null);
   const [displays, setDisplays] = React.useState("");
@@ -75,6 +86,13 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = React.useState<number | null>(null); // Step 39D2
+  // Step 39E2: grades, printing and die line checks, worked on here on a display
+  const [boxRows, setBoxRows] = React.useState<BoxRow[]>([]);
+  const [grades, setGrades] = React.useState<Grade[]>([]);
+  const [toCheck, setToCheck] = React.useState<number[]>([]);
+  const [openLines, setOpenLines] = React.useState<number | null>(null);
+  const [adding, setAdding] = React.useState(false);
+  const [printEdit, setPrintEdit] = React.useState<{ colors: ("spot" | "flood")[]; sides: 1 | 2 } | null>(null);
 
   React.useEffect(() => {
     let alive = true;
@@ -87,6 +105,23 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
         setParts(Object.fromEntries(j.parts.map((p) => [p.id, { per: String(p.per_display), label: p.label ?? "" }])));
         setMinutes(j.assembly?.override.minutes_per_display != null ? String(j.assembly.override.minutes_per_display) : "");
         setPerDisplayUsd(j.assembly?.override.usd_per_display != null ? String(j.assembly.override.usd_per_display) : "");
+      })
+      .catch(() => {});
+    // Step 39E2
+    fetch(`/api/admin/quotes/boxes?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive || !j?.ok || !j.boxes_only) return;
+        setBoxRows(Array.isArray(j.rows) ? j.rows : []);
+        setGrades(Array.isArray(j.grades) ? j.grades : []);
+      })
+      .catch(() => {});
+    fetch(`/api/admin/quotes/dieline?quote_no=${encodeURIComponent(quoteNo)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive || !j?.ok) return;
+        const rows = (Array.isArray(j.rows) ? j.rows : []) as { id: number; dieline?: { check?: boolean } | null }[];
+        setToCheck(rows.filter((r) => r.dieline?.check === true).map((r) => Number(r.id)));
       })
       .catch(() => {});
     return () => {
@@ -150,6 +185,69 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
     }
   };
 
+  // Step 39E2: one part's board grade, or the quote's printing (saved on one part,
+  // applies to the whole quote); same route as the Boxes card, quantity unchanged.
+  const saveBox = async (row: BoxRow, patch: { grade_id?: number | null; colors?: ("spot" | "flood")[]; sides?: 1 | 2 }) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/quotes/boxes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quote_no: quoteNo,
+          box_id: row.id,
+          L: row.L,
+          W: row.W,
+          D: 0,
+          style: row.style,
+          qty: row.qty,
+          grade_id: patch.grade_id !== undefined ? patch.grade_id : row.grade_id,
+          colors: patch.colors ?? row.colors,
+          sides: patch.sides ?? row.sides,
+        }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setNote(j?.message || `Couldn't save (HTTP ${res.status}).`);
+        return;
+      }
+      window.location.reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Step 39E2: staff confirm the lines read from a buyer's upload
+  const confirmLines = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const fd = new FormData();
+      fd.set("quote_no", quoteNo);
+      fd.set("mode", "confirm");
+      const res = await fetch("/api/admin/quotes/dieline", { method: "POST", body: fd });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setNote(j?.message || `Couldn't save (HTTP ${res.status}).`);
+        return;
+      }
+      window.location.reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const boxOf = (id: number) => boxRows.find((r) => r.id === id) ?? null;
+  const printRow = info.parts.map((p) => boxOf(p.id)).find(Boolean) ?? null;
+  const printText = (colors: ("spot" | "flood")[], sides: 1 | 2) =>
+    colors.length
+      ? `${colors.length}-color (${colors.join(", ")}), ${sides === 2 ? "outside + inside" : "outside"}`
+      : "No print";
+  const workHere = info.is_display; // Step 39E2: the other cards are hidden on a display
+
   const locked = info.locked;
   const asm = info.assembly;
   const digits = (v: string) => v.replace(/[^\d]/g, "").slice(0, 8);
@@ -163,6 +261,23 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
           ? "This quote is a display: each part's quantity is the number of displays × how many go in one, and assembly and packing is its own line, priced from your rates in Pricing → Corrugated boxes → Displays and multi-part jobs."
           : "Several parts that go together, like a display? Make it a display to set how many of each part go in one, and add an assembly and packing line."}
       </div>
+
+      {/* Step 39E2: the buyer uploaded this die line; staff confirm the reading */}
+      {workHere && toCheck.length && !locked ? (
+        <div
+          style={{ marginBottom: 10, padding: 10, borderRadius: 8, border: "1px solid var(--attention-border)", background: "var(--attention-bg)", fontSize: 12 }}
+          data-display-check
+        >
+          <div style={{ color: "var(--text-primary)", fontWeight: 600 }}>The buyer uploaded this die line</div>
+          <div style={{ color: "var(--text-secondary)", marginTop: 2 }}>
+            Its cut and crease lines were read automatically. Open Lines on a part to check it (saving confirms that part),
+            or confirm them all. The quote stays in the review queue until then.
+          </div>
+          <button type="button" style={{ ...primary, marginTop: 6 }} disabled={busy} onClick={() => void confirmLines()} data-display-confirm>
+            The lines look right ({toCheck.length} part{toCheck.length === 1 ? "" : "s"})
+          </button>
+        </div>
+      ) : null}
 
       {info.per_box ? (
         <div style={small}>This quote prices each size with its own printing; displays use one print setting for the whole quote.</div>
@@ -186,6 +301,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
               <tr style={{ textAlign: "left", color: "var(--text-muted)" }}>
                 <th style={{ padding: "4px 6px" }}>Part</th>
                 <th style={{ padding: "4px 6px" }}>Blank</th>
+                {workHere && grades.length ? <th style={{ padding: "4px 6px" }}>Board grade</th> : null}
                 <th style={{ padding: "4px 6px" }}>Per display</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Qty</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Each</th>
@@ -195,7 +311,8 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
             </thead>
             <tbody>
               {info.parts.map((p) => (
-                <tr key={p.id} style={{ borderTop: "1px solid var(--border)" }}>
+                <React.Fragment key={p.id}>
+                <tr style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ padding: "4px 6px" }}>
                     <input
                       style={{ ...input, width: 130 }}
@@ -208,7 +325,34 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                   </td>
                   <td style={{ padding: "4px 6px", color: "var(--text-secondary)" }}>
                     {p.blank ? `${p.blank.length_in.toFixed(2)} × ${p.blank.width_in.toFixed(2)} in` : "—"}
+                    {toCheck.includes(p.id) ? <div style={{ ...small, color: "var(--attention)" }}>to check</div> : null}
                   </td>
+                  {workHere && grades.length ? (
+                    <td style={{ padding: "4px 6px" }}>
+                      {(() => {
+                        const row = boxOf(p.id);
+                        return (
+                          <select
+                            style={{ ...input, maxWidth: 120 }}
+                            value={row?.grade_id != null ? String(row.grade_id) : ""}
+                            disabled={locked || busy || !row}
+                            onChange={(e) => {
+                              if (row) void saveBox(row, { grade_id: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null });
+                            }}
+                            aria-label="Board grade"
+                            data-display-grade={p.id}
+                          >
+                            <option value="">Shop default</option>
+                            {grades.map((g) => (
+                              <option key={g.id} value={String(g.id)}>
+                                {g.name}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
+                    </td>
+                  ) : null}
                   <td style={{ padding: "4px 6px" }}>
                     <input
                       style={{ ...input, width: 56 }}
@@ -228,6 +372,22 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                   </td>
                   {!locked ? (
                     <td style={{ padding: "4px 6px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      {workHere ? (
+                        <>
+                          <button
+                            type="button"
+                            style={btn}
+                            disabled={busy}
+                            onClick={() => {
+                              setAdding(false);
+                              setOpenLines(openLines === p.id ? null : p.id);
+                            }}
+                            data-display-lines={p.id}
+                          >
+                            {openLines === p.id ? "Hide lines" : "Lines"}
+                          </button>{" "}
+                        </>
+                      ) : null}
                       {confirmRemove === p.id ? (
                         <>
                           <button type="button" style={btn} disabled={busy} onClick={() => void removePart(p.id)} data-display-remove-yes={p.id}>
@@ -245,9 +405,121 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                     </td>
                   ) : null}
                 </tr>
+                {/* Step 39E2: the part's die lines, read and saved right here */}
+                {openLines === p.id ? (
+                  <tr>
+                    <td colSpan={workHere && grades.length ? 8 : 7} style={{ padding: "0 6px 6px" }}>
+                      <DielineImportCard quoteNo={quoteNo} embedded={{ mode: "edit", boxId: p.id }} onClose={() => setOpenLines(null)} />
+                    </td>
+                  </tr>
+                ) : null}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
+
+          {/* Step 39E2: the quote's printing and a new part, here instead of the other cards */}
+          {workHere ? (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }} data-display-tools>
+              {printRow ? (
+                <span style={{ color: "var(--text-secondary)" }}>
+                  Printing (all parts): {printText(printRow.colors, printRow.sides)}
+                </span>
+              ) : null}
+              {!locked && printRow ? (
+                <button
+                  type="button"
+                  style={btn}
+                  disabled={busy}
+                  onClick={() => setPrintEdit(printEdit ? null : { colors: [...printRow.colors], sides: printRow.sides })}
+                  data-display-print
+                >
+                  {printEdit ? "Cancel" : "Change printing"}
+                </button>
+              ) : null}
+              {!locked ? (
+                <button
+                  type="button"
+                  style={btn}
+                  disabled={busy}
+                  onClick={() => {
+                    setOpenLines(null);
+                    setAdding(!adding);
+                  }}
+                  data-display-add
+                >
+                  {adding ? "Cancel adding" : "+ Add a part from a file"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {workHere && printEdit && printRow && !locked ? (
+            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }} data-display-print-edit>
+              <label style={small}>
+                Colors{" "}
+                <select
+                  style={input}
+                  value={String(printEdit.colors.length)}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setPrintEdit((x) =>
+                      x ? { ...x, colors: Array.from({ length: n }, (_, i) => x.colors[i] ?? ("spot" as const)) } : x,
+                    );
+                  }}
+                  aria-label="Print colors"
+                >
+                  <option value="0">No print</option>
+                  <option value="1">1 color</option>
+                  <option value="2">2 colors</option>
+                  <option value="3">3 colors</option>
+                  <option value="4">4 colors</option>
+                </select>
+              </label>
+              {printEdit.colors.map((c, i) => (
+                <label key={i} style={small}>
+                  Color {i + 1}{" "}
+                  <select
+                    style={input}
+                    value={c}
+                    onChange={(e) => {
+                      const v: "spot" | "flood" = e.target.value === "flood" ? "flood" : "spot";
+                      setPrintEdit((x) => (x ? { ...x, colors: x.colors.map((y, j) => (j === i ? v : y)) } : x));
+                    }}
+                    aria-label={`Color ${i + 1} coverage`}
+                  >
+                    <option value="spot">Spot</option>
+                    <option value="flood">Flood</option>
+                  </select>
+                </label>
+              ))}
+              {printEdit.colors.length ? (
+                <label style={small}>
+                  Printed on{" "}
+                  <select
+                    style={input}
+                    value={String(printEdit.sides)}
+                    onChange={(e) => setPrintEdit((x) => (x ? { ...x, sides: e.target.value === "2" ? 2 : 1 } : x))}
+                    aria-label="Printed on"
+                  >
+                    <option value="1">Outside</option>
+                    <option value="2">Outside + inside</option>
+                  </select>
+                </label>
+              ) : null}
+              <button
+                type="button"
+                style={primary}
+                disabled={busy}
+                onClick={() => void saveBox(printRow, { colors: printEdit.colors, sides: printEdit.sides })}
+                data-display-print-save
+              >
+                Save printing
+              </button>
+            </div>
+          ) : null}
+          {workHere && adding && !locked ? (
+            <DielineImportCard quoteNo={quoteNo} embedded={{ mode: "add" }} onClose={() => setAdding(false)} />
+          ) : null}
           {info.other_lines.length ? (
             <div style={{ ...small, marginTop: 6 }}>
               Other lines on this quote ({info.other_lines.map((l) => l.description || `line ${l.id}`).join("; ")}) are 1 per display.
