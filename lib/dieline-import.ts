@@ -123,13 +123,42 @@ export function dielineSizeSuspect(lengthIn: number, widthIn: number): boolean {
   return Math.max(Number(lengthIn) || 0, Number(widthIn) || 0) > DIELINE_UNITS_CHECK_IN;
 }
 
+/**
+ * Step 39F: lines already read from another format (a vector PDF, see
+ * lib/dieline-pdf.ts) in the DXF reader's shape. `pdf` = the page it came from.
+ */
+export type DielineLines = {
+  segments: TaggedSeg[];
+  unitsLabel: string;
+  unitsSet: boolean;
+  pdf?: { pages: number; page_w_in: number; page_h_in: number; layers: string[] };
+};
+/** A die line: DXF text, or lines read from a PDF. */
+export type DielineSource = string | DielineLines;
+
+function toParsed(src: DielineSource): { segments: TaggedSeg[]; unitsLabel: string; unitsSet: boolean } {
+  return typeof src === "string" ? parseDxfTagged(src) : src;
+}
+
+/** Step 39F: a standard paper page (letter, legal, tabloid, A4, A3), either way round. */
+function isPaperPage(w: number, h: number): boolean {
+  const sizes = [[8.5, 11], [8.5, 14], [11, 17], [8.27, 11.69], [11.69, 16.54]];
+  return sizes.some(([a, b]) => (Math.abs(w - a) < 0.15 && Math.abs(h - b) < 0.15) || (Math.abs(w - b) < 0.15 && Math.abs(h - a) < 0.15));
+}
+
+/** Step 39F: a drawing scale picked by staff (1 = full size; 2 = drawn at 1:2, so x2). */
+export function cleanDielineScale(raw: unknown): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v > 0 && v <= 100 ? v : 1;
+}
+
 export function analyzeDieline(
-  text: string,
-  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits; split?: boolean } = {},
+  text: DielineSource,
+  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits; split?: boolean; scale?: number } = {},
 ): DielineAnalysis {
-  let parsed: ReturnType<typeof parseDxfTagged>;
+  let parsed: { segments: TaggedSeg[]; unitsLabel: string; unitsSet: boolean };
   try {
-    parsed = parseDxfTagged(text);
+    parsed = toParsed(text);
   } catch {
     return { ok: false, error: "unreadable", message: "We couldn't read that DXF file." };
   }
@@ -179,6 +208,20 @@ export function analyzeDieline(
     scale = 1 / 25.4;
     unitsLabel = "millimeters (guessed: the file doesn't say, and it's over 150 across as inches)";
     warnings.push("The file doesn't say its units, so it was read as millimeters. Switch to inches if that's wrong.");
+  }
+  // Step 39F: the drawing's scale (staff), and PDF notes
+  const drawScale = cleanDielineScale(opts.scale);
+  if (drawScale !== 1) {
+    scale *= drawScale;
+    unitsLabel += drawScale > 1 ? `, drawn at 1:${drawScale}` : `, scaled x${drawScale}`;
+  }
+  if (typeof text !== "string" && text.pdf) {
+    if (text.pdf.pages > 1) warnings.push(`Only page 1 of the PDF was read (it has ${text.pdf.pages} pages).`);
+    if (drawScale === 1 && isPaperPage(text.pdf.page_w_in, text.pdf.page_h_in)) {
+      warnings.push(
+        "This PDF is on a standard paper page. PDFs are read at full size (1:1): if the drawing was printed to fit the page or at a scale, check the blank size and set the drawing scale.",
+      );
+    }
   }
 
   const groups: DielineGroup[] = Array.from(byKey.entries())
@@ -271,6 +314,7 @@ export type DielineBlank = {
   per_display?: number; // Step 39D: how many of this part go into one display / set (default 1)
   piece?: number | null; // Step 39D: which piece of a multi-part file (1-based), null = the whole file
   label?: string | null; // Step 39D: staff's name for the part ("Header", "Shelf")
+  scale?: number; // Step 39F: the drawing scale staff set (1 = full size); kept for Edit lines
   check?: boolean; // Step 39E: read automatically from a buyer's upload; staff haven't confirmed the lines yet
 };
 
@@ -293,6 +337,7 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
     per_display: Number.isInteger(Number(o.per_display)) && Number(o.per_display) >= 1 ? Number(o.per_display) : 1,
     piece: Number.isInteger(Number(o.piece)) && Number(o.piece) >= 1 ? Number(o.piece) : null,
     label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 60) : null,
+    ...(cleanDielineScale(o.scale) !== 1 ? { scale: cleanDielineScale(o.scale) } : {}),
     ...(o.check === true ? { check: true } : {}),
   };
 }
@@ -310,12 +355,12 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
 export type DielinePiece = DielineMeasure & { piece: number };
 
 export function splitDieline(
-  text: string,
-  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits } = {},
+  text: DielineSource,
+  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits; scale?: number } = {},
 ): { ok: true; pieces: DielinePiece[]; stray_in: number } | { ok: false; error: string; message: string } {
   const a = analyzeDieline(text, opts);
   if (!a.ok) return a;
-  const parsed = parseDxfTagged(text);
+  const parsed = toParsed(text);
   const scale = a.scale;
   const roleOf = new Map(a.groups.map((g) => [g.key, g.role]));
   const used = parsed.segments
@@ -403,7 +448,7 @@ export const BUYER_DIELINE_MAX_PARTS = 12;
  * the buyer's name and count per display for each piece.
  */
 export function buyerDielineParts(
-  text: string,
+  text: DielineSource,
   filename: string,
   asked: { piece?: unknown; label?: unknown; per_display?: unknown }[] = [],
 ):

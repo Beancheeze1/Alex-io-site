@@ -36,7 +36,7 @@
 // Step 39E: the buyer's own die line. Send multipart/form-data with
 // `payload` (the JSON body above, without box dims) and `file` (a .dxf, up
 // to 5 MB). The file is read automatically (lib/dieline-import.ts,
-// buyerDielineParts) and kept on the quote:
+// buyerDielineParts; Step 39F: or a vector .pdf, lib/dieline-pdf.ts) and kept on the quote:
 //   one outline     -> one die-cut part line, qty = qty
 //   several outlines -> a display: one part line each (payload.parts =
 //                      [{ piece, label, per_display }]), qty = qty displays x
@@ -68,7 +68,8 @@ import {
   resolveStockSelection,
   type StockBoxRow,
 } from "@/app/lib/packaging-selection";
-import { buyerDielineParts, type DielineBlank } from "@/lib/dieline-import"; // Step 39E
+import { buyerDielineParts, type DielineBlank, type DielineSource } from "@/lib/dieline-import"; // Step 39E
+import { looksLikePdf, pdfDielineLines } from "@/lib/dieline-pdf"; // Step 39F
 import { ASSEMBLY_STYLE } from "@/lib/display-assembly"; // Step 39E
 
 const DIELINE_MAX_BYTES = 5 * 1024 * 1024; // Step 39E
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
       if (f && typeof f === "object" && "arrayBuffer" in f) {
         const file = f as File;
         const fname = String(file.name || "dieline.dxf").slice(0, 200);
-        if (!/\.dxf$/i.test(fname)) return bad("not_dxf", "Upload your die line as a .dxf file.");
+        if (!/\.(dxf|pdf)$/i.test(fname)) return bad("not_dxf", "Upload your die line as a .dxf file or a vector .pdf.");
         if (file.size > DIELINE_MAX_BYTES) return bad("too_big", "That file is over 5 MB.");
         dielineFile = { name: fname, bytes: Buffer.from(await file.arrayBuffer()) };
       }
@@ -163,7 +164,16 @@ export async function POST(req: NextRequest) {
     // Step 39E: the buyer's die line -> part(s), read before any quote row is made.
     let dieline: { parts: DielineBlank[]; display: boolean; gradeId: number | null } | null = null;
     if (dielineFile) {
-      const read = buyerDielineParts(dielineFile.bytes.toString("utf8"), dielineFile.name, Array.isArray(b.parts) ? b.parts.slice(0, 50) : []);
+      // Step 39F: a vector PDF is read into the same lines a DXF gives
+      let src: DielineSource = dielineFile.bytes.toString("utf8");
+      if (/\.pdf$/i.test(dielineFile.name) || looksLikePdf(dielineFile.bytes)) {
+        const pdf = await pdfDielineLines(dielineFile.bytes);
+        if (!pdf.ok) {
+          return bad("dieline_unreadable", `${pdf.message} You can send the file to the shop instead and they'll quote it.`, 422);
+        }
+        src = pdf.lines;
+      }
+      const read = buyerDielineParts(src, dielineFile.name, Array.isArray(b.parts) ? b.parts.slice(0, 50) : []);
       if (!read.ok) {
         return bad("dieline_unreadable", `${read.message} You can send the file to the shop instead and they'll quote it.`, 422);
       }
@@ -316,7 +326,14 @@ export async function POST(req: NextRequest) {
         `INSERT INTO public.quote_attachments (quote_id, quote_no, filename, content_type, size_bytes, data, kind)
          VALUES ($1, $2, $3, $4, $5, $6, 'dieline')
          RETURNING id`,
-        [quote.id, quote.quote_no, dielineFile.name, "application/dxf", dielineFile.bytes.length, dielineFile.bytes],
+        [
+          quote.id,
+          quote.quote_no,
+          dielineFile.name,
+          /\.pdf$/i.test(dielineFile.name) ? "application/pdf" : "application/dxf",
+          dielineFile.bytes.length,
+          dielineFile.bytes,
+        ],
       );
       for (const part0 of dieline.parts) {
         const part: DielineBlank = { ...part0, attachment_id: att ? Number(att.id) : null };

@@ -510,8 +510,8 @@ export default function StartQuoteModal({
       setDlInputKey((k) => k + 1);
       return;
     }
-    if (!/\.dxf$/i.test(f.name)) {
-      setDlError("Upload your die line as a .dxf file. For a PDF, DWG or STEP drawing, send it to the shop.");
+    if (!/\.(dxf|pdf)$/i.test(f.name)) {
+      setDlError("Upload your die line as a .dxf file or a vector .pdf. For a DWG or STEP drawing, send it to the shop.");
       return;
     }
     if (f.size > 5 * 1024 * 1024) {
@@ -519,6 +519,32 @@ export default function StartQuoteModal({
       return;
     }
     try {
+      // Step 39F: a PDF is read on the server (nothing is saved until the quote is made).
+      if (/\.pdf$/i.test(f.name)) {
+        const fd = new FormData();
+        fd.set("file", f);
+        const res = await fetch("/api/quote/dieline-preview", { method: "POST", body: fd });
+        const j = await res.json().catch(() => null);
+        if (!res.ok || !j?.ok) {
+          setDlError(`${j?.message || "We couldn't read that PDF."} You can send it to the shop instead and they'll quote it.`);
+          return;
+        }
+        const pieces: DielineRead["pieces"] = Array.isArray(j.pieces) ? j.pieces : [];
+        if (pieces.length > 1) setDlParts(Object.fromEntries(pieces.map((p) => [p.piece, { label: "", per: "1" }])));
+        setDlRead({
+          units_label: String(j.units_label || ""),
+          warnings: Array.isArray(j.warnings) ? j.warnings : [],
+          length_in: Number(j.measure?.length_in) || 0,
+          width_in: Number(j.measure?.width_in) || 0,
+          rule_in: Number(j.measure?.rule_in) || 0,
+          pieces: pieces.length > 1 ? pieces : [],
+        });
+        setDlFile(f);
+        setExtraSizes([]);
+        setPrefillPackagingSku("");
+        setBoxChoice("custom");
+        return;
+      }
       const text = await f.text();
       const a = analyzeDieline(text, { split: true });
       if (!a.ok) {
@@ -1834,8 +1860,8 @@ export default function StartQuoteModal({
                               HAVE A DIE LINE FILE? (OPTIONAL)
                             </div>
                             <div className="mt-1 text-sm text-[var(--text-secondary)]">
-                              Upload your DXF die line (a box, a display or any die-cut part) and we&apos;ll measure it and
-                              price it. A file with several separate parts is quoted as a display: your quantity is the
+                              Upload your die line (a DXF, or a vector PDF from your CAD program) for a box, a display or
+                              any die-cut part, and we&apos;ll measure it and price it. A file with several separate parts is quoted as a display: your quantity is the
                               number of displays.
                             </div>
                             {dlWanted && !dlFile ? (
@@ -1846,7 +1872,7 @@ export default function StartQuoteModal({
                             <input
                               key={dlInputKey}
                               type="file"
-                              accept=".dxf"
+                              accept=".dxf,.pdf"
                               aria-label="Die line file"
                               data-dieline-input
                               onChange={(e) => void pickDieline(e.target.files?.[0] || null)}

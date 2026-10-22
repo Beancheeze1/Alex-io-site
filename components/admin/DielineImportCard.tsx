@@ -10,6 +10,8 @@
 // by sheet when the shop buys sheets; the die and the CAD table time from
 // the rule). A box already priced from a file can be re-read (Edit lines).
 // Backed by /api/admin/quotes/dieline. Renders nothing on other quotes.
+// Step 39F: also a vector PDF die line, and the drawing's scale (a PDF is
+// read at full size; a drawing made at 1:2 etc. is scaled up here).
 // Step 39E2: on a display quote the card itself is hidden; the Display card
 // opens it inside a part's row (embedded "edit": that part's lines) or under
 // the parts table (embedded "add": a new part from a file).
@@ -63,6 +65,7 @@ type Stored = {
   filename?: string | null;
   roles?: Record<string, Role>;
   units?: "in" | "mm";
+  scale?: number; // Step 39F
   piece?: number | null;
   label?: string | null;
   check?: boolean; // Step 39E: from the buyer's upload, lines not confirmed yet
@@ -118,6 +121,7 @@ export default function DielineImportCard({
   const [attachmentId, setAttachmentId] = React.useState<number | null>(null);
   const [roles, setRoles] = React.useState<Record<string, Role>>({});
   const [units, setUnits] = React.useState<"auto" | "in" | "mm">("auto");
+  const [scale, setScale] = React.useState("1"); // Step 39F: drawing scale (1 = full size)
   const [analysis, setAnalysis] = React.useState<Analysis | null>(null);
   const [price, setPrice] = React.useState<Price | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -147,6 +151,7 @@ export default function DielineImportCard({
             setBoxId(r.id);
             setRoles((r.dieline?.roles as Record<string, Role>) || {});
             setUnits(r.dieline?.units || "auto");
+            setScale(String(r.dieline?.scale ?? 1));
             setAttachmentId(r.dieline?.attachment_id ?? null);
             if (!r.dieline?.attachment_id) setNote("This part's die line file isn't on the quote any more. Upload it again.");
           }
@@ -161,7 +166,7 @@ export default function DielineImportCard({
   const send = React.useCallback(
     async (
       mode: "preview" | "apply" | "add",
-      over?: { roles?: Record<string, Role>; units?: "auto" | "in" | "mm"; split?: boolean },
+      over?: { roles?: Record<string, Role>; units?: "auto" | "in" | "mm"; split?: boolean; scale?: string },
     ) => {
       if (boxId == null || (!file && !attachmentId)) return;
       setBusy(true);
@@ -175,6 +180,7 @@ export default function DielineImportCard({
         else if (attachmentId) fd.set("attachment_id", String(attachmentId));
         fd.set("roles", JSON.stringify(over?.roles ?? roles));
         fd.set("units", over?.units ?? units);
+        fd.set("scale", over?.scale ?? scale); // Step 39F
         const sp = over?.split ?? split;
         if (sp) fd.set("split", "1");
         if (mode === "add" && label.trim()) fd.set("label", label.trim());
@@ -203,7 +209,7 @@ export default function DielineImportCard({
         setBusy(false);
       }
     },
-    [boxId, file, attachmentId, quoteNo, roles, units, split, label, perDisplay],
+    [boxId, file, attachmentId, quoteNo, roles, units, split, label, perDisplay, scale],
   );
 
   // Re-read whenever the file or the box changes.
@@ -225,11 +231,16 @@ export default function DielineImportCard({
     setUnits(u);
     void send("preview", { units: u });
   };
+  const setScaleAnd = (v: string) => {
+    setScale(v);
+    void send("preview", { scale: v });
+  };
   const editStored = (r: Row) => {
     setBoxId(r.id);
     setFile(null);
     setRoles((r.dieline?.roles as Record<string, Role>) || {});
     setUnits(r.dieline?.units || "auto");
+    setScale(String(r.dieline?.scale ?? 1));
     setAttachmentId(r.dieline?.attachment_id ?? null);
     if (!r.dieline?.attachment_id) setNote("This box's die line file isn't on the quote any more. Upload it again.");
   };
@@ -286,7 +297,7 @@ export default function DielineImportCard({
       <>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Price from a die line</div>
       <div style={{ ...small, marginBottom: 10 }}>
-        Upload the buyer&apos;s die line (DXF) for a box, a display part or any die-cut piece. Cut, crease and perforation lines are read from the layer names,
+        Upload the buyer&apos;s die line (DXF, or a vector PDF from their CAD program) for a box, a display part or any die-cut piece. Cut, crease and perforation lines are read from the layer names,
         dashed lines and red lines; check them below. Each part is priced as die-cut work: board from the blank (nested
         on your sheets when you buy sheets), the cutting die from the rule inches on press runs, and CAD table time from the
         same inches on short runs.
@@ -352,7 +363,7 @@ export default function DielineImportCard({
           ) : null}
           <input
             type="file"
-            accept=".dxf"
+            accept=".dxf,.pdf"
             aria-label="Die line file"
             data-dieline-file
             onChange={(e) => {
@@ -360,6 +371,7 @@ export default function DielineImportCard({
               setAttachmentId(null);
               setRoles({});
               setUnits("auto");
+              setScale("1");
               setSplit(false);
               setFile(f);
             }}
@@ -389,6 +401,20 @@ export default function DielineImportCard({
                 <option value="auto">From the file ({analysis.units_label})</option>
                 <option value="in">Inches</option>
                 <option value="mm">Millimeters</option>
+              </select>
+            </div>
+            {/* Step 39F: a drawing made at a scale (PDFs are read at full size) */}
+            <div>
+              <div style={small}>Drawing scale</div>
+              <select style={select} value={scale} onChange={(e) => setScaleAnd(e.target.value)} aria-label="Drawing scale" data-dieline-scale>
+                <option value="1">Full size (1:1)</option>
+                {!["1", "2", "4", "8", "10", "16", "20"].includes(scale) ? <option value={scale}>{`x${scale}`}</option> : null}
+                <option value="2">1:2</option>
+                <option value="4">1:4</option>
+                <option value="8">1:8</option>
+                <option value="10">1:10</option>
+                <option value="16">1:16</option>
+                <option value="20">1:20</option>
               </select>
             </div>
           </div>

@@ -8,7 +8,8 @@
 //     -> { ok, boxes_only, locked, rows: [{ id, description, style, qty, dieline }] }
 //   POST multipart/form-data
 //     quote_no, box_id, mode = "preview" | "apply",
-//     file (.dxf)  OR  attachment_id (the die line already saved on the quote),
+//     file (.dxf, or Step 39F a vector .pdf)  OR  attachment_id (the die line already saved on the quote),
+//     scale (Step 39F: the drawing's scale, 1 = full size; 2 = drawn at 1:2),
 //     roles (JSON: { groupKey: "cut" | "crease" | "perf" | "ignore" }),
 //     units ("auto" | "in" | "mm")
 //     preview -> { ok, analysis, price: { unit, extended, tooling, method, qty, description } | null,
@@ -42,9 +43,12 @@ import {
   resolveCustomSelection,
   rowPrintSpec,
 } from "@/app/lib/packaging-selection";
+import { looksLikePdf, pdfDielineLines } from "@/lib/dieline-pdf"; // Step 39F
 import {
   analyzeDieline,
+  cleanDielineScale,
   DIELINE_ROLES,
+  type DielineSource,
   parseDielineBlank,
   splitDieline,
   type DielineBlank,
@@ -119,6 +123,18 @@ function cleanRoles(raw: unknown): Record<string, DielineRole> {
     if (typeof v === "string" && (DIELINE_ROLES as readonly string[]).includes(v) && k.length <= 300) out[k] = v as DielineRole;
   }
   return out;
+}
+
+/** Step 39F: a die line file's bytes -> DXF text, or the lines read from a vector PDF. */
+async function readDielineFile(
+  filename: string,
+  bytes: Buffer,
+): Promise<{ ok: true; src: DielineSource } | { ok: false; error: string; message: string }> {
+  if (/\.pdf$/i.test(filename) || looksLikePdf(bytes)) {
+    const r = await pdfDielineLines(bytes);
+    return r.ok ? { ok: true, src: r.lines } : r;
+  }
+  return { ok: true, src: bytes.toString("utf8") };
 }
 
 function cleanUnits(raw: unknown): DielineUnits {
@@ -210,7 +226,7 @@ export async function POST(req: NextRequest) {
     const perDisplay = form.get("per_display") != null && Number.isInteger(pd) && pd >= 1 && pd <= 10000 ? pd : prev?.per_display ?? 1;
 
     // ---- The file: a new upload, or the die line already saved on this quote ----
-    let text: string;
+    let text: DielineSource; // Step 39F: DXF text or a PDF's lines
     let filename: string;
     let bytes: Buffer | null = null;
     let attachmentId: number | null = null;
@@ -218,12 +234,14 @@ export async function POST(req: NextRequest) {
     if (file && typeof file === "object" && "arrayBuffer" in file) {
       const f = file as File;
       filename = String(f.name || "dieline.dxf").slice(0, 200);
-      if (!/\.dxf$/i.test(filename)) {
-        return json({ ok: false, error: "not_dxf", message: "Upload a .dxf file (PDF die lines come in a later step)." }, 400);
+      if (!/\.(dxf|pdf)$/i.test(filename)) {
+        return json({ ok: false, error: "not_dxf", message: "Upload a .dxf file or a vector .pdf die line." }, 400);
       }
       if (f.size > MAX_BYTES) return json({ ok: false, error: "too_big", message: "That file is over 5 MB." }, 400);
       bytes = Buffer.from(await f.arrayBuffer());
-      text = bytes.toString("utf8");
+      const rd = await readDielineFile(filename, bytes);
+      if (!rd.ok) return json({ ok: false, error: rd.error, message: rd.message }, 422);
+      text = rd.src;
     } else {
       const aid = Number(form.get("attachment_id"));
       if (!Number.isInteger(aid) || aid <= 0) {
@@ -236,19 +254,23 @@ export async function POST(req: NextRequest) {
       if (!att) return json({ ok: false, error: "attachment_not_found", message: "That file isn't on this quote." }, 404);
       attachmentId = Number(att.id);
       filename = String(att.filename || "dieline.dxf");
-      text = Buffer.from(att.data).toString("utf8");
+      const rd = await readDielineFile(filename, Buffer.from(att.data));
+      if (!rd.ok) return json({ ok: false, error: rd.error, message: rd.message }, 422);
+      text = rd.src;
     }
 
     const roles = cleanRoles(form.get("roles"));
     const units = cleanUnits(form.get("units"));
-    const analysis = analyzeDieline(text, { roles, units, split }); // Step 39D2: split-aware hint
+    // Step 39F: the drawing scale (sent, or the part's stored one when re-reading)
+    const scale = cleanDielineScale(form.get("scale") ?? prev?.scale ?? 1);
+    const analysis = analyzeDieline(text, { roles, units, split, scale }); // Step 39D2: split-aware hint
     if (!analysis.ok) return json({ ok: false, error: analysis.error, message: analysis.message }, 422);
 
     let m = analysis.measure;
     // Step 39E: Edit lines on a part from one piece of a multi-part file
     // (re-reading the stored file) re-reads that piece, not the whole file.
     if (mode !== "add" && !split && attachmentId != null && prev?.piece) {
-      const own = splitDieline(text, { roles, units });
+      const own = splitDieline(text, { roles, units, scale });
       const pc = own.ok ? own.pieces.find((x) => x.piece === prev.piece) : undefined;
       if (!pc) {
         return json(
@@ -279,9 +301,10 @@ export async function POST(req: NextRequest) {
       per_display: perDisplay,
       label,
       piece: attachmentId != null ? prev?.piece ?? null : null, // Step 39E: Edit lines keeps which piece it is
+      ...(scale !== 1 ? { scale } : {}), // Step 39F
     };
     // Step 39D: one line per separate part in the file (asked for with split=1).
-    const sp = split ? splitDieline(text, { roles, units }) : null;
+    const sp = split ? splitDieline(text, { roles, units, scale }) : null;
     if (split && sp && !sp.ok) return json({ ok: false, error: sp.error, message: sp.message }, 422);
 
     const perBox = facts.print_mode === "per_box";
@@ -320,7 +343,7 @@ export async function POST(req: NextRequest) {
         `INSERT INTO public.quote_attachments (quote_id, quote_no, filename, content_type, size_bytes, data, kind)
          VALUES ($1, $2, $3, $4, $5, $6, 'dieline')
          RETURNING id`,
-        [quote.id, quote.quote_no, filename, "application/dxf", bytes.length, bytes],
+        [quote.id, quote.quote_no, filename, /\.pdf$/i.test(filename) ? "application/pdf" : "application/dxf", bytes.length, bytes],
       );
       if (!att) return json({ ok: false, error: "insert_failed", message: "Couldn't save the file." }, 500);
       blank.attachment_id = Number(att.id);
