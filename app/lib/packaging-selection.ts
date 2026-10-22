@@ -30,6 +30,7 @@
 // pricing_detail.run_method on each row.
 
 import { boxShapeIssue } from "@/lib/box-shape"; // Step 39B
+import { parseDielineBlank, type DielineBlank } from "@/lib/dieline-import"; // Step 39C
 import { q, one } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
 import {
@@ -296,6 +297,7 @@ export async function resolveCustomSelection(
     print?: PrintSpec | null;
     method?: RunMethod | null;
     cells?: PartitionCells | null; // Step 27: partition sets
+    dieline?: DielineBlank | null; // Step 39C: style "dieline", measured from the file
   } = {},
 ): Promise<CustomResolvedSelection> {
   const L = customLengthIn;
@@ -338,6 +340,7 @@ export async function resolveCustomSelection(
     method,
     style,
     cells,
+    dieline: style === "dieline" ? opts.dieline ?? null : null, // Step 39C
   };
   let engine: CustomRscQuote | null = null;
   let engineError: string | null = null;
@@ -388,6 +391,18 @@ export async function resolveCustomSelection(
         // Step 27
         style,
         ...(cells ? { cells } : {}),
+        // Step 39C: what the die line file measured
+        ...(style === "dieline" && opts.dieline
+          ? {
+              dieline: {
+                cut_in: opts.dieline.cut_in,
+                crease_in: opts.dieline.crease_in,
+                perf_in: opts.dieline.perf_in,
+                rule_in: opts.dieline.rule_in,
+                filename: opts.dieline.filename ?? null,
+              },
+            }
+          : {}),
         ...(engine.blank.rule_in > 0 ? { die_rule_in: engine.blank.rule_in, die_line_usd: qp.die_line_usd } : {}),
       },
       tooling_usd: qp.die_line_usd > 0 ? qp.die_line_usd : null,
@@ -443,8 +458,12 @@ export function customSelectionInsert(args: {
   qty: number;
   resolved: CustomResolvedSelection;
   cells?: PartitionCells | null; // Step 27: partition sets
+  dieline?: DielineBlank | null; // Step 39C: stored only for style "dieline"
 }): { text: string; values: unknown[] } {
   const r = args.resolved;
+  // Step 39C: the dieline column exists after migration 049; only die-line
+  // uploads write it, so other inserts don't name it.
+  const withDieline = !!args.dieline;
   return {
     text: `
       INSERT INTO public.quote_box_selections
@@ -453,10 +472,10 @@ export function customSelectionInsert(args: {
          description, qty, unit_price_usd, extended_price_usd,
          board_grade_id, board_grade_name, pricing_source, needs_review, pricing_note, pricing_detail,
          print_colors, print_sides, print_usd, plates_usd,
-         tooling_usd, custom_cells_across, custom_cells_down)
+         tooling_usd, custom_cells_across, custom_cells_down${withDieline ? ", dieline" : ""})
       VALUES
         ($1, $2, 'custom', NULL, NULL, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb,
-         $17::jsonb, $18, $19, $20, $21, $22, $23)
+         $17::jsonb, $18, $19, $20, $21, $22, $23${withDieline ? ", $24::jsonb" : ""})
       RETURNING ${CUSTOM_SELECTION_RETURNING}`,
     values: [
       args.quoteId, args.quoteNo, args.L, args.W, args.H, args.style,
@@ -466,6 +485,7 @@ export function customSelectionInsert(args: {
       r.print_colors === null ? null : JSON.stringify(r.print_colors),
       r.print_sides, r.print_usd, r.plates_usd,
       r.tooling_usd, args.cells?.across ?? null, args.cells?.down ?? null,
+      ...(withDieline ? [JSON.stringify(args.dieline)] : []),
     ],
   };
 }
@@ -538,6 +558,7 @@ export async function repriceQuoteBoxes(
     print_sides: number | string | null;
     custom_cells_across: number | string | null;
     custom_cells_down: number | string | null;
+    dieline: unknown; // Step 39C
     b_id: number | null;
     sku: string | null;
     vendor: string | null;
@@ -551,6 +572,7 @@ export async function repriceQuoteBoxes(
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
             qbs.board_grade_id, qbs.print_colors, qbs.print_sides,
             qbs.custom_cells_across, qbs.custom_cells_down,
+            to_jsonb(qbs) -> 'dieline' AS dieline,
             b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
             b.inside_length_in, b.inside_width_in, b.inside_height_in
        FROM public.quote_box_selections qbs
@@ -580,6 +602,7 @@ export async function repriceQuoteBoxes(
           print,
           method,
           cells: rowCells(row.custom_cells_across, row.custom_cells_down),
+          dieline: parseDielineBlank(row.dieline), // Step 39C
         },
       );
       const upd = customSelectionUpdate(row.id, resolved);
@@ -677,6 +700,7 @@ export async function priceQuoteBoxesAtQtys(
     print_sides: number | string | null;
     custom_cells_across: number | string | null;
     custom_cells_down: number | string | null;
+    dieline: unknown; // Step 39C
     b_id: number | null;
     sku: string | null;
     vendor: string | null;
@@ -690,6 +714,7 @@ export async function priceQuoteBoxesAtQtys(
             qbs.custom_length_in, qbs.custom_width_in, qbs.custom_height_in, qbs.custom_style,
             qbs.board_grade_id, qbs.print_colors, qbs.print_sides,
             qbs.custom_cells_across, qbs.custom_cells_down,
+            to_jsonb(qbs) -> 'dieline' AS dieline,
             b.id AS b_id, b.sku, b.vendor, b.style, b.description AS b_description,
             b.inside_length_in, b.inside_width_in, b.inside_height_in
        FROM public.quote_box_selections qbs
@@ -732,6 +757,7 @@ export async function priceQuoteBoxesAtQtys(
             print,
             method,
             cells: rowCells(row.custom_cells_across, row.custom_cells_down),
+            dieline: parseDielineBlank(row.dieline), // Step 39C
           },
         );
         ext = r.extended_price_usd;

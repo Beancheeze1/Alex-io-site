@@ -208,8 +208,9 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
           {editing === r.id && draft && editRow ? (
             <div style={{ marginTop: 10 }} data-box-editor={r.id}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+                {/* Step 39C: a die line box keeps its file's size (Edit lines re-reads the file) */}
                 {(["L", "W", "D"] as const)
-                  .filter((k) => k !== "D" || boxStyleInfo(draft.style).usesDepth)
+                  .filter((k) => draft.style !== "dieline" && (k !== "D" || boxStyleInfo(draft.style).usesDepth))
                   .map((k) => (
                   <label key={k}>
                     <div style={label}>
@@ -237,6 +238,12 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 8 }}>
+                {draft.style === "dieline" ? (
+                  <div style={{ ...label, gridColumn: "span 2", alignSelf: "end" }} data-dieline-size>
+                    Size and rule from the die line file ({draft.L} × {draft.W} in blank). Use Edit lines below to
+                    change how the file is read.
+                  </div>
+                ) : (
                 <label>
                   <div style={label}>Style</div>
                   <select
@@ -252,6 +259,7 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
                     ))}
                   </select>
                 </label>
+                )}
                 {boxStyleInfo(draft.style).cells ? (
                   <>
                     <label>

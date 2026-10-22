@@ -278,6 +278,9 @@ export function computeStyleBlank(
     return one(rsc.raw_length_in, rawW, 0, "Blank", slotsAndScores(bl, bw, style === "hsc" ? 1 : 2));
   }
   if (style === "pad") return one(L + t, W + t, 0, "Pad", 2 * (roundUp(L + t, inc) + roundUp(W + t, inc)));
+  // Step 39C: a die line needs its measured file (dielineStyleBlank); with
+  // only a size, treat it as a flat blank with no rule.
+  if (style === "dieline") return one(L + t, W + t, 0, "Blank", 2 * (roundUp(L + t, inc) + roundUp(W + t, inc)));
   if (style === "tray") {
     const bl = roundUp(L + 2 * D + 2 * a + t, inc);
     const bw = roundUp(W + 2 * D + 2 * a + t, inc);
@@ -317,6 +320,36 @@ export function computeStyleBlank(
     pieces_per_box: pieces.reduce((n, p) => n + p.count, 0),
     rule_in: 0,
     cad_path_in: r1(cadPath),
+  };
+}
+
+/**
+ * Step 39C: the blank for a die line measured from a file (lib/dieline-import):
+ * the file's blank + edge trim, rounded up to the shop's increment. The die
+ * rule and the CAD table path are the file's cut + crease + perf inches.
+ */
+export function dielineStyleBlank(
+  d: { length_in: number; width_in: number; rule_in: number },
+  layout: { round_to_in: number; edge_trim_in: number; waste_pct: number },
+): StyleBlank {
+  const t = Number(layout.edge_trim_in) || 0;
+  const rawL = d.length_in + t;
+  const rawW = d.width_in + t;
+  const length_in = roundUp(rawL, layout.round_to_in);
+  const width_in = roundUp(rawW, layout.round_to_in);
+  const sqft_each = (length_in * width_in) / 144;
+  return {
+    style: "dieline",
+    raw_length_in: rawL,
+    raw_width_in: rawW,
+    length_in,
+    width_in,
+    sqft_each,
+    sqft_each_with_waste: sqft_each * (1 + (Number(layout.waste_pct) || 0) / 100),
+    pieces: [{ label: "Blank", length_in, width_in, count: 1 }],
+    pieces_per_box: 1,
+    rule_in: d.rule_in,
+    cad_path_in: r1(d.rule_in),
   };
 }
 

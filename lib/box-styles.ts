@@ -13,8 +13,12 @@
 //
 // Die-cut styles carry a one-time cutting die when run on the press (not on
 // digital short runs, which are CAD cut). Partitions are unprinted.
+//
+// Step 39C: "dieline" = a die-cut box measured from the buyer's / shop's own
+// die line file (blank size and rule inches from the file). It is never in
+// the pickers (BOX_STYLES); it only comes from a file upload.
 
-export type BoxStyle = "rsc" | "hsc" | "fol" | "mailer" | "tray" | "pad" | "partition";
+export type BoxStyle = "rsc" | "hsc" | "fol" | "mailer" | "tray" | "pad" | "partition" | "dieline";
 
 export type BoxStyleKind = "slotted" | "diecut" | "flat" | "partition";
 
@@ -42,12 +46,26 @@ export const BOX_STYLES: BoxStyleInfo[] = [
 
 export const BOX_STYLE_KEYS: BoxStyle[] = BOX_STYLES.map((s) => s.key);
 
+/** Step 39C: the from-a-file die-cut style (not offered in pickers). */
+export const DIELINE_STYLE: BoxStyleInfo = {
+  key: "dieline",
+  label: "Die-cut from your file",
+  desc: "Priced from an uploaded die line: blank size and rule from the file.",
+  kind: "diecut",
+  usesDepth: false,
+  depthLabel: "Depth",
+  cells: false,
+  printable: true,
+  forFoam: false,
+};
+
 /** A style key from user / stored input; anything containing "mailer" is a mailer. Unknown -> null. */
 export function parseBoxStyle(raw: unknown): BoxStyle | null {
   const s = String(raw ?? "").trim().toLowerCase();
   if (!s) return null;
   const hit = BOX_STYLES.find((x) => x.key === s);
   if (hit) return hit.key;
+  if (s === "dieline") return "dieline"; // Step 39C
   if (s.includes("mailer")) return "mailer";
   return null;
 }
@@ -58,6 +76,7 @@ export function boxStyleOrRsc(raw: unknown): BoxStyle {
 }
 
 export function boxStyleInfo(style: BoxStyle): BoxStyleInfo {
+  if (style === "dieline") return DIELINE_STYLE; // Step 39C
   return BOX_STYLES.find((s) => s.key === style) ?? BOX_STYLES[0];
 }
 
@@ -83,6 +102,7 @@ export function parseCells(across: unknown, down: unknown): PartitionCells | nul
 /** "Custom box 12 x 10 x 8 in" / "Custom pad 12 x 10 in" / "Custom partition set 12 x 10 x 6 in, 3 x 4 cells". */
 export function customBoxBaseDesc(style: BoxStyle | null, L: number, W: number, H: number, cells?: PartitionCells | null): string {
   if (style === "pad") return `Custom pad ${L} x ${W} in`;
+  if (style === "dieline") return `Die-cut box from your file, ${L} x ${W} in blank`; // Step 39C
   if (style === "partition") {
     return `Custom partition set ${L} x ${W} x ${H} in${cells ? `, ${cells.across} x ${cells.down} cells` : ""}`;
   }
@@ -106,6 +126,8 @@ export function parseCustomBoxInput(
   raw: Record<string, unknown>,
 ): { ok: true; value: CustomBoxInput } | { ok: false; message: string } {
   const style = boxStyleOrRsc(raw.style);
+  // Step 39C: a die line is priced from its file, never from typed sizes.
+  if (style === "dieline") return { ok: false, message: "Upload the die line file to quote a box from it." };
   const info = boxStyleInfo(style);
   const L = Number(raw.L);
   const W = Number(raw.W);

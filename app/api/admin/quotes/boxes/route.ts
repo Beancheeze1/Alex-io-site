@@ -200,7 +200,15 @@ export async function POST(req: NextRequest) {
     if (!row) return json({ ok: false, error: "box_not_found", message: "That box isn't on this quote." }, 404);
 
     // ---- Validate (Step 27: any style; pads have no depth, partitions need cells) ----
-    const parsed = parseCustomBoxInput(b);
+    // Step 39C: a box priced from a die line keeps its file's size and style;
+    // only the quantity, grade and printing change here (Edit lines re-reads the file).
+    const isDieline = row.custom_style === "dieline";
+    const parsed = isDieline
+      ? ({
+          ok: true,
+          value: { L: Number(row.custom_length_in), W: Number(row.custom_width_in), D: 0, style: "dieline" as BoxStyle, cells: null },
+        } as const)
+      : parseCustomBoxInput(b);
     if (!parsed.ok) return json({ ok: false, error: "invalid_dims", message: parsed.message }, 400);
     const { L, W, D, style, cells } = parsed.value;
     const qty = Number(b.qty);
@@ -261,7 +269,7 @@ export async function POST(req: NextRequest) {
       next.printed = print.colors.length > 0 ? 1 : 0;
       next.qty = qty;
       if (Array.isArray(facts.box_qty_breaks)) next.box_qty_breaks = swapBreak(facts.box_qty_breaks, oldQty, qty);
-      if (!stockUnchanged) next.customer_box_in = { L, W, H: D, style };
+      if (!stockUnchanged && !isDieline) next.customer_box_in = { L, W, H: D, style };
     } else {
       // Per-size quotes: facts.qty follows the first size; printed = any size printed.
       if (Number(rows[0]?.id) === Number(row.id)) next.qty = qty;

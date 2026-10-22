@@ -20,6 +20,9 @@
 
 export type Pt = { x: number; y: number };
 export type Seg = { x1: number; y1: number; x2: number; y2: number };
+/** Step 39C: what a line is drawn with (resolved through BYLAYER / BYBLOCK). */
+export type SegTag = { layer: string; ltype: string; dashed: boolean; color: number };
+export type TaggedSeg = Seg & { tag: SegTag };
 
 export type FacesLoop = {
   idx: number;
@@ -120,12 +123,21 @@ function toEntities(pairs: Pair[]): Entity[] {
   return out;
 }
 
-type Doc = { insunits: number | null; entities: Entity[]; blocks: Map<string, { base: Pt; entities: Entity[] }> };
+type Doc = {
+  insunits: number | null;
+  entities: Entity[];
+  blocks: Map<string, { base: Pt; entities: Entity[] }>;
+  // Step 39C: LAYER and LTYPE tables (empty when the file has none)
+  layers: Map<string, { color: number; ltype: string }>;
+  ltypes: Map<string, { dashed: boolean }>;
+};
 
 export function readDoc(text: string): Doc {
   const pairs = dxfPairs(text);
   let insunits: number | null = null;
   const blocks = new Map<string, { base: Pt; entities: Entity[] }>();
+  const layers = new Map<string, { color: number; ltype: string }>();
+  const ltypes = new Map<string, { dashed: boolean }>();
   let entities: Entity[] = [];
 
   let i = 0;
@@ -139,6 +151,18 @@ export function readDoc(text: string): Doc {
         for (let k = 0; k < body.length; k++) {
           if (body[k].code === 9 && body[k].value === "$INSUNITS" && body[k + 1]?.code === 70) {
             insunits = parseInt(body[k + 1].value, 10);
+          }
+        }
+      } else if (name === "TABLES") {
+        // Step 39C: layer colors / linetypes, and which linetypes are dashed.
+        for (const t of toEntities(body)) {
+          if (t.type === "LAYER") {
+            const ln = str(t, 2);
+            if (ln) layers.set(ln.toUpperCase(), { color: Math.abs(num(t, 62, 7)) || 7, ltype: (str(t, 6) || "CONTINUOUS").toUpperCase() });
+          } else if (t.type === "LTYPE") {
+            const tn = str(t, 2);
+            const dashes = nums(t, 49).filter(Number.isFinite);
+            if (tn) ltypes.set(tn.toUpperCase(), { dashed: num(t, 73, 0) > 0 && dashes.some((d) => d < 0) });
           }
         }
       } else if (name === "ENTITIES") {
@@ -161,7 +185,28 @@ export function readDoc(text: string): Doc {
       i = j + 1;
     } else i++;
   }
-  return { insunits, entities, blocks };
+  return { insunits, entities, blocks, layers, ltypes };
+}
+
+/** Step 39C: a linetype name that reads as dashed when the file has no LTYPE table entry for it. */
+function dashedByName(ltype: string): boolean {
+  return /DASH|HIDDEN|CENTER|DOT|DIVIDE|PHANTOM|BORDER/.test(ltype);
+}
+
+/** Step 39C: the layer / linetype / color an entity is drawn with. */
+function entityTag(e: Entity, doc: Doc, parent: SegTag | null): SegTag {
+  let layer = (str(e, 8) || "0").toUpperCase();
+  if (layer === "0" && parent) layer = parent.layer; // block contents on layer 0 follow the insert
+  const lay = doc.layers.get(layer);
+  let ltype = (str(e, 6) || "BYLAYER").toUpperCase();
+  if (ltype === "BYLAYER") ltype = lay?.ltype || "CONTINUOUS";
+  else if (ltype === "BYBLOCK") ltype = parent?.ltype || "CONTINUOUS";
+  let color = e.pairs.some((p) => p.code === 62) ? num(e, 62, 256) : 256;
+  if (color === 256) color = lay?.color ?? 7;
+  else if (color === 0) color = parent?.color ?? 7;
+  const lt = doc.ltypes.get(ltype);
+  const dashed = ltype === "CONTINUOUS" ? false : lt ? lt.dashed : dashedByName(ltype);
+  return { layer, ltype, dashed, color: Math.abs(color) };
 }
 
 /* ----------------------- geometry to segments ----------------------- */
@@ -298,6 +343,7 @@ function entitySegments(
   counts: Record<string, number>,
   depth: number,
   scaleHint: number,
+  parentTag: SegTag | null = null,
 ): Seg[] {
   const segs: Seg[] = [];
   // tolerance in drawing units (scaleHint = inches per unit after xf)
@@ -307,6 +353,9 @@ function entitySegments(
     if (IGNORED.has(e.type)) continue;
     // paper-space entities (title blocks on layouts) are skipped
     if (str(e, 67) === "1") continue;
+    // Step 39C: every segment carries the layer / linetype / color it's drawn with.
+    const tag = entityTag(e, doc, parentTag);
+    const from = segs.length;
     switch (e.type) {
       case "LINE":
         pushPath(segs, [{ x: num(e, 10), y: num(e, 20) }, { x: num(e, 11), y: num(e, 21) }], xf);
@@ -387,12 +436,14 @@ function entitySegments(
           const y = (q.y - b.base.y) * sy;
           return xf({ x: ip.x + x * cos - y * sin, y: ip.y + x * sin + y * cos });
         };
-        segs.push(...entitySegments(b.entities, doc, ins, tolIn, counts, depth + 1, scaleHint * Math.max(Math.abs(sx), Math.abs(sy), 1e-9)));
-        break;
+        // children keep their own tags (layer 0 / BYBLOCK resolve to this insert's)
+        segs.push(...entitySegments(b.entities, doc, ins, tolIn, counts, depth + 1, scaleHint * Math.max(Math.abs(sx), Math.abs(sy), 1e-9), tag));
+        continue;
       }
       default:
         break;
     }
+    for (let k = from; k < segs.length; k++) (segs[k] as TaggedSeg).tag = tag;
   }
   return segs;
 }
@@ -425,6 +476,26 @@ export function parseDxf(text: string, opts: { tolIn?: number } = {}): {
     [s.x1, s.y1, s.x2, s.y2].every(Number.isFinite),
   );
   return { segments, counts, unitsLabel: u.label };
+}
+
+/**
+ * Step 39C: like parseDxf, but every segment keeps its layer / linetype /
+ * color (for telling cut from crease on a corrugated die line). Also says
+ * whether the file set its units.
+ */
+export function parseDxfTagged(
+  text: string,
+  opts: { tolIn?: number } = {},
+): { segments: TaggedSeg[]; counts: Record<string, number>; unitsLabel: string; unitsSet: boolean } {
+  const doc = readDoc(text);
+  const u = unitsFactor(doc.insunits);
+  const tolIn = opts.tolIn ?? 0.003;
+  const counts: Record<string, number> = {};
+  const toIn: Xform = (p) => ({ x: p.x * u.f, y: p.y * u.f });
+  const segments = (entitySegments(doc.entities, doc, toIn, tolIn, counts, 0, u.f) as TaggedSeg[]).filter(
+    (s) => [s.x1, s.y1, s.x2, s.y2].every(Number.isFinite) && !!s.tag,
+  );
+  return { segments, counts, unitsLabel: u.label, unitsSet: doc.insunits != null && doc.insunits !== 0 };
 }
 
 /* ---------------------------- loops ---------------------------- */

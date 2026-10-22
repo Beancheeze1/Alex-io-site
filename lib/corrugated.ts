@@ -253,6 +253,8 @@ export type CustomRscRequest = {
   method?: RunMethod | null; // Step 15: null / missing = auto by quantity
   style?: BoxStyle; // Step 27: missing = "rsc"
   cells?: PartitionCells | null; // Step 27: partitions
+  /** Step 39C: style "dieline": the blank and rule measured from the file. */
+  dieline?: { length_in: number; width_in: number; rule_in: number } | null;
 };
 
 export type CustomRscQuote = BoxPriceResult & {
@@ -290,6 +292,7 @@ export async function priceCustomRsc(tenantId: number, req: CustomRscRequest): P
     method: req.method ?? null,
     style: req.style ?? "rsc",
     cells: req.cells ?? null,
+    dieline: req.dieline ?? null, // Step 39C
   });
   return { ...result, grade: { id: grade.id, name: grade.name, flute: grade.flute } };
 }

@@ -26,6 +26,7 @@ import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
 import RunMethodControl from "@/components/admin/RunMethodControl";
 import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
+import DielineImportCard from "@/components/admin/DielineImportCard"; // Step 39C
 import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
 import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
 import ProofCard from "@/components/quote/ProofCard";
@@ -2880,6 +2881,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
             {/* Step 18: edit the boxes on a boxes-only quote (no layout editor for these) */}
             {quoteNoValue ? <BoxEditPanel quoteNo={quoteNoValue} /> : null}
+            {quoteNoValue ? <DielineImportCard quoteNo={quoteNoValue} /> : null}
 
             {/* Materials explorer + "view customer quote" */}
             {primaryItem && (

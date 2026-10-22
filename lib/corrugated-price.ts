@@ -44,6 +44,7 @@
 import {
   computeSheet,
   computeStyleBlank,
+  dielineStyleBlank,
   type BlankPiece,
   type StyleBlank,
   type BoardMethod,
@@ -118,6 +119,8 @@ export type PriceRscInput = {
   method?: RunMethod | null; // Step 15: null / missing = auto by quantity
   style?: BoxStyle; // Step 27: missing = "rsc"
   cells?: PartitionCells | null; // Step 27: partitions only
+  /** Step 39C: style "dieline" only: the blank and rule measured from the file. */
+  dieline?: { length_in: number; width_in: number; rule_in: number } | null;
 };
 
 export type QtyPrice = {
@@ -225,7 +228,13 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
   }
 
   const s = inp.settings;
-  const blank = computeStyleBlank(
+  // Step 39C: a die line from a file is priced from its measured blank.
+  if (style === "dieline" && !(inp.dieline && inp.dieline.length_in > 0 && inp.dieline.width_in > 0)) {
+    return fail("dieline_missing", "This box is priced from its die line file, and the file's measurements are missing.");
+  }
+  const blank = style === "dieline" && inp.dieline
+    ? dielineStyleBlank(inp.dieline, { round_to_in: s.round_to_in, edge_trim_in: s.edge_trim_in, waste_pct: s.waste_pct })
+    : computeStyleBlank(
     style,
     { L, W, D },
     inp.flute,
