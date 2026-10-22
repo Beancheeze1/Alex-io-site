@@ -389,6 +389,10 @@ export default function RepStartQuoteModal({
   const [stockCandidates, setStockCandidates] = React.useState<StockCandidate[]>([]);
   const [stockCandidatesLoading, setStockCandidatesLoading] = React.useState(false);
   const [boxChoice, setBoxChoice] = React.useState<"" | "stock" | "custom">("");
+  // Step 39I: an HSC, FOL, tray, pad or partition is always a custom size (stock
+  // boxes are RSCs and mailers only), so it never needs the stock / custom pick.
+  const customStyleOnly = quoteType === "boxes_only" && boxStyle !== "rsc" && boxStyle !== "mailer";
+  const boxPicked = !!boxChoice || customStyleOnly;
   const [selectedStockSku, setSelectedStockSku] = React.useState("");
 
   // Board grade for a custom RSC (Corrugated Step 3A). "" = shop default.
@@ -697,7 +701,7 @@ export default function RepStartQuoteModal({
       return;
     }
 
-    if ((quoteType === "complete_pack" || quoteType === "boxes_only") && !boxChoice && !dlMode) {
+    if ((quoteType === "complete_pack" || quoteType === "boxes_only") && !boxPicked && !dlMode) {
       setSubmitError('Choose a stock box or "Use custom instead" before creating the quote.');
       setActiveStep("specs");
       return;
@@ -1326,7 +1330,15 @@ export default function RepStartQuoteModal({
                             <Field label="Box style">
                               <select
                                 value={boxStyle}
-                                onChange={(e) => setBoxStyle(boxStyleOrRsc(e.target.value))}
+                                onChange={(e) => {
+                                  const st = boxStyleOrRsc(e.target.value);
+                                  setBoxStyle(st);
+                                  // Step 39I: other styles are custom sizes (no stock pick)
+                                  if (st !== "rsc" && st !== "mailer") {
+                                    setBoxChoice("custom");
+                                    setSelectedStockSku("");
+                                  }
+                                }}
                                 className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
                               >
                                 {/* Step 27: boxes only offers every style; foam + box keeps mailer / RSC. */}
@@ -2117,7 +2129,7 @@ export default function RepStartQuoteModal({
                   disabled={
                     activeStep === "specs" &&
                     (quoteType === "complete_pack" || quoteType === "boxes_only") &&
-                    (dlMode ? !dielinePartsOk(dieline) : !boxChoice)
+                    (dlMode ? !dielinePartsOk(dieline) : !boxPicked)
                   }
                   className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-40"
                 >
