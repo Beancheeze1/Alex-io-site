@@ -30,7 +30,7 @@
 // pricing_detail.run_method on each row.
 
 import { boxShapeIssue } from "@/lib/box-shape"; // Step 39B
-import { dielineSizeSuspect, parseDielineBlank, type DielineBlank } from "@/lib/dieline-import"; // Step 39C, 39D2
+import { dielineSizeSuspect, parseDielineBlank, partPrintOf, type DielineBlank } from "@/lib/dieline-import"; // Step 39C, 39D2, 39G
 import {
   ASSEMBLY_STYLE,
   assemblyDescription,
@@ -676,8 +676,10 @@ export async function repriceQuoteBoxes(
 
   for (const row of rows) {
     const qty = Math.max(1, Math.round(Number(row.qty) || 1));
+    // Step 39G: a display part can have its own printing (stored on its dieline blob).
+    const ownPrint = row.custom_style === "dieline" ? partPrintOf(row.dieline) : null;
     const print: PrintSpec | null =
-      printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg;
+      ownPrint ?? (printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg);
 
     if (row.custom_style === ASSEMBLY_STYLE) {
       const resolved = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline);
@@ -837,8 +839,10 @@ export async function priceQuoteBoxesAtQtys(
     let priced = 0;
 
     for (const row of rows) {
+      // Step 39G: a display part's own printing
+      const ownPrint = row.custom_style === "dieline" ? partPrintOf(row.dieline) : null;
       const print: PrintSpec | null =
-        printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg;
+        ownPrint ?? (printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg);
       let ext: number | null = null;
       let u: number | null = null;
       let pl: number | null = null;

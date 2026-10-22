@@ -48,6 +48,7 @@ import {
   analyzeDieline,
   cleanDielineScale,
   DIELINE_ROLES,
+  partPrintOf,
   type DielineSource,
   parseDielineBlank,
   splitDieline,
@@ -302,13 +303,17 @@ export async function POST(req: NextRequest) {
       label,
       piece: attachmentId != null ? prev?.piece ?? null : null, // Step 39E: Edit lines keeps which piece it is
       ...(scale !== 1 ? { scale } : {}), // Step 39F
+      ...(prev?.print ? { print: prev.print } : {}), // Step 39G: Edit lines keeps the part's own printing
     };
     // Step 39D: one line per separate part in the file (asked for with split=1).
     const sp = split ? splitDieline(text, { roles, units, scale }) : null;
     if (split && sp && !sp.ok) return json({ ok: false, error: sp.error, message: sp.message }, 422);
 
     const perBox = facts.print_mode === "per_box";
-    const print = perBox ? rowPrintSpec(row.print_colors, row.print_sides) : parsePrintSpec(facts.print_spec);
+    // Step 39G: a part with its own printing is previewed with it
+    const print =
+      (mode !== "add" ? partPrintOf(row.dieline) : null) ??
+      (perBox ? rowPrintSpec(row.print_colors, row.print_sides) : parsePrintSpec(facts.print_spec));
     const qty = Math.max(1, Math.round(Number(row.qty) || 1));
     const gradeId = row.board_grade_id == null ? null : Number(row.board_grade_id);
 

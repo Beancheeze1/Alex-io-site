@@ -13,6 +13,8 @@
 // buyer-upload check ("The lines look right"). The Boxes on this quote,
 // Price from a die line and Customer requested cartons cards are hidden on
 // a display to save room.
+// Step 39G: each part can have its own printing (Printing column: "Quote's"
+// or the part's own, Change opens an editor in the row).
 
 "use client";
 
@@ -31,7 +33,9 @@ type Part = {
   tooling: number | null;
   description: string | null;
   blank: { length_in: number; width_in: number; rule_in: number } | null;
+  print?: Print | null; // Step 39G: own printing, null = the quote's
 };
+type Print = { colors: ("spot" | "flood")[]; sides: 1 | 2 };
 type Assembly = {
   id: number;
   unit: number | null;
@@ -51,6 +55,7 @@ type Info = {
   parts: Part[];
   other_lines: { id: number; description: string | null; qty: number }[];
   assembly: Assembly | null;
+  quote_print?: Print; // Step 39G
 };
 
 const usd = (n: number | null | undefined) =>
@@ -74,6 +79,96 @@ const input: React.CSSProperties = {
 const btn: React.CSSProperties = { ...input, border: "1px solid var(--border-strong)", padding: "4px 10px", cursor: "pointer" };
 const primary: React.CSSProperties = { ...btn, background: "var(--action-primary)", borderColor: "var(--action-primary)", color: "#fff" };
 
+const printText = (pr: Print | null | undefined) =>
+  pr && pr.colors.length
+    ? `${pr.colors.length}-color (${pr.colors.join(", ")}), ${pr.sides === 2 ? "outside + inside" : "outside"}`
+    : "No print";
+
+/** Step 39G: colors (0-4), spot / flood for each, outside or outside + inside. */
+function PrintEditor({
+  initial,
+  busy,
+  saveLabel,
+  onSave,
+  onCancel,
+  onUseQuote,
+  testId,
+}: {
+  initial: Print;
+  busy: boolean;
+  saveLabel: string;
+  onSave: (p: Print) => void;
+  onCancel: () => void;
+  onUseQuote?: () => void;
+  testId: string;
+}) {
+  const [pr, setPr] = React.useState<Print>({ colors: [...initial.colors], sides: initial.sides });
+  return (
+    <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }} data-print-editor={testId}>
+      <label style={small}>
+        Colors{" "}
+        <select
+          style={input}
+          value={String(pr.colors.length)}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            setPr((x) => ({ ...x, colors: Array.from({ length: n }, (_, i) => x.colors[i] ?? ("spot" as const)) }));
+          }}
+          aria-label="Print colors"
+        >
+          <option value="0">No print</option>
+          <option value="1">1 color</option>
+          <option value="2">2 colors</option>
+          <option value="3">3 colors</option>
+          <option value="4">4 colors</option>
+        </select>
+      </label>
+      {pr.colors.map((c, i) => (
+        <label key={i} style={small}>
+          Color {i + 1}{" "}
+          <select
+            style={input}
+            value={c}
+            onChange={(e) => {
+              const v: "spot" | "flood" = e.target.value === "flood" ? "flood" : "spot";
+              setPr((x) => ({ ...x, colors: x.colors.map((y, j) => (j === i ? v : y)) }));
+            }}
+            aria-label={`Color ${i + 1} coverage`}
+          >
+            <option value="spot">Spot</option>
+            <option value="flood">Flood</option>
+          </select>
+        </label>
+      ))}
+      {pr.colors.length ? (
+        <label style={small}>
+          Printed on{" "}
+          <select
+            style={input}
+            value={String(pr.sides)}
+            onChange={(e) => setPr((x) => ({ ...x, sides: e.target.value === "2" ? 2 : 1 }))}
+            aria-label="Printed on"
+          >
+            <option value="1">Outside</option>
+            <option value="2">Outside + inside</option>
+          </select>
+        </label>
+      ) : null}
+      <button type="button" style={primary} disabled={busy} onClick={() => onSave(pr)} data-print-save={testId}>
+        {saveLabel}
+      </button>
+      {onUseQuote ? (
+        <button type="button" style={btn} disabled={busy} onClick={onUseQuote} data-print-use-quote={testId}>
+          Use the quote&apos;s printing
+        </button>
+      ) : null}
+      <button type="button" style={btn} disabled={busy} onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 type BoxRow = { id: number; L: number | null; W: number | null; style: string; grade_id: number | null; qty: number; colors: ("spot" | "flood")[]; sides: 1 | 2 };
 type Grade = { id: number; name: string; is_default: boolean };
 
@@ -92,7 +187,8 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const [toCheck, setToCheck] = React.useState<number[]>([]);
   const [openLines, setOpenLines] = React.useState<number | null>(null);
   const [adding, setAdding] = React.useState(false);
-  const [printEdit, setPrintEdit] = React.useState<{ colors: ("spot" | "flood")[]; sides: 1 | 2 } | null>(null);
+  const [printEdit, setPrintEdit] = React.useState(false); // the quote's printing editor
+  const [partPrintEdit, setPartPrintEdit] = React.useState<number | null>(null); // Step 39G: a part's printing editor
 
   React.useEffect(() => {
     let alive = true;
@@ -241,12 +337,36 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
     }
   };
   const boxOf = (id: number) => boxRows.find((r) => r.id === id) ?? null;
-  const printRow = info.parts.map((p) => boxOf(p.id)).find(Boolean) ?? null;
-  const printText = (colors: ("spot" | "flood")[], sides: 1 | 2) =>
-    colors.length
-      ? `${colors.length}-color (${colors.join(", ")}), ${sides === 2 ? "outside + inside" : "outside"}`
-      : "No print";
+  // The quote's printing is saved through a part that uses it (Step 39G), else the first part.
+  const printRow =
+    info.parts.filter((p) => !p.print).map((p) => boxOf(p.id)).find(Boolean) ??
+    info.parts.map((p) => boxOf(p.id)).find(Boolean) ??
+    null;
+  const quotePrint: Print = info.quote_print ?? (printRow ? { colors: printRow.colors, sides: printRow.sides } : { colors: [], sides: 1 });
+  // Step 39G: a part's own printing (null = back to the quote's)
+  const savePartPrint = async (id: number, pr: Print | null) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/quotes/display", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNo, action: "part_print", part_id: id, print: pr }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setNote(j?.message || `Couldn't save (HTTP ${res.status}).`);
+        return;
+      }
+      window.location.reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const workHere = info.is_display; // Step 39E2: the other cards are hidden on a display
+  const cols = 6 + (workHere && grades.length ? 1 : 0) + (workHere ? 1 : 0) + (!info.locked ? 1 : 0);
 
   const locked = info.locked;
   const asm = info.assembly;
@@ -302,6 +422,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                 <th style={{ padding: "4px 6px" }}>Part</th>
                 <th style={{ padding: "4px 6px" }}>Blank</th>
                 {workHere && grades.length ? <th style={{ padding: "4px 6px" }}>Board grade</th> : null}
+                {workHere ? <th style={{ padding: "4px 6px" }}>Printing</th> : null}
                 <th style={{ padding: "4px 6px" }}>Per display</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Qty</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Each</th>
@@ -351,6 +472,33 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                           </select>
                         );
                       })()}
+                    </td>
+                  ) : null}
+                  {/* Step 39G: the part's printing: the quote's, or its own */}
+                  {workHere ? (
+                    <td style={{ padding: "4px 6px", fontSize: 12 }} data-display-part-print={p.id}>
+                      {p.print ? (
+                        <span style={{ color: "var(--text-primary)" }}>{printText(p.print)}</span>
+                      ) : (
+                        <span style={{ color: "var(--text-muted)" }}>Quote&apos;s ({printText(quotePrint)})</span>
+                      )}
+                      {!locked ? (
+                        <>
+                          {" "}
+                          <button
+                            type="button"
+                            style={{ ...btn, padding: "1px 6px" }}
+                            disabled={busy}
+                            onClick={() => {
+                              setOpenLines(null);
+                              setPartPrintEdit(partPrintEdit === p.id ? null : p.id);
+                            }}
+                            data-display-part-print-edit={p.id}
+                          >
+                            Change
+                          </button>
+                        </>
+                      ) : null}
                     </td>
                   ) : null}
                   <td style={{ padding: "4px 6px" }}>
@@ -406,9 +554,25 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                   ) : null}
                 </tr>
                 {/* Step 39E2: the part's die lines, read and saved right here */}
+                {partPrintEdit === p.id && !locked ? (
+                  <tr>
+                    <td colSpan={cols} style={{ padding: "0 6px 6px" }}>
+                      <div style={small}>Printing for {parts[p.id]?.label || p.label || "this part"}</div>
+                      <PrintEditor
+                        initial={p.print ?? quotePrint}
+                        busy={busy}
+                        saveLabel="Save this part's printing"
+                        onSave={(pr) => void savePartPrint(p.id, pr)}
+                        onUseQuote={p.print ? () => void savePartPrint(p.id, null) : undefined}
+                        onCancel={() => setPartPrintEdit(null)}
+                        testId={`part-${p.id}`}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
                 {openLines === p.id ? (
                   <tr>
-                    <td colSpan={workHere && grades.length ? 8 : 7} style={{ padding: "0 6px 6px" }}>
+                    <td colSpan={cols} style={{ padding: "0 6px 6px" }}>
                       <DielineImportCard quoteNo={quoteNo} embedded={{ mode: "edit", boxId: p.id }} onClose={() => setOpenLines(null)} />
                     </td>
                   </tr>
@@ -421,19 +585,12 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
           {/* Step 39E2: the quote's printing and a new part, here instead of the other cards */}
           {workHere ? (
             <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }} data-display-tools>
-              {printRow ? (
-                <span style={{ color: "var(--text-secondary)" }}>
-                  Printing (all parts): {printText(printRow.colors, printRow.sides)}
-                </span>
-              ) : null}
+              <span style={{ color: "var(--text-secondary)" }}>
+                {info.parts.some((p) => p.print) ? "Quote's printing (parts without their own)" : "Printing (all parts)"}:{" "}
+                {printText(quotePrint)}
+              </span>
               {!locked && printRow ? (
-                <button
-                  type="button"
-                  style={btn}
-                  disabled={busy}
-                  onClick={() => setPrintEdit(printEdit ? null : { colors: [...printRow.colors], sides: printRow.sides })}
-                  data-display-print
-                >
+                <button type="button" style={btn} disabled={busy} onClick={() => setPrintEdit(!printEdit)} data-display-print>
                   {printEdit ? "Cancel" : "Change printing"}
                 </button>
               ) : null}
@@ -454,68 +611,14 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
             </div>
           ) : null}
           {workHere && printEdit && printRow && !locked ? (
-            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }} data-display-print-edit>
-              <label style={small}>
-                Colors{" "}
-                <select
-                  style={input}
-                  value={String(printEdit.colors.length)}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    setPrintEdit((x) =>
-                      x ? { ...x, colors: Array.from({ length: n }, (_, i) => x.colors[i] ?? ("spot" as const)) } : x,
-                    );
-                  }}
-                  aria-label="Print colors"
-                >
-                  <option value="0">No print</option>
-                  <option value="1">1 color</option>
-                  <option value="2">2 colors</option>
-                  <option value="3">3 colors</option>
-                  <option value="4">4 colors</option>
-                </select>
-              </label>
-              {printEdit.colors.map((c, i) => (
-                <label key={i} style={small}>
-                  Color {i + 1}{" "}
-                  <select
-                    style={input}
-                    value={c}
-                    onChange={(e) => {
-                      const v: "spot" | "flood" = e.target.value === "flood" ? "flood" : "spot";
-                      setPrintEdit((x) => (x ? { ...x, colors: x.colors.map((y, j) => (j === i ? v : y)) } : x));
-                    }}
-                    aria-label={`Color ${i + 1} coverage`}
-                  >
-                    <option value="spot">Spot</option>
-                    <option value="flood">Flood</option>
-                  </select>
-                </label>
-              ))}
-              {printEdit.colors.length ? (
-                <label style={small}>
-                  Printed on{" "}
-                  <select
-                    style={input}
-                    value={String(printEdit.sides)}
-                    onChange={(e) => setPrintEdit((x) => (x ? { ...x, sides: e.target.value === "2" ? 2 : 1 } : x))}
-                    aria-label="Printed on"
-                  >
-                    <option value="1">Outside</option>
-                    <option value="2">Outside + inside</option>
-                  </select>
-                </label>
-              ) : null}
-              <button
-                type="button"
-                style={primary}
-                disabled={busy}
-                onClick={() => void saveBox(printRow, { colors: printEdit.colors, sides: printEdit.sides })}
-                data-display-print-save
-              >
-                Save printing
-              </button>
-            </div>
+            <PrintEditor
+              initial={quotePrint}
+              busy={busy}
+              saveLabel="Save printing"
+              onSave={(pr) => void saveBox(printRow, { colors: pr.colors, sides: pr.sides })}
+              onCancel={() => setPrintEdit(false)}
+              testId="quote"
+            />
           ) : null}
           {workHere && adding && !locked ? (
             <DielineImportCard quoteNo={quoteNo} embedded={{ mode: "add" }} onClose={() => setAdding(false)} />

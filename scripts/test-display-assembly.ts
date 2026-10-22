@@ -11,6 +11,8 @@ import {
   perDisplayOf,
   priceAssembly,
 } from "../lib/display-assembly";
+import { parseDielineBlank, partPrintOf } from "../lib/dieline-import";
+import { computePrintCharges } from "../app/lib/pricing/print-charges";
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: unknown) {
@@ -82,6 +84,20 @@ const mixed = cuttingDieNote([{ part: false, text: "12 × 10 × 8 in rsc" }, { p
 check("die note: boxes and parts", mixed.startsWith("Steel-rule dies for the 12 × 10 × 8 in rsc, and for the part: Header"), mixed);
 check("die note: none", cuttingDieNote([]) === null);
 check("die note: never repeats the style label", !/die-cut part from your file/.test(dn ?? ""));
+
+// Step 39G: a display part's own printing
+check("partPrintOf: none -> null", partPrintOf({ length_in: 1 }) === null && partPrintOf(null) === null);
+check("partPrintOf: 2 colors outside+inside", JSON.stringify(partPrintOf({ print: { colors: ["spot", "flood"], sides: 2 } })) === JSON.stringify({ colors: ["spot", "flood"], sides: 2 }));
+check("partPrintOf: no print is a choice too", JSON.stringify(partPrintOf({ print: { colors: [], sides: 1 } })) === JSON.stringify({ colors: [], sides: 1 }));
+check("partPrintOf: junk colors -> null", partPrintOf({ print: { colors: ["neon"], sides: 1 } }) === null);
+check("partPrintOf: 5 colors capped at 4 -> null (not silently trimmed)", partPrintOf({ print: { colors: ["spot", "spot", "spot", "spot", "spot"], sides: 1 } }) === null);
+const blankPr = parseDielineBlank({ length_in: 10, width_in: 8, cut_in: 36, crease_in: 10, perf_in: 0, rule_in: 46, print: { colors: ["flood"], sides: 1 } });
+check("stored part keeps its own printing", !!blankPr && JSON.stringify(blankPr.print) === JSON.stringify({ colors: ["flood"], sides: 1 }), blankPr);
+const settings0 = { printing_upcharge_usd: 0, printing_upcharge_pct: 0 };
+const perPart = computePrintCharges({ facts: { print_spec: { colors: [], sides: 1 }, part_print: true, printed: 1 }, settings: settings0, foamSubtotal: 0, packagingSubtotal: 100, platesTotal: 202.5 });
+check("print charges: parts printed differently, quote unprinted -> printed, per-part summary, plates kept", perPart.isPrinted && perPart.platesTotal === 202.5 && /per part/.test(perPart.printSummary ?? ""), perPart);
+const same = computePrintCharges({ facts: { print_spec: { colors: ["spot"], sides: 1 } }, settings: settings0, foamSubtotal: 0, packagingSubtotal: 100, platesTotal: 202.5 });
+check("print charges: one printing for the quote unchanged", same.isPrinted && !/per part/.test(same.printSummary ?? ""), same);
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

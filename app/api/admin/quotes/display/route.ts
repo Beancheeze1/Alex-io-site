@@ -18,6 +18,10 @@
 //     remove_part { part_id } -> (Step 39D2) takes one part off the display;
 //               the assembly line follows the new parts count (the last part
 //               removed ends the display)
+//     part_print { part_id, print: { colors, sides } | null } -> (Step 39G)
+//               a part's own printing (null = the quote's printing again);
+//               every line is repriced. GET returns each part's own `print`
+//               and the quote's `quote_print`.
 //   Every change sets each part's qty = displays x per display (other lines =
 //   displays), the quote's qty and compare quantity = displays, and reprices
 //   every line at today's rates. Released (locked) quotes are refused.
@@ -36,7 +40,7 @@ import {
   resolveAssemblySelection,
   setQuoteBoxQty,
 } from "@/app/lib/packaging-selection";
-import { parseDielineBlank } from "@/lib/dieline-import";
+import { parseDielineBlank, partPrintOf } from "@/lib/dieline-import";
 import { ASSEMBLY_STYLE, parseAssemblyOverride, perDisplayOf } from "@/lib/display-assembly";
 
 export const runtime = "nodejs";
@@ -110,6 +114,7 @@ export async function GET(req: NextRequest) {
       per_box: facts.print_mode === "per_box",
       is_display: !!asm,
       displays: ctx.displays,
+      quote_print: parsePrintSpec(facts.print_spec) ?? { colors: [], sides: 1 }, // Step 39G
       parts: lines
         .filter((l) => l.custom_style === "dieline")
         .map((l) => {
@@ -120,6 +125,7 @@ export async function GET(req: NextRequest) {
             filename: d?.filename ?? null,
             piece: d?.piece ?? null,
             per_display: perDisplayOf(l.dieline),
+            print: partPrintOf(l.dieline), // Step 39G: own printing, null = the quote's
             qty: Number(l.qty) || 0,
             unit: num(l.unit_price_usd),
             extended: num(l.extended_price_usd),
@@ -171,13 +177,39 @@ export async function POST(req: NextRequest) {
       );
     }
     const action =
-      b.action === "start" || b.action === "stop" || b.action === "remove_part" ? b.action : "update";
+      b.action === "start" || b.action === "stop" || b.action === "remove_part" || b.action === "part_print"
+        ? b.action
+        : "update";
     const asm = lines.find((l) => l.custom_style === ASSEMBLY_STYLE) ?? null;
     const parts = lines.filter((l) => l.custom_style === "dieline");
 
     const d = Number(b.displays);
     const displays = Number.isInteger(d) && d >= 1 && d <= 10_000_000 ? d : Math.max(1, Math.round(Number(facts.qty) || 1));
     const print = parsePrintSpec(facts.print_spec);
+
+    // Step 39G: one part's own printing (or back to the quote's).
+    if (action === "part_print") {
+      const line = parts.find((x) => Number(x.id) === Number(b.part_id));
+      if (!line) return json({ ok: false, error: "part_not_found", message: "That part isn't on this quote." }, 404);
+      const own = b.print == null ? null : parsePrintSpec(b.print);
+      if (b.print != null && !own) {
+        return json({ ok: false, error: "invalid_print", message: "Pick up to 4 colors (spot or flood) on 1 or 2 sides." }, 400);
+      }
+      await q(
+        own
+          ? `UPDATE public.quote_box_selections SET dieline = COALESCE(dieline, '{}'::jsonb) || jsonb_build_object('print', $2::jsonb) WHERE id = $1`
+          : `UPDATE public.quote_box_selections SET dieline = dieline - 'print' WHERE id = $1`,
+        own ? [line.id, JSON.stringify({ colors: own.colors, sides: own.sides })] : [line.id],
+      );
+      // The quote is printed if its own printing or any part's printing has colors.
+      const after = await loadLines(quote.id);
+      const owns = after.filter((l) => l.custom_style === "dieline").map((l) => partPrintOf(l.dieline));
+      const partPrint = owns.some(Boolean);
+      const printed = (print?.colors.length ?? 0) > 0 || owns.some((p) => (p?.colors.length ?? 0) > 0);
+      await saveFacts(quote.quote_no, { ...facts, part_print: partPrint, printed: printed ? 1 : 0 });
+      await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), print);
+      return json({ ok: true, part_id: Number(line.id), print: own });
+    }
 
     // Step 39D2: take one part off (buyers can't remove display parts on the quote page).
     if (action === "remove_part") {

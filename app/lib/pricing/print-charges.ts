@@ -59,6 +59,22 @@ export function computePrintCharges(args: {
   const spec = parsePrintSpec(args.facts?.print_spec);
   if (spec) {
     const plates = Math.round((Number(args.platesTotal) || 0) * 100) / 100;
+    // Step 39G: display parts can each have their own printing (facts.part_print)
+    if (args.facts?.part_print === true) {
+      const f = args.facts || {};
+      const printed = plates > 0 || spec.colors.length > 0 || f.printed === 1 || f.printed === "1" || f.printed === true;
+      return {
+        printModel: "per_color",
+        isPrinted: printed,
+        artSetupFee: 0,
+        printingUpchargePct: 0,
+        printingUpchargeAmt: 0,
+        printingUpcharge: plates,
+        platesTotal: plates,
+        printSummary: printed ? (digitalOnly ? "Digital print set per part (see each part)" : "Printing set per part (see each part)") : null,
+        digitalOnly,
+      };
+    }
     return {
       printModel: "per_color",
       isPrinted: spec.colors.length > 0,

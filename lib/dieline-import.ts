@@ -146,6 +146,18 @@ function isPaperPage(w: number, h: number): boolean {
   return sizes.some(([a, b]) => (Math.abs(w - a) < 0.15 && Math.abs(h - b) < 0.15) || (Math.abs(w - b) < 0.15 && Math.abs(h - a) < 0.15));
 }
 
+/** Step 39G: a part's own printing: 0-4 colors (spot / flood each) on 1 or 2 sides. */
+export type PartPrint = { colors: ("spot" | "flood")[]; sides: 1 | 2 };
+
+/** Step 39G: the part's own printing stored on its dieline blob, or null (= the quote's printing). */
+export function partPrintOf(dieline: unknown): PartPrint | null {
+  const p = (dieline as { print?: unknown } | null)?.print as { colors?: unknown; sides?: unknown } | null | undefined;
+  if (!p || typeof p !== "object" || !Array.isArray(p.colors)) return null;
+  const colors = p.colors.filter((c): c is "spot" | "flood" => c === "spot" || c === "flood").slice(0, 4);
+  if (colors.length !== p.colors.length) return null;
+  return { colors, sides: Number(p.sides) === 2 ? 2 : 1 };
+}
+
 /** Step 39F: a drawing scale picked by staff (1 = full size; 2 = drawn at 1:2, so x2). */
 export function cleanDielineScale(raw: unknown): number {
   const v = Number(raw);
@@ -315,6 +327,7 @@ export type DielineBlank = {
   piece?: number | null; // Step 39D: which piece of a multi-part file (1-based), null = the whole file
   label?: string | null; // Step 39D: staff's name for the part ("Header", "Shelf")
   scale?: number; // Step 39F: the drawing scale staff set (1 = full size); kept for Edit lines
+  print?: PartPrint; // Step 39G: this part's own printing (a display part printed differently); none = the quote's
   check?: boolean; // Step 39E: read automatically from a buyer's upload; staff haven't confirmed the lines yet
 };
 
@@ -338,6 +351,7 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
     piece: Number.isInteger(Number(o.piece)) && Number(o.piece) >= 1 ? Number(o.piece) : null,
     label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 60) : null,
     ...(cleanDielineScale(o.scale) !== 1 ? { scale: cleanDielineScale(o.scale) } : {}),
+    ...(partPrintOf(o) ? { print: partPrintOf(o) as PartPrint } : {}),
     ...(o.check === true ? { check: true } : {}),
   };
 }
