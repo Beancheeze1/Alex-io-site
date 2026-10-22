@@ -64,6 +64,8 @@ export type FoamProcessResult = {
     die_owned: boolean;
     press_hits: number | null;
     glue_lines: number;
+    /** Step 39B: staff chose a method whose rates aren't set (no charge added for it). */
+    missing_rates: FoamRunMethod | null;
   };
 };
 
@@ -103,8 +105,11 @@ export function resolveFoamMethod(choice: FoamRunChoice, qty: number, s: FoamPro
   const c = cncOn(s);
   const d = dieOn(s);
   if (!c && !d) return null;
-  if (choice === "cnc" && c) return "cnc";
-  if (choice === "die" && d) return "die";
+  // Step 39B: the staff choice always stands. CNC chosen with no CNC rates no
+  // longer falls back to a steel-rule die (a die on parts meant to be CNC cut);
+  // the quote shows no CNC charge and the admin control warns.
+  if (choice === "cnc") return "cnc";
+  if (choice === "die") return "die";
   if (d && (!c || (s.foam_die_over_qty > 0 && qty >= s.foam_die_over_qty))) return "die";
   return c ? "cnc" : "die";
 }
@@ -133,6 +138,7 @@ export function priceFoamProcess(args: {
     die_owned: args.dieOwned === true,
     press_hits: null,
     glue_lines: geom.glue_lines,
+    missing_rates: null,
   };
 
   const legacyLine = (): ProcessLine | null => {
@@ -154,7 +160,13 @@ export function priceFoamProcess(args: {
     }
   } else {
     const m = qty > 0 ? resolveFoamMethod(args.choice ?? "auto", qty, s) : null;
-    if (m === "cnc") {
+    if (m === "cnc" && !cncOn(s)) {
+      method = "cnc";
+      detail.missing_rates = "cnc";
+    } else if (m === "die" && !dieOn(s)) {
+      method = "die";
+      detail.missing_rates = "die";
+    } else if (m === "cnc") {
       method = "cnc";
       const minutes = s.cnc_feed_in_per_min > 0 ? (geom.cut_in_per_piece / s.cnc_feed_in_per_min) * qty : 0;
       detail.cnc_minutes = Math.round(minutes * 10) / 10;

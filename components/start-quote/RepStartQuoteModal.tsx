@@ -20,6 +20,7 @@
 
 "use client";
 
+import BoxShapeHint from "@/components/start-quote/BoxShapeHint"; // Step 39B
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
@@ -1267,6 +1268,18 @@ export default function RepStartQuoteModal({
                               </Field>
                             ) : null}
                           </div>
+                          {/* Step 39B: a mailer / tray deeper than it is wide is almost always a typo. */}
+                          <BoxShapeHint
+                            style={boxStyle}
+                            L={toNumOrNull(boxL)}
+                            W={toNumOrNull(boxW)}
+                            D={toNumOrNull(boxD)}
+                            onUse={(d) => {
+                              setBoxL(String(d.L));
+                              setBoxW(String(d.W));
+                              setBoxD(String(d.D));
+                            }}
+                          />
 
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <Field label="Box style">

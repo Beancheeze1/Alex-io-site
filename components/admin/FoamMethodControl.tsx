@@ -29,6 +29,7 @@ type Info = {
     glue_lines?: number;
     layers?: number;
     cavity_ci?: number;
+    missing_rates?: "cnc" | "die" | null; // Step 39B
   } | null;
 };
 
@@ -109,7 +110,7 @@ export default function FoamMethodControl({ quoteNo }: { quoteNo: string }) {
   if (info.model === 1) {
     status = "Priced before Step 23 (old die-cut fee, cavities not subtracted). Reprice at today's rates to switch.";
   } else if (!info.cnc_on && !info.die_on) {
-    status = "No CNC or die rates set for this shop, so the old flat die-cut fee applies. Set them in Admin → Settings.";
+    status = "No CNC or die rates set for this shop, so the old flat die-cut fee applies. Set them in Pricing → Foam cutting rates.";
   } else {
     const auto =
       info.die_on && info.cnc_on && info.cutoff > 0
@@ -118,8 +119,14 @@ export default function FoamMethodControl({ quoteNo }: { quoteNo: string }) {
           ? "Auto: steel-rule die (no CNC rates set)."
           : !info.die_on
             ? "Auto: CNC (no die rates set)."
-            : "Auto: CNC (set a die cutoff in Admin → Settings to switch to a die by quantity).";
+            : "Auto: CNC (set a die cutoff in Pricing → Foam cutting rates to switch to a die by quantity).";
     status = `${auto} This quote: ${info.resolved === "die" ? "steel-rule die + press" : "CNC short run"}.`;
+    // Step 39B: a forced method with no rates adds no charge; say so.
+    if (info.detail?.missing_rates === "cnc") {
+      status += " CNC is chosen but this shop has no CNC rates, so no cutting charge is on this quote. Set them in Pricing → Foam cutting rates, then reprice.";
+    } else if (info.detail?.missing_rates === "die") {
+      status += " Steel-rule die is chosen but this shop has no die rates, so no die charge is on this quote. Set them in Pricing → Foam cutting rates, then reprice.";
+    }
   }
 
   return (

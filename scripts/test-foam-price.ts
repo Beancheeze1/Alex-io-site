@@ -199,6 +199,17 @@ check("method: auto below the cutoff = CNC", resolveFoamMethod("auto", 100, proc
 check("method: auto at the cutoff = die", resolveFoamMethod("auto", 500, proc), "die");
 check("method: staff can force CNC", resolveFoamMethod("cnc", 5000, proc), "cnc");
 check("method: no rates = old fee", resolveFoamMethod("auto", 100, pickFoamProcess({})), null);
+// Step 39B: CNC chosen on a die-only shop stays CNC (no die), and says rates are missing.
+const dieOnly = pickFoamProcess({ die_base_usd: 75, die_rule_per_in_usd: 1.5 });
+check("method: CNC chosen without CNC rates stays CNC", resolveFoamMethod("cnc", 100, dieOnly), "cnc");
+check("method: auto on a die-only shop = die", resolveFoamMethod("auto", 100, dieOnly), "die");
+{
+  const fc = priceFoamProcess({ model: 2, geom: g, qty: 100, settings: dieOnly, markup: 1.45, choice: "cnc", legacy: { trigger_qty: 50, upcharge_usd: 100, qty: 100 } });
+  check("forced CNC, no CNC rates: no die line", fc.lines.some((l) => l.key === "die" || l.key === "press"), false);
+  check("forced CNC, no CNC rates: no old flat fee", fc.lines.some((l) => l.key === "die_cut_legacy"), false);
+  check("forced CNC, no CNC rates: missing_rates cnc", fc.detail.missing_rates, "cnc");
+  check("forced CNC, no CNC rates: method cnc", fc.method, "cnc");
+}
 
 //   CNC, qty 100: 50 + (108.283 ÷ 100 × 100 = 108.283 min) × $2 = 266.566 × 1.45 = 386.52
 const cnc = priceFoamProcess({ model: 2, geom: g, qty: 100, settings: proc, markup: 1.45, legacy });

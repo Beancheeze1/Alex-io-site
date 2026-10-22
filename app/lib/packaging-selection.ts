@@ -29,6 +29,7 @@
 // cutoff = digital print + CAD cut, no plates). The method used is saved in
 // pricing_detail.run_method on each row.
 
+import { boxShapeIssue } from "@/lib/box-shape"; // Step 39B
 import { q, one } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
 import {
@@ -357,6 +358,14 @@ export async function resolveCustomSelection(
 
   if (engine && engine.ok) {
     const qp = engine.quantities[0];
+    // Step 39B: an odd shape (mailer / tray deeper than wide) or a blank bigger
+    // than the shop's largest sheet is priced, but flagged for staff to check.
+    const shape = boxShapeIssue(style, { L, W, D: H });
+    const oversize = engine.warnings.some((w) => /largest sheet/i.test(w));
+    const notes = [
+      ...(shape ? [`Check the size: ${shape.message}`] : []),
+      ...(engine.warnings.length ? [`Check corrugated rates: ${engine.warnings.join(" ")}`] : []),
+    ];
     return {
       description: rscDesc + printDesc(qp.method) + (qp.method === "digital" ? " · Short run (CAD cut)" : ""),
       unit_price_usd: qp.unit_price_usd,
@@ -365,8 +374,8 @@ export async function resolveCustomSelection(
       board_grade_id: gradeId,
       board_grade_name: gradeName,
       pricing_source: "corrugated_engine",
-      needs_review: false,
-      pricing_note: engine.warnings.length ? `Check corrugated rates: ${engine.warnings.join(" ")}` : null,
+      needs_review: !!shape || oversize,
+      pricing_note: notes.length ? notes.join(" ") : null,
       pricing_detail: {
         blank: engine.blank,
         quantity: qp,

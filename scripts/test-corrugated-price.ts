@@ -6,6 +6,7 @@
 
 import { DEFAULT_FLUTES, computeSheet, computeStyleBlank } from "../lib/corrugated-blank";
 import { parseBoxStyle, parseCells, parseCustomBoxInput } from "../lib/box-styles";
+import { boxShapeIssue } from "../lib/box-shape";
 import {
   describePrintSpec,
   parsePrintSpec,
@@ -362,6 +363,17 @@ const cp = parseCustomBoxInput({ L: 12, W: 10, D: 6, style: "partition" });
 check("partition input without cells is refused", !cp.ok, cp);
 const cr = parseCustomBoxInput({ L: 12, W: 10, D: 8 });
 check("no style = RSC (old callers)", cr.ok && cr.value.style === "rsc", cr);
+
+// 9. Step 39B: odd box shapes (a mailer / tray deeper than it is wide)
+const shp = boxShapeIssue("mailer", { L: 12, W: 4, D: 16 });
+check("mailer 12 x 4 x 16 is flagged", shp !== null && shp.code === "deeper_than_wide", shp);
+check("suggestion is largest first: 16 x 12 x 4", shp !== null && shp.suggestion.L === 16 && shp.suggestion.W === 12 && shp.suggestion.D === 4, shp);
+check("message names the suggestion", shp !== null && shp.message.includes("Did you mean 16 × 12 × 4?"), shp?.message);
+check("mailer 16 x 12 x 4 is fine", boxShapeIssue("mailer", { L: 16, W: 12, D: 4 }) === null);
+check("tray 10 x 6 x 8 is flagged", boxShapeIssue("tray", { L: 10, W: 6, D: 8 }) !== null);
+check("RSC 12 x 4 x 16 is fine (tall shippers are normal)", boxShapeIssue("rsc", { L: 12, W: 4, D: 16 }) === null);
+check("depth equal to width is fine", boxShapeIssue("mailer", { L: 12, W: 6, D: 6 }) === null);
+check("missing size is not flagged", boxShapeIssue("mailer", { L: 12, W: 0, D: 16 }) === null);
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

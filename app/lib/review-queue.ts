@@ -125,10 +125,14 @@ export async function buildQueue(tenantId: number, opts: { fresh?: boolean } = {
 
   // Needs review: recent unreleased quotes with review flags or a box without a price
   const recent = await safe(
-    q<{ id: number; quote_no: string; customer_name: string | null; created_at: unknown; box_review: number }>(
+    q<{ id: number; quote_no: string; customer_name: string | null; created_at: unknown; box_review: number; box_note: string | null }>(
       `SELECT qq.id, qq.quote_no, qq.customer_name, qq.created_at,
               (SELECT count(*)::int FROM public.quote_box_selections b
-                WHERE b.quote_id = qq.id AND (to_jsonb(b) ->> 'needs_review') = 'true') AS box_review
+                WHERE b.quote_id = qq.id AND (to_jsonb(b) ->> 'needs_review') = 'true') AS box_review,
+              -- Step 39B: the first flagged box's note (odd size, oversize blank, no board price)
+              (SELECT to_jsonb(b) ->> 'pricing_note' FROM public.quote_box_selections b
+                WHERE b.quote_id = qq.id AND (to_jsonb(b) ->> 'needs_review') = 'true'
+                ORDER BY b.id LIMIT 1) AS box_note
          FROM public.quotes qq
         WHERE qq.tenant_id = $1 AND COALESCE(qq.locked, false) = false
           AND qq.created_at > now() - interval '${REVIEW_DAYS} days'
@@ -140,7 +144,14 @@ export async function buildQueue(tenantId: number, opts: { fresh?: boolean } = {
   for (const r of recent) {
     const flags = await quoteReviewFlags(Number(r.id), r.quote_no, tenantId).catch(() => []);
     const msgs = flags.map((f) => f.message);
-    if (Number(r.box_review) > 0) msgs.push(`${r.box_review} box line${Number(r.box_review) > 1 ? "s" : ""} priced from the nearest stock box (no board price).`);
+    if (Number(r.box_review) > 0) {
+      const note = String(r.box_note || "").trim();
+      msgs.push(
+        note
+          ? note.slice(0, 220) + (Number(r.box_review) > 1 ? ` (+${Number(r.box_review) - 1} more box line${Number(r.box_review) > 2 ? "s" : ""})` : "")
+          : `${r.box_review} box line${Number(r.box_review) > 1 ? "s" : ""} priced from the nearest stock box (no board price).`,
+      );
+    }
     if (!msgs.length) continue;
     out.push({
       section: "needs_review",

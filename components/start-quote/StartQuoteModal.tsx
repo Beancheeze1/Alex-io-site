@@ -25,6 +25,7 @@ import { QUOTE_TYPE_LABELS } from "@/lib/quote-types";
 import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } from "@/lib/box-styles";
 import { matchGrade } from "@/lib/corrugated/grade-match";
+import BoxShapeHint from "@/components/start-quote/BoxShapeHint";
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -1710,6 +1711,19 @@ export default function StartQuoteModal({
                               <DimInput label={`${quoteType === "boxes_only" ? styleInfo.depthLabel : "Depth"} (in)`} value={boxD} onChange={setBoxD} />
                             ) : null}
                           </div>
+
+                          {/* Step 39B: a mailer / tray deeper than it is wide is almost always a typo. */}
+                          <BoxShapeHint
+                            style={boxStyle}
+                            L={toNumOrNull(boxL)}
+                            W={toNumOrNull(boxW)}
+                            D={toNumOrNull(boxD)}
+                            onUse={(d) => {
+                              setBoxL(String(d.L));
+                              setBoxW(String(d.W));
+                              setBoxD(String(d.D));
+                            }}
+                          />
 
                           {!boxOk ? (
                             <div className="mt-3 text-sm text-[var(--attention)]">
