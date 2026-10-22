@@ -271,6 +271,7 @@ export type DielineBlank = {
   per_display?: number; // Step 39D: how many of this part go into one display / set (default 1)
   piece?: number | null; // Step 39D: which piece of a multi-part file (1-based), null = the whole file
   label?: string | null; // Step 39D: staff's name for the part ("Header", "Shelf")
+  check?: boolean; // Step 39E: read automatically from a buyer's upload; staff haven't confirmed the lines yet
 };
 
 /** A stored dieline blob -> a usable blank, or null. */
@@ -292,6 +293,7 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
     per_display: Number.isInteger(Number(o.per_display)) && Number(o.per_display) >= 1 ? Number(o.per_display) : 1,
     piece: Number.isInteger(Number(o.piece)) && Number(o.piece) >= 1 ? Number(o.piece) : null,
     label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 60) : null,
+    ...(o.check === true ? { check: true } : {}),
   };
 }
 
@@ -388,4 +390,65 @@ export function splitDieline(
     };
   });
   return { ok: true, pieces, stray_in: r1(stray) };
+}
+
+/** Step 39E: the most a buyer's quote can hold from one file (more = send it to the shop). */
+export const BUYER_DIELINE_MAX_PARTS = 12;
+
+/**
+ * Step 39E: a buyer's own die line -> the parts to quote. Lines are read
+ * automatically (layer names, dashed, red), and every part is marked
+ * `check` so staff confirm the reading. One outline = one part (qty = the
+ * buyer's qty). Several separate outlines = a display: one part each, with
+ * the buyer's name and count per display for each piece.
+ */
+export function buyerDielineParts(
+  text: string,
+  filename: string,
+  asked: { piece?: unknown; label?: unknown; per_display?: unknown }[] = [],
+):
+  | { ok: true; parts: DielineBlank[]; display: boolean; warnings: string[]; units: "in" | "mm" }
+  | { ok: false; error: string; message: string } {
+  const a = analyzeDieline(text, { split: true });
+  if (!a.ok) return a;
+  const base = { filename: String(filename || "dieline.dxf").slice(0, 200), units: a.units, check: true as const };
+  if (a.measure.pieces <= 1) {
+    const m = a.measure;
+    return {
+      ok: true,
+      display: false,
+      units: a.units,
+      warnings: a.warnings,
+      parts: [
+        { length_in: m.length_in, width_in: m.width_in, cut_in: m.cut_in, crease_in: m.crease_in, perf_in: m.perf_in, rule_in: m.rule_in, ...base, per_display: 1, piece: null, label: null },
+      ],
+    };
+  }
+  const sp = splitDieline(text);
+  if (!sp.ok) return sp;
+  if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
+    return {
+      ok: false,
+      error: "too_many_parts",
+      message: `That file has ${sp.pieces.length} separate parts. Online quotes take up to ${BUYER_DIELINE_MAX_PARTS}; send it to the shop and they'll quote it.`,
+    };
+  }
+  const parts = sp.pieces.map((pc) => {
+    const want = asked.find((x) => Number(x?.piece) === pc.piece) ?? null;
+    const pd = Number(want?.per_display);
+    const label = typeof want?.label === "string" ? want.label.trim().slice(0, 60) : "";
+    return {
+      length_in: pc.length_in,
+      width_in: pc.width_in,
+      cut_in: pc.cut_in,
+      crease_in: pc.crease_in,
+      perf_in: pc.perf_in,
+      rule_in: pc.rule_in,
+      ...base,
+      per_display: Number.isInteger(pd) && pd >= 1 && pd <= 10000 ? pd : 1,
+      piece: pc.piece,
+      label: label || `Part ${pc.piece}`,
+    };
+  });
+  return { ok: true, display: true, units: a.units, warnings: a.warnings, parts };
 }

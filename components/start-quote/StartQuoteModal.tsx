@@ -26,6 +26,7 @@ import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } from "@/lib/box-styles";
 import { matchGrade } from "@/lib/corrugated/grade-match";
 import BoxShapeHint from "@/components/start-quote/BoxShapeHint";
+import { analyzeDieline, BUYER_DIELINE_MAX_PARTS, splitDieline } from "@/lib/dieline-import"; // Step 39E
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -375,15 +376,16 @@ export default function StartQuoteModal({
   const [printSides, setPrintSides] = React.useState<1 | 2>(1);
   // Step 37N: panels printed (recorded on the quote and job ticket; not priced).
   const [printPanels, setPrintPanels] = React.useState<1 | 2 | 3 | 4>(2);
+  // Step 39E: a die line part has no side panels (dlMode is set further down)
   const printSpecOut = () =>
-    printColors.length > 0
+    printColors.length > 0 && !dlMode
       ? { colors: printColors, sides: printSides, panels: printPanels }
       : { colors: printColors, sides: printSides };
   // Step 37N: the panels also go in the buyer's notes, so they reach the job
   // ticket on every kind of quote.
   const notesOut = () => {
     const base = customerNotes.trim();
-    if (printColors.length === 0) return base || null;
+    if (printColors.length === 0 || dlMode) return base || null;
     const line = `Printed panels: ${printPanels === 4 ? "all 4" : printPanels}`;
     return [base, line].filter(Boolean).join("\n");
   };
@@ -475,6 +477,88 @@ export default function StartQuoteModal({
   const extraSizesOk = !extraSizesProblemText;
   const boAnyPrinted = printColors.length > 0 || extraSizes.some((s) => s.colors.length > 0);
 
+  // Step 39E: the buyer's own die line (DXF). Read here in the browser to show
+  // what was found; the server reads it again and prices it when the quote is made.
+  type DielineRead = {
+    units_label: string;
+    warnings: string[];
+    length_in: number;
+    width_in: number;
+    rule_in: number;
+    pieces: { piece: number; length_in: number; width_in: number; rule_in: number }[];
+  };
+  const [dlFile, setDlFile] = React.useState<File | null>(null);
+  const [dlRead, setDlRead] = React.useState<DielineRead | null>(null);
+  const [dlError, setDlError] = React.useState<string | null>(null);
+  const [dlParts, setDlParts] = React.useState<Record<number, { label: string; per: string }>>({});
+  const [dlInputKey, setDlInputKey] = React.useState(0);
+  // The chat said the buyer has a die line: the form opens on Box Setup to upload it.
+  const [dlWanted, setDlWanted] = React.useState(false);
+  const dlMode = quoteType === "boxes_only" && !!dlFile && !!dlRead;
+  const dlDisplay = dlMode && (dlRead?.pieces.length ?? 0) > 1;
+  const dlPartsOk = !dlDisplay || Object.values(dlParts).every((p) => /^\d+$/.test(p.per) && Number(p.per) >= 1);
+  const dlSpecHref = (() => {
+    const t = (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase();
+    return t ? `/t/${encodeURIComponent(t)}/specs` : null;
+  })();
+  const pickDieline = async (f: File | null) => {
+    setDlError(null);
+    setDlRead(null);
+    setDlParts({});
+    setDlFile(null);
+    if (!f) {
+      setDlInputKey((k) => k + 1);
+      return;
+    }
+    if (!/\.dxf$/i.test(f.name)) {
+      setDlError("Upload your die line as a .dxf file. For a PDF, DWG or STEP drawing, send it to the shop.");
+      return;
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      setDlError("That file is over 5 MB.");
+      return;
+    }
+    try {
+      const text = await f.text();
+      const a = analyzeDieline(text, { split: true });
+      if (!a.ok) {
+        setDlError(`${a.message} You can send it to the shop instead and they'll quote it.`);
+        return;
+      }
+      let pieces: DielineRead["pieces"] = [];
+      if (a.measure.pieces > 1) {
+        const sp = splitDieline(text);
+        if (!sp.ok) {
+          setDlError(`${sp.message} You can send it to the shop instead and they'll quote it.`);
+          return;
+        }
+        if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
+          setDlError(
+            `That file has ${sp.pieces.length} separate parts. Online quotes take up to ${BUYER_DIELINE_MAX_PARTS}; send it to the shop and they'll quote it.`,
+          );
+          return;
+        }
+        pieces = sp.pieces.map((p) => ({ piece: p.piece, length_in: p.length_in, width_in: p.width_in, rule_in: p.rule_in }));
+        setDlParts(Object.fromEntries(pieces.map((p) => [p.piece, { label: "", per: "1" }])));
+      }
+      setDlRead({
+        units_label: a.units_label,
+        warnings: a.warnings,
+        length_in: a.measure.length_in,
+        width_in: a.measure.width_in,
+        rule_in: a.measure.rule_in,
+        pieces,
+      });
+      setDlFile(f);
+      // A die line quote is just this file: no stock box, no extra sizes.
+      setExtraSizes([]);
+      setPrefillPackagingSku("");
+      setBoxChoice("custom");
+    } catch {
+      setDlError("We couldn't read that file. You can send it to the shop instead and they'll quote it.");
+    }
+  };
+
   // ---------- Seed all state from prefillData once it resolves ----------
   // prefillData comes from useMemo(searchParams) which may be null on first render
   // in Next.js App Router. This effect fires as soon as it's available.
@@ -524,12 +608,15 @@ export default function StartQuoteModal({
         setCustomerNotes(prefillData.notes.trim());
       }
       if (typeof b.grade === "string" && b.grade.trim()) setPendingGrade(b.grade.trim());
-      prefillStepRef.current = { type: "boxes_only", step: "rev", done: ["type", "box"] };
+      // Step 39E: a buyer with a die line opens on Box Setup to upload it.
+      const dlStep = prefillData.dieline === true;
+      if (dlStep) setDlWanted(true);
+      prefillStepRef.current = { type: "boxes_only", step: dlStep ? "box" : "rev", done: dlStep ? ["type"] : ["type", "box"] };
       if (quoteType === "boxes_only") {
         // Step 14: already Boxes only (e.g. ?quote_type=boxes_only), so the type
         // won't change — open the review step directly.
-        setActiveStep("rev");
-        setCompletedSteps(new Set(["type", "box"]));
+        setActiveStep(dlStep ? "box" : "rev");
+        setCompletedSteps(new Set(dlStep ? ["type"] : ["type", "box"]));
         setTimeout(() => {
           prefillStepRef.current = null;
         }, 0);
@@ -922,8 +1009,9 @@ export default function StartQuoteModal({
         extraInsertLayers.every((l) => !!toNumOrNull(l.thicknessIn))
       : true;
 
-  const boxOk =
-    quoteType === "complete_pack" || quoteType === "boxes_only"
+  const boxOk = dlMode
+    ? dlPartsOk // Step 39E: the die line file is the box
+    : quoteType === "complete_pack" || quoteType === "boxes_only"
       ? !!(
           toNumOrNull(boxL) &&
           toNumOrNull(boxW) &&
@@ -1399,8 +1487,37 @@ export default function StartQuoteModal({
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isInteger(n) && n > 0);
       const boCustomer = { name, email, company: boCompany.trim() || null, phone: boPhone.trim() || null };
-      const res =
-        extraSizes.length > 0
+      // Step 39E: a die line quote sends the file with the same details.
+      const dielineForm = () => {
+        const fd = new FormData();
+        fd.set(
+          "payload",
+          JSON.stringify({
+            quote_no,
+            tenant_slug: tenantSlug || null,
+            quote_source: quoteSource || null,
+            sales_rep_slug: salesSlug || null,
+            customer: boCustomer,
+            qty: qtyNum,
+            box: { grade_id: /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null },
+            parts: dlDisplay
+              ? Object.entries(dlParts).map(([piece, v]) => ({
+                  piece: Number(piece),
+                  label: v.label.trim() || null,
+                  per_display: Number(v.per) || 1,
+                }))
+              : [],
+            print_spec: printSpecOut(),
+            qty_breaks: size1Breaks,
+            notes: notesOut(),
+          }),
+        );
+        if (dlFile) fd.set("file", dlFile);
+        return fd;
+      };
+      const res = dlMode
+        ? await fetch("/api/quote/boxes-only", { method: "POST", body: dielineForm() })
+        : extraSizes.length > 0
           ? await fetch("/api/quote/boxes-only/multi", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1574,14 +1691,19 @@ export default function StartQuoteModal({
                       {quoteType === "boxes_only" ? (
                         <>
                           <div>
-                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Box ID</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">
-                              {prefillPackagingSku.trim() || boxSizeText || "—"}
+                            <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">
+                              {dlMode ? "Die line" : "Box ID"}
+                            </div>
+                            <div className="mt-1 break-words text-sm text-[var(--text-primary)]">
+                              {dlMode ? dlFile?.name : prefillPackagingSku.trim() || boxSizeText || "—"}
                             </div>
                           </div>
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Style</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{styleInfo.label}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">
+                              {/* Step 39E */}
+                              {dlMode ? (dlDisplay ? `Display, ${dlRead?.pieces.length} parts` : "Die-cut part") : styleInfo.label}
+                            </div>
                           </div>
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Printing</div>
@@ -1699,6 +1821,149 @@ export default function StartQuoteModal({
                       hint="Internal box size (ID) + style + printing"
                     >
                       <div className="space-y-4">
+                        {/* Step 39E: price from the buyer's own die line */}
+                        {quoteType === "boxes_only" ? (
+                          <div
+                            className={[
+                              "rounded-xl border bg-[var(--surface-card)] p-4",
+                              dlWanted && !dlFile ? "border-[var(--action-primary)]" : "border-[var(--border)]",
+                            ].join(" ")}
+                            data-dieline-upload
+                          >
+                            <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
+                              HAVE A DIE LINE FILE? (OPTIONAL)
+                            </div>
+                            <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                              Upload your DXF die line (a box, a display or any die-cut part) and we&apos;ll measure it and
+                              price it. A file with several separate parts is quoted as a display: your quantity is the
+                              number of displays.
+                            </div>
+                            {dlWanted && !dlFile ? (
+                              <div className="mt-2 text-sm font-medium text-[var(--text-primary)]">
+                                Upload your die line here to get your price.
+                              </div>
+                            ) : null}
+                            <input
+                              key={dlInputKey}
+                              type="file"
+                              accept=".dxf"
+                              aria-label="Die line file"
+                              data-dieline-input
+                              onChange={(e) => void pickDieline(e.target.files?.[0] || null)}
+                              className="mt-3 block w-full text-sm text-[var(--text-secondary)]"
+                            />
+                            {dlError ? (
+                              <div className="mt-2 text-sm text-[var(--attention)]" data-dieline-error>
+                                {dlError}
+                                {dlSpecHref ? (
+                                  <>
+                                    {" "}
+                                    <a href={dlSpecHref} className="underline">
+                                      Open the spec request form
+                                    </a>
+                                  </>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {dlMode && dlRead ? (
+                              <div className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]" data-dieline-read>
+                                {dlDisplay ? (
+                                  <>
+                                    <div>
+                                      Your file has{" "}
+                                      <span className="font-medium text-[var(--text-primary)]">{dlRead.pieces.length} parts</span>.
+                                      Name them if you like, and say how many of each go in one display.
+                                    </div>
+                                    <table className="w-full text-xs" data-dieline-parts>
+                                      <thead>
+                                        <tr className="text-left text-[var(--text-muted)]">
+                                          <th className="py-1 pr-2 font-medium">Part</th>
+                                          <th className="py-1 pr-2 font-medium">Blank</th>
+                                          <th className="py-1 font-medium">Per display</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {dlRead.pieces.map((p) => (
+                                          <tr key={p.piece} className="border-t border-[var(--border)]">
+                                            <td className="py-1 pr-2">
+                                              <input
+                                                aria-label={`Part ${p.piece} name`}
+                                                placeholder={`Part ${p.piece}`}
+                                                value={dlParts[p.piece]?.label ?? ""}
+                                                onChange={(e) =>
+                                                  setDlParts((x) => ({
+                                                    ...x,
+                                                    [p.piece]: { per: x[p.piece]?.per ?? "1", label: e.target.value.slice(0, 60) },
+                                                  }))
+                                                }
+                                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                              />
+                                            </td>
+                                            <td className="py-1 pr-2 whitespace-nowrap">
+                                              {p.length_in} × {p.width_in} in
+                                            </td>
+                                            <td className="py-1">
+                                              <input
+                                                aria-label={`Part ${p.piece} per display`}
+                                                inputMode="numeric"
+                                                value={dlParts[p.piece]?.per ?? "1"}
+                                                onChange={(e) =>
+                                                  setDlParts((x) => ({
+                                                    ...x,
+                                                    [p.piece]: {
+                                                      label: x[p.piece]?.label ?? "",
+                                                      per: e.target.value.replace(/[^\d]/g, "").slice(0, 5),
+                                                    },
+                                                  }))
+                                                }
+                                                className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                              />
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                    {!dlPartsOk ? (
+                                      <div className="text-xs text-[var(--attention)]">Enter at least 1 of each part per display.</div>
+                                    ) : null}
+                                    <div className="text-xs text-[var(--text-muted)]">
+                                      Assembly and packing is added as its own line.
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div>
+                                    Read as one part:{" "}
+                                    <span className="font-medium text-[var(--text-primary)]">
+                                      {dlRead.length_in} × {dlRead.width_in} in blank
+                                    </span>
+                                    , {Math.round(dlRead.rule_in)} in of cutting and creasing rule.
+                                  </div>
+                                )}
+                                {dlRead.warnings.length ? (
+                                  <ul className="list-disc pl-5 text-xs text-[var(--text-muted)]">
+                                    {dlRead.warnings.map((w) => (
+                                      <li key={w}>{w}</li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                                <div className="text-xs text-[var(--text-muted)]">
+                                  Units: {dlRead.units_label}. The shop checks the lines before your order goes ahead.
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void pickDieline(null)}
+                                  className="text-xs text-[var(--text-secondary)] underline"
+                                  data-dieline-remove
+                                >
+                                  Remove the file and enter a box size instead
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {!dlMode ? (
+                        <>
                         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                           <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                             BOX INTERNAL DIMENSIONS
@@ -1885,6 +2150,9 @@ export default function StartQuoteModal({
                           )}
                         </div>
 
+                        </>
+                        ) : null}
+
                         {customRscBox && boxGrades.length > 0 ? (
                           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                             <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
@@ -1951,8 +2219,8 @@ export default function StartQuoteModal({
                                 </select>
                               </label>
                             ) : null}
-                            {/* Step 37N: how many panels carry print */}
-                            {printColors.length > 0 ? (
+                            {/* Step 37N: how many panels carry print (Step 39E: not for a die line part) */}
+                            {printColors.length > 0 && !dlMode ? (
                               <label className="block">
                                 <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">
                                   PANELS PRINTED
@@ -1999,7 +2267,7 @@ export default function StartQuoteModal({
                           ) : null}
                         </div>
 
-                        {quoteType === "boxes_only" ? (
+                        {quoteType === "boxes_only" && !dlMode ? (
                           <BoxSizesEditor
                             sizes={extraSizes}
                             onChange={setExtraSizes}
@@ -2425,7 +2693,28 @@ export default function StartQuoteModal({
                           </div>
                           <div className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
                             <Row k="Quote type" v="Boxes only" />
-                            {prefillPackagingSku.trim() ? (
+                            {dlMode && dlRead ? (
+                              <>
+                                {/* Step 39E */}
+                                <Row k="Die line" v={dlFile?.name || "Your file"} />
+                                <Row
+                                  k={dlDisplay ? "Display parts" : "Blank"}
+                                  v={
+                                    dlDisplay
+                                      ? dlRead.pieces
+                                          .map((p) => `${dlParts[p.piece]?.label.trim() || `Part ${p.piece}`} ×${dlParts[p.piece]?.per || "1"}`)
+                                          .join(", ")
+                                      : `${dlRead.length_in} × ${dlRead.width_in} in`
+                                  }
+                                />
+                                {customRscBox && boxGrades.length > 0 ? (
+                                  <Row
+                                    k="Board grade"
+                                    v={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Recommended by the shop"}
+                                  />
+                                ) : null}
+                              </>
+                            ) : prefillPackagingSku.trim() ? (
                               <Row k="Stock box" v={prefillPackagingSku.trim()} />
                             ) : (
                               <>
@@ -2444,11 +2733,11 @@ export default function StartQuoteModal({
                               k="Printing"
                               v={
                                 printColors.length
-                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "outside + inside" : "outside"}, ${printPanels === 4 ? "all 4 panels" : printPanels === 1 ? "1 panel" : `${printPanels} panels`}`
+                                  ? `${printColors.length} color${printColors.length > 1 ? "s" : ""} (${printColors.join(", ")}), ${printSides === 2 ? "outside + inside" : "outside"}${dlMode ? "" : `, ${printPanels === 4 ? "all 4 panels" : printPanels === 1 ? "1 panel" : `${printPanels} panels`}`}`
                                   : "No print"
                               }
                             />
-                            <Row k="Qty" v={qtyNum ? String(qtyNum) : "(missing)"} />
+                            <Row k={dlDisplay ? "Displays" : "Qty"} v={qtyNum ? String(qtyNum) : "(missing)"} />
                             {extraSizes.map((s, i) => (
                               <Row
                                 key={s.key}
@@ -2603,7 +2892,7 @@ export default function StartQuoteModal({
                                 : "cursor-not-allowed bg-[var(--action-primary)]/30 text-white/60",
                             ].join(" ")}
                           >
-                            {boBusy ? "Pricing your boxes…" : "Get my box price"}
+                            {boBusy ? (dlMode ? "Pricing your parts…" : "Pricing your boxes…") : dlMode ? "Get my price" : "Get my box price"}
                           </button>
                         </div>
                       </div>

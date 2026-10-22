@@ -22,6 +22,11 @@
 //                add one line per separate part in the file. On a display
 //                quote each part's qty = displays x per_display and the
 //                assembly line is repriced; otherwise qty = the quote's qty.
+//     confirm -> Step 39E: staff checked the lines read from a buyer's own die
+//                line: clears the "check" flag on every part (or box_id's)
+//                and reprices, so the quote leaves the review queue.
+//   Step 39E: Edit lines (the stored file) on a part that came from one
+//   piece of a multi-part file re-reads that piece, not the whole file.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -170,6 +175,30 @@ export async function POST(req: NextRequest) {
     if (!(facts.pack_type === "boxes_only" && rows.length > 0)) {
       return json({ ok: false, error: "not_boxes_only", message: "Die lines can be priced on boxes-only quotes." }, 400);
     }
+    // Step 39E: staff confirm a buyer's die line reading (no file needed).
+    if (rawMode === "confirm") {
+      if (quote.locked) {
+        return json({ ok: false, error: "quote_locked", message: "This quote is released. Revise it before changing the boxes." }, 409);
+      }
+      const only = Number(form.get("box_id")) || null;
+      const ids = rows
+        .filter((x) => x.custom_style === "dieline" && parseDielineBlank(x.dieline)?.check === true)
+        .filter((x) => !only || Number(x.id) === only)
+        .map((x) => Number(x.id));
+      if (ids.length) {
+        await q(
+          `UPDATE public.quote_box_selections SET dieline = dieline - 'check' WHERE quote_id = $1 AND id = ANY($2::int[])`,
+          [quote.id, ids],
+        );
+        await repriceQuoteBoxes(
+          quote.id,
+          Number(quote.tenant_id),
+          facts.print_mode === "per_box" ? "per_box" : parsePrintSpec(facts.print_spec),
+        );
+      }
+      return json({ ok: true, quote_no: quote.quote_no, confirmed: ids.length });
+    }
+
     // "add" makes a new line; preview / apply work on an existing box line.
     const row = rows.find((x) => Number(x.id) === Number(form.get("box_id"))) ?? (mode !== "apply" ? rows[0] : undefined);
     if (!row) return json({ ok: false, error: "box_not_found", message: "That box isn't on this quote." }, 404);
@@ -215,7 +244,24 @@ export async function POST(req: NextRequest) {
     const analysis = analyzeDieline(text, { roles, units, split }); // Step 39D2: split-aware hint
     if (!analysis.ok) return json({ ok: false, error: analysis.error, message: analysis.message }, 422);
 
-    const m = analysis.measure;
+    let m = analysis.measure;
+    // Step 39E: Edit lines on a part from one piece of a multi-part file
+    // (re-reading the stored file) re-reads that piece, not the whole file.
+    if (mode !== "add" && !split && attachmentId != null && prev?.piece) {
+      const own = splitDieline(text, { roles, units });
+      const pc = own.ok ? own.pieces.find((x) => x.piece === prev.piece) : undefined;
+      if (!pc) {
+        return json(
+          {
+            ok: false,
+            error: "piece_missing",
+            message: `Part ${prev.piece} isn't in this file the way it's read now. Check the lines, or upload it again with "Add as a new part".`,
+          },
+          422,
+        );
+      }
+      m = pc;
+    }
     // Only the roles staff changed are kept (the rest re-detect the same way).
     const keptRoles: Record<string, DielineRole> = {};
     for (const g of analysis.groups) if (g.role !== g.auto_role) keptRoles[g.key] = g.role;
@@ -232,6 +278,7 @@ export async function POST(req: NextRequest) {
       units: analysis.units,
       per_display: perDisplay,
       label,
+      piece: attachmentId != null ? prev?.piece ?? null : null, // Step 39E: Edit lines keeps which piece it is
     };
     // Step 39D: one line per separate part in the file (asked for with split=1).
     const sp = split ? splitDieline(text, { roles, units }) : null;
@@ -251,7 +298,7 @@ export async function POST(req: NextRequest) {
       });
       return json({
         ok: true,
-        analysis,
+        analysis: { ...analysis, measure: m }, // Step 39E: one piece's measure when Edit lines re-reads a piece
         pieces: sp && sp.ok ? sp.pieces : null,
         stray_in: sp && sp.ok ? sp.stray_in : null,
         price: {

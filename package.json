@@ -24,6 +24,7 @@
   "test:dxf": "npx --yes tsx scripts/test-dxf.ts",
   "test:dieline-import": "npx --yes tsx scripts/test-dieline-import.ts",
   "test:display": "npx --yes tsx scripts/test-display-assembly.ts",
+  "test:buyer-dieline": "npx --yes tsx scripts/test-buyer-dieline.ts",
   "test:grade": "npx --yes tsx scripts/test-grade.ts",
   "test:quote-email": "npx --yes tsx scripts/test-quote-email.ts",
   "docker:build": "docker build -t alex-io:latest .",

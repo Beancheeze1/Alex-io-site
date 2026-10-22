@@ -67,6 +67,7 @@ type WidgetFacts = {
   printSides?: "1" | "2" | null;
   printPanels?: "1" | "2" | "3" | "4" | null; // Step 37N
   boardGrade?: string | null; // Step 37G: "32 ECT C", "200#"...
+  dieline?: boolean | null; // Step 39E: the buyer has their own die line file
 };
 
 type Msg = {
@@ -164,6 +165,8 @@ function buildPrefillPayload(facts: WidgetFacts) {
 
     // Step 12: boxes-only hand-off — Start Quote opens Boxes only on the review step.
     quoteKind: facts.quoteKind ?? "",
+    // Step 39E: Start Quote opens on Box Setup to upload the die line
+    dieline: facts.dieline === true,
     box: {
       l: facts.boxL ?? "",
       w: facts.boxW ?? "",
@@ -182,8 +185,12 @@ function buildPrefillPayload(facts: WidgetFacts) {
 
 // Step 12: summary card lines for a boxes-only conversation.
 function summarizeBoxFacts(facts: WidgetFacts): string[] {
-  const size =
-    facts.boxL && facts.boxW && facts.boxD ? `${facts.boxL}×${facts.boxW}×${facts.boxD} in (inside)` : "(size not set)";
+  const dl = facts.dieline === true; // Step 39E
+  const size = dl
+    ? "From your die line file (you'll upload it next)"
+    : facts.boxL && facts.boxW && facts.boxD
+      ? `${facts.boxL}×${facts.boxW}×${facts.boxD} in (inside)`
+      : "(size not set)";
   const style = facts.boxStyle === "mailer" ? "Mailer" : facts.boxStyle === "rsc" ? "RSC / shipper" : "(style not set)";
   const colors = Array.isArray(facts.printColors) ? facts.printColors : [];
   const printing =
@@ -198,7 +205,7 @@ function summarizeBoxFacts(facts: WidgetFacts): string[] {
           : "(printing not set)";
   return [
     `Box: ${size}`,
-    `Style: ${style}`,
+    dl ? null : `Style: ${style}`,
     `Quantity: ${facts.qty ? facts.qty : "(qty not set)"}`,
     facts.boardGrade ? `Board grade: ${facts.boardGrade === "recommend" ? "shop to recommend" : facts.boardGrade}` : null,
     `Printing: ${printing}`,
@@ -742,7 +749,11 @@ export default function SplashChatWidget({
                       onClick={openStartQuote}
                       className="w-full rounded-md bg-[var(--action-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)]"
                     >
-                      {facts.quoteKind === "boxes" ? "Review & get my box price" : "Open layout & pricing"}
+                      {facts.quoteKind === "boxes"
+                        ? facts.dieline === true
+                          ? "Upload my die line & get my price"
+                          : "Review & get my box price"
+                        : "Open layout & pricing"}
                     </button>
                   </div>
 

@@ -13,6 +13,8 @@
 // The widget hands the facts to Start
 // Quote (Boxes only, review step), where the buyer checks them and can add
 // compare quantities, artwork or more sizes before getting the price.
+// Step 39E: a buyer with their own die line (DXF; often a display) skips the
+// size and style questions; Start Quote opens on Box Setup to upload the file.
 
 import { parseGradeText } from "@/lib/corrugated/grade-match";
 
@@ -33,6 +35,8 @@ export type BoxChatFacts = {
   printSides?: "1" | "2" | null;
   /** Step 37N: panels printed, "1"-"4" (recorded only, not priced). */
   printPanels?: "1" | "2" | "3" | "4" | null;
+  /** Step 39E: the buyer has their own die line file (a box, a display or any die-cut part). */
+  dieline?: boolean | null;
   /** Step 37G: board grade in the buyer's words, tidied ("32 ECT C"); optional. */
   boardGrade?: string | null;
   customerName?: string | null;
@@ -54,6 +58,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const FOAM_WORDS = /\b(foam|inserts?|cavit(?:y|ies)|pockets?|cushion(?:ing)?|trays?|pads?|polyethylene|polyurethane|xlpe|epe)\b/i;
 const BOX_WORDS = /\b(box|boxes|cartons?|corrugated|rsc|shippers?|mailers?)\b/i;
+/** Step 39E: the buyer has their own die line ("dieline", "DXF", "CAD file", "flat pattern"). */
+export const DIELINE_WORDS = /\b(die ?lines?|dxf|cad (?:file|drawing)s?|flat patterns?|die[- ]?cut (?:file|drawing)s?)\b/i;
+const DISPLAY_WORDS = /\b(?:pop|pos|pdq|counter|floor)?\s*displays?\b/i;
 
 /**
  * What the buyer wants from their own words: foam (any foam, with or without
@@ -67,6 +74,8 @@ export function detectQuoteKind(text: string): "foam" | "boxes" | null {
   // Chuck: corrugated pads / trays / dividers / partitions / inserts — neither flow
   // quotes those as such, so ask "foam inserts or just boxes?" instead of guessing.
   if (/\bcorrugated\b/i.test(t) && /\b(pads?|trays?|dividers?|partitions?|inserts?)\b/i.test(t)) return null;
+  // Step 39E: a die line or a display (with no foam words) is a corrugated job.
+  if ((DIELINE_WORDS.test(t) || DISPLAY_WORDS.test(t)) && !FOAM_WORDS.test(t)) return "boxes";
   if (FOAM_WORDS.test(t)) return "foam";
   if (BOX_WORDS.test(t)) return "boxes";
   return null;
@@ -94,7 +103,8 @@ function printSettled(f: BoxChatFacts): boolean {
     Array.isArray(f.printColors) &&
     f.printColors.length === n &&
     (f.printSides === "1" || f.printSides === "2") &&
-    ["1", "2", "3", "4"].includes(String(f.printPanels || ""))
+    // Step 39E: a die line part has no "4 side panels"
+    (f.dieline === true || ["1", "2", "3", "4"].includes(String(f.printPanels || "")))
   );
 }
 
@@ -103,8 +113,8 @@ export const GRADE_RECOMMEND = "recommend";
 
 export function isBoxesReady(f: BoxChatFacts): boolean {
   return (
-    hasDims(f) &&
-    (f.boxStyle === "rsc" || f.boxStyle === "mailer") &&
+    // Step 39E: with a die line, the file gives the size (uploaded on the form)
+    (f.dieline === true || (hasDims(f) && (f.boxStyle === "rsc" || f.boxStyle === "mailer"))) &&
     Number(f.qty) > 0 &&
     !isBlank(f.boardGrade) &&
     printSettled(f) &&
@@ -121,14 +131,22 @@ function coverageReplies(n: number): string[] {
 
 /** The next field to ask about, in order. */
 export function nextBoxQuestion(f: BoxChatFacts): { assistantMessage: string; quickReplies: string[]; done: boolean } {
-  if (!hasDims(f)) {
+  const dl = f.dieline === true; // Step 39E
+  if (!dl && !hasDims(f)) {
     return {
-      assistantMessage: "What inside size do you need? Length × width × depth, in inches.",
-      quickReplies: ["12x10x8", "16x12x6"],
+      assistantMessage: "What inside size do you need? Length × width × depth, in inches. Have a die line file? Say so and you can upload it.",
+      quickReplies: ["12x10x8", "16x12x6", "I have a die line file"],
       done: false,
     };
   }
-  if (f.boxStyle !== "rsc" && f.boxStyle !== "mailer") {
+  if (dl && !(Number(f.qty) > 0)) {
+    return {
+      assistantMessage: "Great, you'll upload your die line on the quote form. How many do you need? For a display, that's the number of displays.",
+      quickReplies: ["Qty 250", "Qty 500", "Qty 1000"],
+      done: false,
+    };
+  }
+  if (!dl && f.boxStyle !== "rsc" && f.boxStyle !== "mailer") {
     return {
       assistantMessage: "RSC (a regular slotted shipper, tape-sealed) or a mailer (tuck-top lid, no tape)?",
       quickReplies: ["RSC / shipper", "Mailer"],
@@ -175,7 +193,7 @@ export function nextBoxQuestion(f: BoxChatFacts): { assistantMessage: string; qu
         done: false,
       };
     }
-    if (!["1", "2", "3", "4"].includes(String(f.printPanels || ""))) {
+    if (!dl && !["1", "2", "3", "4"].includes(String(f.printPanels || ""))) {
       return {
         assistantMessage: "How many of the box's 4 side panels get printed?",
         quickReplies: ["1 panel", "2 panels", "3 panels", "All 4 panels"],
@@ -190,7 +208,9 @@ export function nextBoxQuestion(f: BoxChatFacts): { assistantMessage: string; qu
     return { assistantMessage: "And the best email for the quote?", quickReplies: [], done: false };
   }
   return {
-    assistantMessage: "Perfect — I've got everything for your box quote. Open it to check the details and get your price.",
+    assistantMessage: dl
+      ? "Perfect — open your quote, upload your die line file, and you'll get your price right away."
+      : "Perfect — I've got everything for your box quote. Open it to check the details and get your price.",
     quickReplies: [],
     done: true,
   };
@@ -210,9 +230,13 @@ export function extractBoxFacts(userText: string, f: BoxChatFacts): Partial<BoxC
     }
   }
 
-  const qtyMatch = t.match(/\b(?:qty|quantity)\b\s*[:#-]?\s*(\d[\d,]*)\b/i) || t.match(/(?<![x×\d.])\b(\d[\d,]*)\s*(?:pcs|pieces|boxes|cartons|units)\b/i);
+  // Step 39E: "I have a die line / DXF"
+  if (DIELINE_WORDS.test(t)) next.dieline = true;
+  const dl = next.dieline === true || f.dieline === true;
+
+  const qtyMatch = t.match(/\b(?:qty|quantity)\b\s*[:#-]?\s*(\d[\d,]*)\b/i) || t.match(/(?<![x×\d.])\b(\d[\d,]*)\s*(?:pcs|pieces|boxes|cartons|units|displays?|sets?)\b/i);
   if (qtyMatch) next.qty = qtyMatch[1].replace(/,/g, "");
-  else if (!(Number(f.qty) > 0) && hasDims(f) && f.boxStyle && /^\d[\d,]*$/.test(t)) next.qty = t.replace(/,/g, "");
+  else if (!(Number(f.qty) > 0) && ((hasDims(f) && f.boxStyle) || dl) && /^\d[\d,]*$/.test(t)) next.qty = t.replace(/,/g, "");
   else if (!(Number(f.qty) > 0)) {
     // "500 12x10x8 boxes": one other whole number besides the size is the quantity.
     const rest = t
@@ -327,7 +351,7 @@ function normalize(f: BoxChatFacts): BoxChatFacts {
 
 const PRESERVE: (keyof BoxChatFacts)[] = [
   "boxL", "boxW", "boxD", "boxStyle", "qty", "printed", "printColorCount", "printColors", "printSides",
-  "printPanels", "customerName", "customerEmail", "notes", "boardGrade",
+  "printPanels", "customerName", "customerEmail", "notes", "boardGrade", "dieline",
 ];
 
 async function callOpenAIBoxes(args: {
@@ -363,6 +387,9 @@ async function callOpenAIBoxes(args: {
     "'all four sides', 'all around' -> '4'.\n" +
     "- boardGrade: the board grade, short form: '32 ECT', '44 ECT C', '48 ECT BC', '200#', 'double wall'. " +
     "Ask for it (after the quantity). If they're not sure or want a recommendation, set 'recommend'.\n" +
+    "- dieline: true when they have their own die line file (DXF, CAD flat pattern, die-cut drawing), often for a display. " +
+    "Then DON'T ask for the box size or style: they upload the file on the quote form, and qty is the number of " +
+    "pieces (or displays). Otherwise null.\n" +
     "- customerName, customerEmail.\n" +
     "- notes: anything else important they say, including ink colors ('black ink'), " +
     "kraft or white board, and timing ('need by March'). Don't repeat the board grade here.\n" +
@@ -396,7 +423,7 @@ async function callOpenAIBoxes(args: {
         additionalProperties: false,
         required: [
           "boxL", "boxW", "boxD", "boxStyle", "qty", "printed", "printColorCount", "printColors", "printSides",
-          "printPanels", "boardGrade", "customerName", "customerEmail", "notes",
+          "printPanels", "boardGrade", "dieline", "customerName", "customerEmail", "notes",
         ],
         properties: {
           boxL: { type: ["string", "null"] },
@@ -410,6 +437,7 @@ async function callOpenAIBoxes(args: {
           printSides: nullable({ type: "string", enum: ["1", "2"] }),
           printPanels: nullable({ type: "string", enum: ["1", "2", "3", "4"] }),
           boardGrade: { type: ["string", "null"] },
+          dieline: nullable({ type: "boolean" }),
           customerName: { type: ["string", "null"] },
           customerEmail: { type: ["string", "null"] },
           notes: { type: ["string", "null"] },
@@ -486,13 +514,24 @@ export async function handleBoxesTurn(args: {
   }
   // Plain-text extraction of this message wins over the AI for the same field.
   const merged = normalize({ ...seeded, ...fromAi, ...extractBoxFacts(args.userText, prior) });
+  // Step 39E: once the buyer says they have a die line, the AI can't take it back.
+  if (seeded.dieline === true) merged.dieline = true;
 
   const done = ai.done && isBoxesReady(merged);
   const next = nextBoxQuestion(merged);
   // Name / email questions never get quick replies (the AI sometimes invents an example email).
   const asksContact = /full name|email/i.test(next.assistantMessage);
+  // Step 37O: the grade, outside / inside and panels questions always use the
+  // shop's own buttons (the AI made up grades like "48 ECT BC" or "200#").
+  const fixedReplies = /board grade|outside of the box only|4 side panels/.test(next.assistantMessage);
   const quickReplies =
-    done || asksContact ? [] : ai.quickReplies.length >= 2 ? ai.quickReplies.slice(0, 6) : next.quickReplies;
+    done || asksContact
+      ? []
+      : fixedReplies
+        ? next.quickReplies
+        : ai.quickReplies.length >= 2
+          ? ai.quickReplies.slice(0, 6)
+          : next.quickReplies;
 
   return { assistantMessage: ai.assistantMessage, facts: merged, done, quickReplies };
 }

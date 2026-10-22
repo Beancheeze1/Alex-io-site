@@ -3351,6 +3351,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         const lineTotal = parsePriceField(lineTotalRaw);
 
                         const isRemoving = removingBoxId === rb.id;
+                        const asmUnpriced = isAsmLine && !(Number(lineTotal) > 0); // Step 39E
 
                         return (
                           <tr key={`carton-${rb.id}`}>
@@ -3395,9 +3396,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{Number(qty).toLocaleString("en-US")}</td>
                             {/* Step 37G: box prices to 4 places, so unit x qty matches the line total */}
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
-                              {unitPrice == null ? "—" : `$${unitPrice.toFixed(4)}`}
+                              {unitPrice == null || asmUnpriced ? "—" : `$${unitPrice.toFixed(4)}`}
                             </td>
-                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{formatUsd(lineTotal)}</td>
+                            <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>
+                              {/* Step 39E: a shop with no assembly rates prices it after review */}
+                              {asmUnpriced ? "Priced by the shop" : formatUsd(lineTotal)}
+                            </td>
                           </tr>
                         );
                       })}

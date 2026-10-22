@@ -378,7 +378,12 @@ export async function resolveCustomSelection(
     const oversize = engine.warnings.some((w) => /largest sheet/i.test(w));
     // Step 39D2: a die line read in the wrong units (a huge blank) is flagged too.
     const unitsOdd = style === "dieline" && dielineSizeSuspect(L, W);
+    // Step 39E: a buyer's own die line stays flagged until staff confirm its lines.
+    const buyerCheck = style === "dieline" && opts.dieline?.check === true;
     const notes = [
+      ...(buyerCheck
+        ? ["Buyer's die line, read automatically: check the cut and crease lines (Price from a die line → Edit lines, or The lines look right)."]
+        : []),
       ...(shape ? [`Check the size: ${shape.message}`] : []),
       ...(unitsOdd
         ? [`Check the size: the blank is ${Math.round(L * 10) / 10} x ${Math.round(W * 10) / 10} in. Check the die line's units (Edit lines).`]
@@ -393,7 +398,7 @@ export async function resolveCustomSelection(
       board_grade_id: gradeId,
       board_grade_name: gradeName,
       pricing_source: "corrugated_engine",
-      needs_review: !!shape || oversize || unitsOdd,
+      needs_review: !!shape || oversize || unitsOdd || buyerCheck,
       pricing_note: notes.length ? notes.join(" ") : null,
       pricing_detail: {
         blank: engine.blank,

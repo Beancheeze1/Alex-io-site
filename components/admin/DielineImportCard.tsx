@@ -55,7 +55,15 @@ type Price = {
   description: string;
   note: string | null;
 };
-type Stored = { attachment_id?: number | null; filename?: string | null; roles?: Record<string, Role>; units?: "in" | "mm" } | null;
+type Stored = {
+  attachment_id?: number | null;
+  filename?: string | null;
+  roles?: Record<string, Role>;
+  units?: "in" | "mm";
+  piece?: number | null;
+  label?: string | null;
+  check?: boolean; // Step 39E: from the buyer's upload, lines not confirmed yet
+} | null;
 type Row = { id: number; description: string | null; style: string | null; qty: number; dieline: Stored };
 type Piece = { piece: number; length_in: number; width_in: number; sqft: number; cut_in: number; crease_in: number; perf_in: number; rule_in: number };
 
@@ -201,6 +209,28 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
     if (!r.dieline?.attachment_id) setNote("This box's die line file isn't on the quote any more. Upload it again.");
   };
   const m = analysis?.measure;
+  // Step 39E: parts read automatically from the buyer's own upload
+  const toCheck = rows.filter((r) => r.style === "dieline" && r.dieline?.check);
+  const confirmLines = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const fd = new FormData();
+      fd.set("quote_no", quoteNo);
+      fd.set("mode", "confirm");
+      const res = await fetch("/api/admin/quotes/dieline", { method: "POST", body: fd });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setNote(j?.message || `Couldn't save (HTTP ${res.status}).`);
+        return;
+      }
+      window.location.reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div style={card} data-dieline-card>
@@ -212,13 +242,34 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
         same inches on short runs.
       </div>
 
+      {toCheck.length && !locked ? (
+        <div
+          style={{ marginBottom: 10, padding: 10, borderRadius: 8, border: "1px solid var(--attention-border)", background: "var(--attention-bg)", fontSize: 12 }}
+          data-dieline-check
+        >
+          <div style={{ color: "var(--text-primary)", fontWeight: 600 }}>The buyer uploaded this die line</div>
+          <div style={{ color: "var(--text-secondary)", marginTop: 2 }}>
+            Its cut and crease lines were read automatically and priced. Open Edit lines on a part to check what was read
+            (saving it confirms that part), or confirm them all if they look right. The quote stays in the review queue
+            until then.
+          </div>
+          <button type="button" style={{ ...primary, marginTop: 6 }} disabled={busy} onClick={() => void confirmLines()} data-dieline-confirm>
+            The lines look right ({toCheck.length} part{toCheck.length === 1 ? "" : "s"})
+          </button>
+        </div>
+      ) : null}
+
       {rows.some((r) => r.style === "dieline") ? (
         <div style={{ marginBottom: 10 }} data-dieline-stored>
           {rows
             .filter((r) => r.style === "dieline")
             .map((r) => (
               <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 12, marginBottom: 4 }}>
-                <span style={{ color: "var(--text-primary)" }}>{r.dieline?.filename || "Die line"}</span>
+                <span style={{ color: "var(--text-primary)" }}>
+                  {r.dieline?.filename || "Die line"}
+                  {r.dieline?.piece ? ` · part ${r.dieline.piece}` : ""}
+                </span>
+                {r.dieline?.check ? <span style={{ ...small, color: "var(--attention)" }}>to check</span> : null}
                 <span style={small}>{r.description}</span>
                 {!locked ? (
                   <button type="button" style={btn} onClick={() => editStored(r)} data-dieline-edit={r.id}>

@@ -32,6 +32,19 @@
 //   notes?
 // }
 // -> { ok, quote_no, url }
+//
+// Step 39E: the buyer's own die line. Send multipart/form-data with
+// `payload` (the JSON body above, without box dims) and `file` (a .dxf, up
+// to 5 MB). The file is read automatically (lib/dieline-import.ts,
+// buyerDielineParts) and kept on the quote:
+//   one outline     -> one die-cut part line, qty = qty
+//   several outlines -> a display: one part line each (payload.parts =
+//                      [{ piece, label, per_display }]), qty = qty displays x
+//                      per display, plus an "Assembly and packing" line from
+//                      the shop's rates
+// Every part is flagged for staff to check the lines (review queue) until
+// they confirm them on the admin quote page. A file that can't be read is
+// refused with a message; the form offers the shop's spec request page.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -50,10 +63,15 @@ import { parseCustomBoxInput, type CustomBoxInput } from "@/lib/box-styles";
 import {
   customSelectionInsert,
   repriceQuoteBoxes,
+  resolveAssemblySelection,
   resolveCustomSelection,
   resolveStockSelection,
   type StockBoxRow,
 } from "@/app/lib/packaging-selection";
+import { buyerDielineParts, type DielineBlank } from "@/lib/dieline-import"; // Step 39E
+import { ASSEMBLY_STYLE } from "@/lib/display-assembly"; // Step 39E
+
+const DIELINE_MAX_BYTES = 5 * 1024 * 1024; // Step 39E
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +95,11 @@ function str(v: unknown, max = 200): string | null {
 
 type QuoteRow = { id: number; quote_no: string; tenant_id: number };
 
+// The request body as JSON (Step 39E: also the form's `payload`).
+async function readJson(req: NextRequest) {
+  return (await req.json().catch(() => null)) as Record<string, any> | null;
+}
+
 export async function POST(req: NextRequest) {
   // Step 14: on a failure part-way through, remove what this request wrote.
   let cleanupQuoteId: number | null = null;
@@ -89,7 +112,29 @@ export async function POST(req: NextRequest) {
       if (!rate.success) return rateLimitResponse(rate.reset);
     }
 
-    const b = (await req.json().catch(() => null)) as Record<string, any> | null;
+    // Step 39E: JSON, or a form with `payload` (the same JSON) + `file` (a die line).
+    type Body = NonNullable<Awaited<ReturnType<typeof readJson>>>;
+    let b: Body | null = null;
+    let dielineFile: { name: string; bytes: Buffer } | null = null;
+    if ((req.headers.get("content-type") || "").toLowerCase().includes("multipart/form-data")) {
+      const form = await req.formData().catch(() => null);
+      if (!form) return bad("invalid_body", "Expected a form upload.");
+      try {
+        b = JSON.parse(String(form.get("payload") || ""));
+      } catch {
+        b = null;
+      }
+      const f = form.get("file");
+      if (f && typeof f === "object" && "arrayBuffer" in f) {
+        const file = f as File;
+        const fname = String(file.name || "dieline.dxf").slice(0, 200);
+        if (!/\.dxf$/i.test(fname)) return bad("not_dxf", "Upload your die line as a .dxf file.");
+        if (file.size > DIELINE_MAX_BYTES) return bad("too_big", "That file is over 5 MB.");
+        dielineFile = { name: fname, bytes: Buffer.from(await file.arrayBuffer()) };
+      }
+    } else {
+      b = await readJson(req);
+    }
     if (!b || typeof b !== "object") return bad("invalid_body", "Expected a JSON body.");
 
     const quoteNo = str(b.quote_no, 40);
@@ -113,9 +158,18 @@ export async function POST(req: NextRequest) {
 
     // ---- Box ----
     const box = (b.box && typeof b.box === "object" ? b.box : {}) as Record<string, any>;
-    const sku = str(box.sku, 80);
+    const sku = dielineFile ? null : str(box.sku, 80);
     let custom: (CustomBoxInput & { gradeId: number | null }) | null = null;
-    if (!sku) {
+    // Step 39E: the buyer's die line -> part(s), read before any quote row is made.
+    let dieline: { parts: DielineBlank[]; display: boolean; gradeId: number | null } | null = null;
+    if (dielineFile) {
+      const read = buyerDielineParts(dielineFile.bytes.toString("utf8"), dielineFile.name, Array.isArray(b.parts) ? b.parts.slice(0, 50) : []);
+      if (!read.ok) {
+        return bad("dieline_unreadable", `${read.message} You can send the file to the shop instead and they'll quote it.`, 422);
+      }
+      const g = Number(box.grade_id);
+      dieline = { parts: read.parts, display: read.display, gradeId: Number.isInteger(g) && g > 0 ? g : null };
+    } else if (!sku) {
       // Step 27: any style (pads have no depth; partitions need cells).
       const parsed = parseCustomBoxInput(box);
       if (!parsed.ok) return bad("invalid_dims", parsed.message);
@@ -246,12 +300,63 @@ export async function POST(req: NextRequest) {
       printed: print.colors.length > 0 ? 1 : 0,
       ...(runMethod ? { run_method: runMethod } : {}),
       ...(custom ? { customer_box_in: { L: custom.L, W: custom.W, H: custom.D, style: custom.style } } : {}),
+      // Step 39E: one part from a die line, or a display (qty = displays)
+      ...(dieline && !dieline.display
+        ? { customer_box_in: { L: dieline.parts[0].length_in, W: dieline.parts[0].width_in, H: 0, style: "dieline" } }
+        : {}),
+      ...(dieline?.display ? { display: { displays: qty } } : {}),
       ...(notes ? { customer_notes: notes } : {}),
       ...(qtyBreaks.length > 1 ? { box_qty_breaks: qtyBreaks } : {}),
     });
 
     // ---- Box selection, priced ----
-    if (custom) {
+    if (dieline && dielineFile) {
+      // Step 39E: keep the file on the quote, then one line per part (+ assembly for a display).
+      const att = await one<{ id: number }>(
+        `INSERT INTO public.quote_attachments (quote_id, quote_no, filename, content_type, size_bytes, data, kind)
+         VALUES ($1, $2, $3, $4, $5, $6, 'dieline')
+         RETURNING id`,
+        [quote.id, quote.quote_no, dielineFile.name, "application/dxf", dielineFile.bytes.length, dielineFile.bytes],
+      );
+      for (const part0 of dieline.parts) {
+        const part: DielineBlank = { ...part0, attachment_id: att ? Number(att.id) : null };
+        const lineQty = dieline.display ? qty * (part.per_display ?? 1) : qty;
+        const resolved = await resolveCustomSelection(part.length_in, part.width_in, 0, "dieline", lineQty, tenantId, {
+          gradeId: dieline.gradeId,
+          print,
+          method: runMethod,
+          dieline: part,
+        });
+        const ins = customSelectionInsert({
+          quoteId: quote.id,
+          quoteNo: quote.quote_no,
+          L: part.length_in,
+          W: part.width_in,
+          H: 0,
+          style: "dieline",
+          qty: lineQty,
+          resolved,
+          dieline: part,
+        });
+        await q(ins.text, ins.values);
+      }
+      if (dieline.display) {
+        const perDisplay = dieline.parts.reduce((n, p) => n + (p.per_display ?? 1), 0);
+        const resolved = await resolveAssemblySelection(tenantId, qty, perDisplay, {});
+        const ins = customSelectionInsert({
+          quoteId: quote.id,
+          quoteNo: quote.quote_no,
+          L: 0,
+          W: 0,
+          H: 0,
+          style: ASSEMBLY_STYLE,
+          qty,
+          resolved,
+          dieline: {},
+        });
+        await q(ins.text, ins.values);
+      }
+    } else if (custom) {
       const resolved = await resolveCustomSelection(custom.L, custom.W, custom.D, custom.style, qty, tenantId, {
         gradeId: custom.gradeId,
         print,
@@ -288,8 +393,15 @@ export async function POST(req: NextRequest) {
         tenantId: Number(quote.tenant_id),
         quoteNo: quote.quote_no,
         kind: "new_quote",
-        title: "New boxes-only quote",
-        detail: [name, company, `${qty.toLocaleString("en-US")} boxes`, print.colors.length ? "printed" : null]
+        title: dieline ? "New quote from a die line" : "New boxes-only quote",
+        detail: [
+          name,
+          company,
+          dieline?.display
+            ? `${qty.toLocaleString("en-US")} displays, ${dieline.parts.length} parts`
+            : `${qty.toLocaleString("en-US")} ${dieline ? "parts" : "boxes"}`,
+          print.colors.length ? "printed" : null,
+        ]
           .filter(Boolean)
           .join(" · "),
       });
@@ -311,6 +423,7 @@ export async function POST(req: NextRequest) {
     if (cleanupQuoteId != null) {
       try {
         await q(`DELETE FROM public.quote_box_selections WHERE quote_id = $1`, [cleanupQuoteId]);
+        if (createdQuoteHere) await q(`DELETE FROM public.quote_attachments WHERE quote_id = $1 AND kind = 'dieline'`, [cleanupQuoteId]); // Step 39E
         if (createdQuoteHere) {
           await q(
             `DELETE FROM public.quotes q0
