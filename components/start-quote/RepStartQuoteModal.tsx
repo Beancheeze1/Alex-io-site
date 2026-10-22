@@ -40,6 +40,11 @@ import BoxSizesEditor, {
   type ExtraBoxSize,
 } from "@/components/start-quote/BoxSizesEditor";
 import { BOX_STYLES, boxStyleInfo, boxStyleOrRsc, parseCells, type BoxStyle } from "@/lib/box-styles";
+import DielineUploadCard, {
+  dielinePartsOk,
+  dielinePartsPayload,
+  type DielineUpload,
+} from "@/components/start-quote/DielineUploadCard"; // Step 39H
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 // Step 27: BoxStyle comes from lib/box-styles (boxes only: every style).
@@ -363,6 +368,10 @@ export default function RepStartQuoteModal({
   // Step 9B: sizes 2..10 on a boxes-only quote. Size 1 is the box fields.
   const [extraSizes, setExtraSizes] = React.useState<ExtraBoxSize[]>([]);
   const extraPrinted = quoteType === "boxes_only" && extraSizes.some((s) => s.colors.length > 0);
+  // Step 39H: a boxes-only quote priced from the customer's die line file
+  const [dieline, setDieline] = React.useState<DielineUpload>(null);
+  const dlMode = quoteType === "boxes_only" && !!dieline;
+  const dlDisplay = dlMode && (dieline?.read.pieces.length ?? 0) > 1;
   const setPrintColorCount = (n: number) => {
     setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
     setPrinted(n > 0);
@@ -682,13 +691,19 @@ export default function RepStartQuoteModal({
       return;
     }
 
-    if ((quoteType === "complete_pack" || quoteType === "boxes_only") && !boxChoice) {
+    if (dlMode && !dielinePartsOk(dieline)) {
+      setSubmitError("Enter at least 1 of each part per display.");
+      setActiveStep("specs");
+      return;
+    }
+
+    if ((quoteType === "complete_pack" || quoteType === "boxes_only") && !boxChoice && !dlMode) {
       setSubmitError('Choose a stock box or "Use custom instead" before creating the quote.');
       setActiveStep("specs");
       return;
     }
 
-    if (quoteType === "boxes_only" && extraSizes.length > 0) {
+    if (quoteType === "boxes_only" && extraSizes.length > 0 && !dlMode) {
       const sizeProblem = extraSizesProblem(extraSizes);
       if (sizeProblem || !toNumOrNull(qty)) {
         setSubmitError(sizeProblem || "Enter a quantity for size 1.");
@@ -769,8 +784,30 @@ export default function RepStartQuoteModal({
           email: email.trim() || null,
           phone: phone.trim() || null,
         };
-        const boRes =
-          extraSizes.length > 0
+        // Step 39H: from a die line file: the same details plus the file (multipart)
+        const dielineForm = () => {
+          const fd = new FormData();
+          fd.set(
+            "payload",
+            JSON.stringify({
+              quote_no,
+              sales_rep_slug: salesRepSlug.trim() || null,
+              customer: repCustomer,
+              qty: toNumOrNull(qty),
+              box: { grade_id: /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null },
+              parts: dielinePartsPayload(dieline),
+              print_spec: { colors: printColors, sides: printSides },
+              run_method: runMethod === "auto" ? null : runMethod,
+              qty_breaks: cleanBreaks.map((b) => b.qty),
+              notes: customerNotes.trim() || null,
+            }),
+          );
+          if (dieline) fd.set("file", dieline.file);
+          return fd;
+        };
+        const boRes = dlMode
+          ? await fetch("/api/quote/boxes-only", { method: "POST", body: dielineForm() })
+          : extraSizes.length > 0
             ? await fetch("/api/quote/boxes-only/multi", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1255,6 +1292,10 @@ export default function RepStartQuoteModal({
                         </>
                       ) : (
                         <>
+                          {/* Step 39H: price from the customer's die line (boxes only) */}
+                          {quoteType === "boxes_only" ? <DielineUploadCard value={dieline} onChange={setDieline} /> : null}
+                          {!dlMode ? (
+                          <>
                           <div className="grid grid-cols-3 gap-3">
                             <Field label="Box L (in)">
                               <Input value={boxL} onChange={setBoxL} placeholder="14" />
@@ -1423,6 +1464,8 @@ export default function RepStartQuoteModal({
                             )}
                           </div>
                           )}
+                          </>
+                          ) : null}
 
                           {quoteType === "complete_pack" ? (
                             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -1438,6 +1481,7 @@ export default function RepStartQuoteModal({
                           ) : null}
 
                           {((boxStyle === "rsc" && boxChoice === "custom") ||
+                            dlMode ||
                             (quoteType === "boxes_only" && (boxChoice === "custom" || (boxStyle !== "rsc" && boxStyle !== "mailer")))) &&
                           boxGrades.length > 0 ? (
                             <div className="mt-4">
@@ -1537,7 +1581,7 @@ export default function RepStartQuoteModal({
                             </div>
                           </div>
 
-                          {quoteType === "boxes_only" ? (
+                          {quoteType === "boxes_only" && !dlMode ? (
                             <div className="mt-6">
                               <BoxSizesEditor
                                 sizes={extraSizes}
@@ -1912,14 +1956,20 @@ export default function RepStartQuoteModal({
                             <ReviewRow
                               label="Box"
                               value={
-                                boxChoice === "stock" && selectedStockSku
+                                dlMode && dieline
+                                  ? `Die line ${dieline.file.name}: ${
+                                      dlDisplay
+                                        ? `display, ${dieline.read.pieces.length} parts (qty = displays)`
+                                        : `${dieline.read.length_in} × ${dieline.read.width_in} in blank`
+                                    }`
+                                  : boxChoice === "stock" && selectedStockSku
                                   ? `Stock ${selectedStockSku}`
                                   : `Custom ${boxL || "?"} × ${boxW || "?"}${boxStyleInfo(boxStyle).usesDepth ? ` × ${boxD || "?"}` : ""} in (${boxStyleInfo(boxStyle).label}${
                                       boxStyleInfo(boxStyle).cells ? `, ${cellsAcross} × ${cellsDown} cells` : ""
                                     })`
                               }
                             />
-                            {boxChoice !== "stock" ? (
+                            {boxChoice !== "stock" || dlMode ? (
                               <ReviewRow
                                 label="Board grade"
                                 value={boxGrades.find((g) => String(g.id) === boxGradeId)?.name || "Shop default"}
@@ -2064,7 +2114,11 @@ export default function RepStartQuoteModal({
                 <button
                   type="button"
                   onClick={goNext}
-                  disabled={activeStep === "specs" && (quoteType === "complete_pack" || quoteType === "boxes_only") && !boxChoice}
+                  disabled={
+                    activeStep === "specs" &&
+                    (quoteType === "complete_pack" || quoteType === "boxes_only") &&
+                    (dlMode ? !dielinePartsOk(dieline) : !boxChoice)
+                  }
                   className="rounded-md bg-[var(--action-primary)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--action-primary-hover)] disabled:opacity-40"
                 >
                   Next

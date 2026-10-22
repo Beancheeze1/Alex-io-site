@@ -178,7 +178,15 @@ export async function POST(req: NextRequest) {
         return bad("dieline_unreadable", `${read.message} You can send the file to the shop instead and they'll quote it.`, 422);
       }
       const g = Number(box.grade_id);
-      dieline = { parts: read.parts, display: read.display, gradeId: Number.isInteger(g) && g > 0 ? g : null };
+      // Step 39H: staff (the Start a quote form) check the lines themselves, so their parts aren't flagged.
+      const parts = isStaff
+        ? read.parts.map((p) => {
+            const own: DielineBlank = { ...p };
+            delete own.check;
+            return own;
+          })
+        : read.parts;
+      dieline = { parts, display: read.display, gradeId: Number.isInteger(g) && g > 0 ? g : null };
     } else if (!sku) {
       // Step 27: any style (pads have no depth; partitions need cells).
       const parsed = parseCustomBoxInput(box);
