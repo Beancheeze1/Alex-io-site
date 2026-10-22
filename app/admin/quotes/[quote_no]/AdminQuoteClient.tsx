@@ -27,6 +27,7 @@ import RunMethodControl from "@/components/admin/RunMethodControl";
 import FoamMethodControl from "@/components/admin/FoamMethodControl";
 import BoxEditPanel from "@/components/admin/BoxEditPanel";
 import DielineImportCard from "@/components/admin/DielineImportCard"; // Step 39C
+import DisplayPanel from "@/components/admin/DisplayPanel"; // Step 39D
 import QuoteApprovalPanel from "@/components/admin/QuoteApprovalPanel";
 import ShipToCard, { type FreightOptionsView, type FreightView, type ShipToView } from "@/components/quote/ShipToCard";
 import ProofCard from "@/components/quote/ProofCard";
@@ -2717,10 +2718,21 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         const dimParts = [sel.inside_length_in, sel.inside_width_in, sel.inside_height_in].map((v) =>
                           v == null || v === "" || !Number.isFinite(Number(v)) ? null : String(Number(v)),
                         );
-                        const boxDims = dimParts.every((p) => p != null) ? dimParts.join(" × ") : "—";
+                        // Step 39D: die line parts are a flat blank; the assembly line has no size.
+                        const lineStyle = String((sel as { style?: unknown }).style ?? "");
+                        const boxDims =
+                          lineStyle === "assembly"
+                            ? "—"
+                            : lineStyle === "dieline"
+                              ? `${dimParts[0] ?? "?"} × ${dimParts[1] ?? "?"} blank`
+                              : dimParts.every((p) => p != null)
+                                ? dimParts.join(" × ")
+                                : "—";
                         return (
                           <tr key={`box-${sel.id}`} style={{ color: "var(--text-primary)" }}>
-                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>Box</td>
+                            <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
+                              {lineStyle === "assembly" ? "Assembly" : lineStyle === "dieline" ? "Part" : "Box"}
+                            </td>
                             <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>
                               <span>{sel.description || sel.sku || "Box"}</span>
                               <span style={{
@@ -2732,7 +2744,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                 color: "var(--text-secondary)",
                                 fontSize: 10,
                                 fontWeight: 600,
-                              }}>{sel.kind === "custom" ? "Custom box" : "Stock box"}</span>
+                              }}>{lineStyle === "assembly" ? "Assembly + packing" : lineStyle === "dieline" ? "From die line" : sel.kind === "custom" ? "Custom box" : "Stock box"}</span>
                             </td>
                             <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)" }}>{boxDims}</td>
                             <td style={{ padding: 6, borderBottom: "1px solid var(--surface-subtle)", textAlign: "right" }}>{Number(sel.qty).toLocaleString("en-US")}</td>
@@ -2882,6 +2894,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             {/* Step 18: edit the boxes on a boxes-only quote (no layout editor for these) */}
             {quoteNoValue ? <BoxEditPanel quoteNo={quoteNoValue} /> : null}
             {quoteNoValue ? <DielineImportCard quoteNo={quoteNoValue} /> : null}
+            {quoteNoValue ? <DisplayPanel quoteNo={quoteNoValue} /> : null}
 
             {/* Materials explorer + "view customer quote" */}
             {primaryItem && (

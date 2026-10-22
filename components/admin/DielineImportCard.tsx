@@ -1,7 +1,9 @@
 // components/admin/DielineImportCard.tsx
 //
 // Step 39C: "Price from a die line" on the admin quote page (boxes-only
-// quotes). Staff upload a DXF die line for one of the quote's boxes, check
+// quotes). Step 39D: also "Add as a new part" (with a name, how many per
+// display, and splitting a file that holds several parts), for displays and
+// other multi-part jobs; see DisplayPanel for the display itself. Staff upload a DXF die line for one of the quote's boxes, check
 // how each group of lines was read (cut / crease / perf / ignore, with the
 // reason), the units, the blank and rule inches and a price preview, then
 // apply it: the box is priced from the file (board from the blank, nested
@@ -55,6 +57,7 @@ type Price = {
 };
 type Stored = { attachment_id?: number | null; filename?: string | null; roles?: Record<string, Role>; units?: "in" | "mm" } | null;
 type Row = { id: number; description: string | null; style: string | null; qty: number; dieline: Stored };
+type Piece = { piece: number; length_in: number; width_in: number; sqft: number; cut_in: number; crease_in: number; perf_in: number; rule_in: number };
 
 const ROLE_LABEL: Record<Role, string> = { cut: "Cut", crease: "Crease", perf: "Perf", ignore: "Ignore" };
 const usd = (n: number | null | undefined) =>
@@ -100,6 +103,12 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
   const [price, setPrice] = React.useState<Price | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<string | null>(null);
+  // Step 39D: replace a box, or add the file as a new part
+  const [target, setTarget] = React.useState<"replace" | "add">("replace");
+  const [label, setLabel] = React.useState("");
+  const [perDisplay, setPerDisplay] = React.useState("1");
+  const [split, setSplit] = React.useState(false);
+  const [pieces, setPieces] = React.useState<Piece[] | null>(null);
 
   React.useEffect(() => {
     let alive = true;
@@ -119,7 +128,10 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
   }, [quoteNo]);
 
   const send = React.useCallback(
-    async (mode: "preview" | "apply", over?: { roles?: Record<string, Role>; units?: "auto" | "in" | "mm" }) => {
+    async (
+      mode: "preview" | "apply" | "add",
+      over?: { roles?: Record<string, Role>; units?: "auto" | "in" | "mm"; split?: boolean },
+    ) => {
       if (boxId == null || (!file && !attachmentId)) return;
       setBusy(true);
       setNote(null);
@@ -132,6 +144,11 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
         else if (attachmentId) fd.set("attachment_id", String(attachmentId));
         fd.set("roles", JSON.stringify(over?.roles ?? roles));
         fd.set("units", over?.units ?? units);
+        const sp = over?.split ?? split;
+        if (sp) fd.set("split", "1");
+        if (mode === "add" && label.trim()) fd.set("label", label.trim());
+        // Step 39D: name / count only when adding a part (re-reading keeps the stored ones)
+        if (mode === "add" && /^\d+$/.test(perDisplay)) fd.set("per_display", perDisplay);
         const res = await fetch("/api/admin/quotes/dieline", { method: "POST", body: fd });
         const j = await res.json().catch(() => null);
         if (!res.ok || !j?.ok) {
@@ -142,19 +159,20 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
           }
           return;
         }
-        if (mode === "apply") {
+        if (mode === "apply" || mode === "add") {
           window.location.reload();
           return;
         }
         setAnalysis(j.analysis);
         setPrice(j.price);
+        setPieces(Array.isArray(j.pieces) ? j.pieces : null);
       } catch (e) {
         setNote(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
     },
-    [boxId, file, attachmentId, quoteNo, roles, units],
+    [boxId, file, attachmentId, quoteNo, roles, units, split, label, perDisplay],
   );
 
   // Re-read whenever the file or the box changes.
@@ -188,9 +206,9 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
     <div style={card} data-dieline-card>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>Price from a die line</div>
       <div style={{ ...small, marginBottom: 10 }}>
-        Upload the buyer&apos;s die line (DXF) for a box. Cut, crease and perforation lines are read from the layer names,
-        dashed lines and red lines; check them below. The box is priced as a die-cut box: board from the blank (nested on
-        your sheets when you buy sheets), the cutting die from the rule inches on press runs, and CAD table time from the
+        Upload the buyer&apos;s die line (DXF) for a box, a display part or any die-cut piece. Cut, crease and perforation lines are read from the layer names,
+        dashed lines and red lines; check them below. Each part is priced as die-cut work: board from the blank (nested
+        on your sheets when you buy sheets), the cutting die from the rule inches on press runs, and CAD table time from the
         same inches on short runs.
       </div>
 
@@ -238,6 +256,7 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
               setAttachmentId(null);
               setRoles({});
               setUnits("auto");
+              setSplit(false);
               setFile(f);
             }}
             style={{ fontSize: 12 }}
@@ -320,7 +339,7 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
 
           {price ? (
             <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-primary)" }} data-dieline-price>
-              At qty {price.qty.toLocaleString("en-US")}: {usd(price.unit)} per box, {usd(price.extended)} for the boxes
+              At qty {price.qty.toLocaleString("en-US")}: {usd(price.unit)} each, {usd(price.extended)} in all
               {price.tooling ? ` + ${usd(price.tooling)} cutting die (one time)` : ""}
               {price.plates ? ` + ${usd(price.plates)} plates` : ""}
               {price.method === "digital" ? " · short run (CAD cut, no die)" : ""}.
@@ -328,11 +347,91 @@ export default function DielineImportCard({ quoteNo }: { quoteNo: string }) {
             </div>
           ) : null}
 
+          {/* Step 39D: several parts in one file can be split into one line each */}
+          {m.pieces > 1 ? (
+            <label style={{ display: "block", marginTop: 10, fontSize: 12, color: "var(--text-primary)" }} data-dieline-split>
+              <input
+                type="checkbox"
+                checked={split}
+                onChange={(e) => {
+                  setSplit(e.target.checked);
+                  if (e.target.checked) setTarget("add");
+                  void send("preview", { split: e.target.checked });
+                }}
+              />{" "}
+              Split into {m.pieces} parts, one line each (each priced on its own blank)
+            </label>
+          ) : null}
+          {split && pieces ? (
+            <table style={{ marginTop: 6, fontSize: 12, borderCollapse: "collapse" }} data-dieline-pieces>
+              <tbody>
+                {pieces.map((pc) => (
+                  <tr key={pc.piece}>
+                    <td style={{ padding: "2px 8px 2px 0", color: "var(--text-muted)" }}>Part {pc.piece}</td>
+                    <td style={{ padding: "2px 8px" }}>
+                      {pc.length_in.toFixed(3)} × {pc.width_in.toFixed(3)} in
+                    </td>
+                    <td style={{ padding: "2px 8px", color: "var(--text-secondary)" }}>
+                      rule {pc.rule_in.toFixed(1)} in (cut {pc.cut_in.toFixed(1)} · crease {pc.crease_in.toFixed(1)})
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
+
+          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", fontSize: 12 }}>
+            <label>
+              <input type="radio" checked={target === "replace" && !split} disabled={split} onChange={() => setTarget("replace")} />{" "}
+              Price the box above from this file
+            </label>
+            <label data-dieline-target-add>
+              <input type="radio" checked={target === "add" || split} onChange={() => setTarget("add")} /> Add as a new part
+            </label>
+          </div>
+          {target === "add" || split ? (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: 12 }}>
+              <label style={small}>
+                Name{" "}
+                <input
+                  style={{ ...select, width: 140 }}
+                  value={label}
+                  placeholder={split ? "Part" : "e.g. Header, Shelf"}
+                  onChange={(e) => setLabel(e.target.value.slice(0, 60))}
+                  aria-label="Part name"
+                  data-dieline-label
+                />
+              </label>
+              <label style={small}>
+                Per display{" "}
+                <input
+                  style={{ ...select, width: 56 }}
+                  inputMode="numeric"
+                  value={perDisplay}
+                  onChange={(e) => setPerDisplay(e.target.value.replace(/[^\d]/g, "").slice(0, 5))}
+                  aria-label="How many per display"
+                  data-dieline-per-display
+                />
+              </label>
+            </div>
+          ) : null}
+
           <div style={{ marginTop: 10 }}>
-            <button type="button" style={primary} disabled={busy} onClick={() => void send("apply")} data-dieline-apply>
-              Price this box from the file
-            </button>
-            <span style={{ ...small, marginLeft: 8 }}>Replaces this box&apos;s size and style; quantity, grade and printing stay.</span>
+            {target === "add" || split ? (
+              <>
+                <button type="button" style={primary} disabled={busy} onClick={() => void send("add")} data-dieline-add>
+                  {split && pieces ? `Add ${pieces.length} parts to the quote` : "Add this part to the quote"}
+                </button>
+                <span style={{ ...small, marginLeft: 8 }}>New line{split ? "s" : ""}; the quote&apos;s grade and printing apply.</span>
+              </>
+            ) : (
+              <>
+                <button type="button" style={primary} disabled={busy} onClick={() => void send("apply")} data-dieline-apply>
+                  Price this box from the file
+                </button>
+                <span style={{ ...small, marginLeft: 8 }}>Replaces this box&apos;s size and style; quantity, grade and printing stay.</span>
+              </>
+            )}
           </div>
         </div>
       ) : null}

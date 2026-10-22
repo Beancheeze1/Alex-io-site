@@ -49,8 +49,8 @@ export const BOX_STYLE_KEYS: BoxStyle[] = BOX_STYLES.map((s) => s.key);
 /** Step 39C: the from-a-file die-cut style (not offered in pickers). */
 export const DIELINE_STYLE: BoxStyleInfo = {
   key: "dieline",
-  label: "Die-cut from your file",
-  desc: "Priced from an uploaded die line: blank size and rule from the file.",
+  label: "Die-cut part from your file",
+  desc: "Priced from an uploaded die line: blank size and rule from the file (a box, a display part or any die-cut piece).",
   kind: "diecut",
   usesDepth: false,
   depthLabel: "Depth",
@@ -102,7 +102,7 @@ export function parseCells(across: unknown, down: unknown): PartitionCells | nul
 /** "Custom box 12 x 10 x 8 in" / "Custom pad 12 x 10 in" / "Custom partition set 12 x 10 x 6 in, 3 x 4 cells". */
 export function customBoxBaseDesc(style: BoxStyle | null, L: number, W: number, H: number, cells?: PartitionCells | null): string {
   if (style === "pad") return `Custom pad ${L} x ${W} in`;
-  if (style === "dieline") return `Die-cut box from your file, ${L} x ${W} in blank`; // Step 39C
+  if (style === "dieline") return `Die-cut part from your file, ${L} x ${W} in blank`; // Step 39C (39D: "part")
   if (style === "partition") {
     return `Custom partition set ${L} x ${W} x ${H} in${cells ? `, ${cells.across} x ${cells.down} cells` : ""}`;
   }

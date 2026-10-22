@@ -216,6 +216,9 @@ export function blankAreaIn2(b: Pick<BoxPiece, "l" | "w" | "h" | "style">): numb
   const h = b.h > 0 ? b.h : 0;
   const style = String(b.style || "rsc").toLowerCase();
   if (style === "pad") return b.l * b.w;
+  // Step 39D: a die line part stores its flat blank as L x W (no depth).
+  if (style === "dieline") return b.l * b.w;
+  if (style === "assembly") return 0; // the assembly / packing line ships nothing
   if (style === "tray") return (b.l + 2 * h) * (b.w + 2 * h);
   if (style === "fol") return (2 * b.l + 2 * b.w + 1.5) * (h + 2 * b.w);
   if (style === "mailer") return (b.l + 4 * h) * (2 * b.w + 3 * h);

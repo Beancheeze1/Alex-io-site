@@ -55,6 +55,7 @@ export type DielineAnalysis =
       ok: true;
       units: "in" | "mm";
       units_label: string;
+      scale: number; // Step 39D: drawing units -> inches applied on top of the reader's conversion
       groups: DielineGroup[];
       measure: DielineMeasure;
       warnings: string[];
@@ -218,7 +219,7 @@ export function analyzeDieline(
   if (crease_in === 0) warnings.push("No crease lines found. If the box folds, mark the crease lines.");
   if (pieces > 1) {
     warnings.push(
-      `The cut lines make ${pieces} separate pieces. They're priced as one blank holding all of them; for one piece per box, upload a file with a single part.`,
+      `The cut lines make ${pieces} separate pieces. As one line they're priced as one blank holding all of them; tick "Split" to price each part on its own blank.`,
     );
   }
   if (groups.some((g) => g.role === "ignore")) {
@@ -230,6 +231,7 @@ export function analyzeDieline(
     ok: true,
     units,
     units_label: unitsLabel,
+    scale,
     groups,
     measure: {
       length_in,
@@ -257,6 +259,9 @@ export type DielineBlank = {
   attachment_id?: number | null;
   roles?: Record<string, DielineRole>;
   units?: "in" | "mm";
+  per_display?: number; // Step 39D: how many of this part go into one display / set (default 1)
+  piece?: number | null; // Step 39D: which piece of a multi-part file (1-based), null = the whole file
+  label?: string | null; // Step 39D: staff's name for the part ("Header", "Shelf")
 };
 
 /** A stored dieline blob -> a usable blank, or null. */
@@ -275,5 +280,103 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
     attachment_id: Number.isInteger(Number(o.attachment_id)) ? Number(o.attachment_id) : null,
     roles: o.roles && typeof o.roles === "object" ? (o.roles as Record<string, DielineRole>) : undefined,
     units: o.units === "mm" ? "mm" : "in",
+    per_display: Number.isInteger(Number(o.per_display)) && Number(o.per_display) >= 1 ? Number(o.per_display) : 1,
+    piece: Number.isInteger(Number(o.piece)) && Number(o.piece) >= 1 ? Number(o.piece) : null,
+    label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 60) : null,
   };
+}
+
+/**
+ * Step 39D: one file holding several separate parts (a display's base,
+ * header and shelves drawn side by side) -> one measure per part, so each is
+ * priced on its own blank instead of one big rectangle around all of them.
+ * Parts = the outer outlines of the cut lines; every counted line (cut,
+ * crease, perf) goes to the smallest part outline whose box holds its
+ * midpoint. Lines outside every part are listed as stray. Same roles and
+ * units as analyzeDieline. Pieces are numbered left to right, then top to
+ * bottom, so piece numbers stay the same each time the file is read.
+ */
+export type DielinePiece = DielineMeasure & { piece: number };
+
+export function splitDieline(
+  text: string,
+  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits } = {},
+): { ok: true; pieces: DielinePiece[]; stray_in: number } | { ok: false; error: string; message: string } {
+  const a = analyzeDieline(text, opts);
+  if (!a.ok) return a;
+  const parsed = parseDxfTagged(text);
+  const scale = a.scale;
+  const roleOf = new Map(a.groups.map((g) => [g.key, g.role]));
+  const used = parsed.segments
+    .filter((x) => segLen(x) > 1e-6)
+    .map((x) => ({
+      x1: x.x1 * scale,
+      y1: x.y1 * scale,
+      x2: x.x2 * scale,
+      y2: x.y2 * scale,
+      role: roleOf.get(groupKey(x.tag)) ?? "ignore",
+    }))
+    .filter((x) => x.role !== "ignore");
+  const { loops } = buildLoops(used.filter((x) => x.role === "cut"), 0.02);
+  const big = loops.filter((lp) => lp.length >= 3);
+  const outers = big.filter((lp, i) => !big.some((other, j) => j !== i && other.length >= 3 && inside(lp, other)));
+  if (outers.length < 2) return { ok: false, error: "one_piece", message: "This file has one part; there's nothing to split." };
+  const boxes = outers
+    .map((lp) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of lp) {
+        x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+      }
+      return { x0, y0, x1, y1 };
+    })
+    // left to right, then top to bottom (rows within 1")
+    .sort((p, q) => (Math.abs(q.y1 - p.y1) > 1 ? q.y1 - p.y1 : p.x0 - q.x0));
+  const tol = 0.05;
+  const acc = boxes.map(() => ({ cut: 0, crease: 0, perf: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }));
+  let stray = 0;
+  for (const sg of used) {
+    const mx = (sg.x1 + sg.x2) / 2;
+    const my = (sg.y1 + sg.y2) / 2;
+    let best = -1;
+    let bestArea = Infinity;
+    boxes.forEach((b, i) => {
+      if (mx >= b.x0 - tol && mx <= b.x1 + tol && my >= b.y0 - tol && my <= b.y1 + tol) {
+        const ar = (b.x1 - b.x0) * (b.y1 - b.y0);
+        if (ar < bestArea) {
+          bestArea = ar;
+          best = i;
+        }
+      }
+    });
+    const len = segLen(sg);
+    if (best < 0) {
+      stray += len;
+      continue;
+    }
+    const t = acc[best];
+    if (sg.role === "cut") t.cut += len;
+    else if (sg.role === "crease") t.crease += len;
+    else t.perf += len;
+    t.x0 = Math.min(t.x0, sg.x1, sg.x2); t.x1 = Math.max(t.x1, sg.x1, sg.x2);
+    t.y0 = Math.min(t.y0, sg.y1, sg.y2); t.y1 = Math.max(t.y1, sg.y1, sg.y2);
+  }
+  const pieces: DielinePiece[] = acc.map((t, i) => {
+    const length_in = r3(t.x1 - t.x0);
+    const width_in = r3(t.y1 - t.y0);
+    const cut_in = r1(t.cut);
+    const crease_in = r1(t.crease);
+    const perf_in = r1(t.perf);
+    return {
+      piece: i + 1,
+      length_in,
+      width_in,
+      sqft: r3((length_in * width_in) / 144),
+      cut_in,
+      crease_in,
+      perf_in,
+      rule_in: r1(cut_in + crease_in + perf_in),
+      pieces: 1,
+    };
+  });
+  return { ok: true, pieces, stray_in: r1(stray) };
 }

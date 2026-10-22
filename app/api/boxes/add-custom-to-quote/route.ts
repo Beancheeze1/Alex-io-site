@@ -189,7 +189,9 @@ export async function POST(req: NextRequest) {
     const selection = await withTxn(async (tx) => {
       // A quote has at most one custom selection — replace, don't accumulate.
       await tx.query(
-        `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,
+        // Step 39D: never die line parts or a display's assembly line.
+        `DELETE FROM public.quote_box_selections
+          WHERE quote_id = $1 AND kind = 'custom' AND COALESCE(custom_style, '') NOT IN ('dieline', 'assembly')`,
         [quote.id],
       );
 

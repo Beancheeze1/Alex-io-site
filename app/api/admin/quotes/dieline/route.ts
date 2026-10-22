@@ -11,11 +11,17 @@
 //     file (.dxf)  OR  attachment_id (the die line already saved on the quote),
 //     roles (JSON: { groupKey: "cut" | "crease" | "perf" | "ignore" }),
 //     units ("auto" | "in" | "mm")
-//     preview -> { ok, analysis, price: { unit, extended, tooling, method, qty, description } | null }
+//     preview -> { ok, analysis, price: { unit, extended, tooling, method, qty, description } | null,
+//                  pieces: [...] when split=1 }
 //     apply   -> the box becomes style "dieline" (blank + rule from the file),
 //                the file is kept on the quote (quote_attachments, kind
 //                'dieline'), and the box is repriced at today's rates with
 //                the quote's print, grade, run method and quantity.
+//     add     -> Step 39D: a NEW part line from the file (box_id not needed):
+//                label (optional name), per_display (default 1), split=1 to
+//                add one line per separate part in the file. On a display
+//                quote each part's qty = displays x per_display and the
+//                assembly line is repriced; otherwise qty = the quote's qty.
 
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
@@ -24,6 +30,8 @@ import { isPlatformOwner } from "@/lib/admin-auth";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import {
+  customSelectionInsert,
+  displayContext,
   quoteRunMethod,
   repriceQuoteBoxes,
   resolveCustomSelection,
@@ -33,6 +41,7 @@ import {
   analyzeDieline,
   DIELINE_ROLES,
   parseDielineBlank,
+  splitDieline,
   type DielineBlank,
   type DielineRole,
   type DielineUnits,
@@ -147,8 +156,9 @@ export async function POST(req: NextRequest) {
     if ("res" in r) return r.res;
     const { quote } = r;
 
-    const mode = form.get("mode") === "apply" ? "apply" : "preview";
-    if (mode === "apply" && quote.locked) {
+    const rawMode = String(form.get("mode") || "");
+    const mode = rawMode === "apply" ? "apply" : rawMode === "add" ? "add" : "preview";
+    if (mode !== "preview" && quote.locked) {
       return json(
         { ok: false, error: "quote_locked", message: "This quote is released. Revise it before changing the boxes." },
         409,
@@ -160,8 +170,15 @@ export async function POST(req: NextRequest) {
     if (!(facts.pack_type === "boxes_only" && rows.length > 0)) {
       return json({ ok: false, error: "not_boxes_only", message: "Die lines can be priced on boxes-only quotes." }, 400);
     }
-    const row = rows.find((x) => Number(x.id) === Number(form.get("box_id")));
+    // "add" makes a new line; preview / apply work on an existing box line.
+    const row = rows.find((x) => Number(x.id) === Number(form.get("box_id"))) ?? (mode !== "apply" ? rows[0] : undefined);
     if (!row) return json({ ok: false, error: "box_not_found", message: "That box isn't on this quote." }, 404);
+    const split = form.get("split") === "1";
+    // Step 39D: re-reading / replacing a part's file keeps its name and count unless new ones are sent.
+    const prev = mode !== "add" ? parseDielineBlank(row.dieline) : null;
+    const label = String(form.get("label") || "").trim().slice(0, 60) || prev?.label || null;
+    const pd = Number(form.get("per_display"));
+    const perDisplay = form.get("per_display") != null && Number.isInteger(pd) && pd >= 1 && pd <= 10000 ? pd : prev?.per_display ?? 1;
 
     // ---- The file: a new upload, or the die line already saved on this quote ----
     let text: string;
@@ -213,7 +230,12 @@ export async function POST(req: NextRequest) {
       attachment_id: attachmentId,
       roles: keptRoles,
       units: analysis.units,
+      per_display: perDisplay,
+      label,
     };
+    // Step 39D: one line per separate part in the file (asked for with split=1).
+    const sp = split ? splitDieline(text, { roles, units }) : null;
+    if (split && sp && !sp.ok) return json({ ok: false, error: sp.error, message: sp.message }, 422);
 
     const perBox = facts.print_mode === "per_box";
     const print = perBox ? rowPrintSpec(row.print_colors, row.print_sides) : parsePrintSpec(facts.print_spec);
@@ -230,6 +252,8 @@ export async function POST(req: NextRequest) {
       return json({
         ok: true,
         analysis,
+        pieces: sp && sp.ok ? sp.pieces : null,
+        stray_in: sp && sp.ok ? sp.stray_in : null,
         price: {
           qty,
           unit: priced.unit_price_usd,
@@ -243,7 +267,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ---- Apply: keep the file, make the box a die line, reprice ----
+    // ---- Keep a newly uploaded file on the quote (add and apply) ----
     if (bytes) {
       const att = await one<{ id: number }>(
         `INSERT INTO public.quote_attachments (quote_id, quote_no, filename, content_type, size_bytes, data, kind)
@@ -255,6 +279,56 @@ export async function POST(req: NextRequest) {
       blank.attachment_id = Number(att.id);
     }
 
+    // ---- Step 39D, add: new part line(s) from the file ----
+    if (mode === "add") {
+      const disp = await displayContext(quote.id);
+      const displays = disp.isDisplay ? disp.displays ?? 1 : null;
+      const baseQty = Math.max(1, Math.round(Number(facts.qty) || Number(rows[0]?.qty) || 1));
+      const lineQty = displays ? displays * perDisplay : baseQty;
+      const runMethod = await quoteRunMethod(quote.quote_no);
+      const addPrint = perBox ? null : parsePrintSpec(facts.print_spec);
+      const parts: DielineBlank[] =
+        sp && sp.ok
+          ? sp.pieces.map((pc) => ({
+              ...blank,
+              length_in: pc.length_in,
+              width_in: pc.width_in,
+              cut_in: pc.cut_in,
+              crease_in: pc.crease_in,
+              perf_in: pc.perf_in,
+              rule_in: pc.rule_in,
+              piece: pc.piece,
+              label: label ? `${label} ${pc.piece}` : `Part ${pc.piece}`,
+            }))
+          : [blank];
+      const ids: number[] = [];
+      for (const part of parts) {
+        const resolved = await resolveCustomSelection(part.length_in, part.width_in, 0, "dieline", lineQty, Number(quote.tenant_id), {
+          gradeId,
+          print: addPrint,
+          method: runMethod,
+          dieline: part,
+        });
+        const ins = customSelectionInsert({
+          quoteId: quote.id,
+          quoteNo: quote.quote_no,
+          L: part.length_in,
+          W: part.width_in,
+          H: 0,
+          style: "dieline",
+          qty: lineQty,
+          resolved,
+          dieline: part,
+        });
+        const saved = await one<{ id: number }>(ins.text, ins.values);
+        if (saved) ids.push(Number(saved.id));
+      }
+      // The assembly line follows the parts count.
+      if (disp.isDisplay) await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), perBox ? "per_box" : addPrint);
+      return json({ ok: true, quote_no: quote.quote_no, added: ids });
+    }
+
+    // ---- Apply: make the box a die line, reprice ----
     await q(
       `UPDATE public.quote_box_selections
           SET kind = 'custom', box_id = NULL, sku = NULL,

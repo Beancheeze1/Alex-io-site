@@ -1355,6 +1355,9 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     const q0 = Number(primaryItem?.qty ?? 0);
     if (Number.isFinite(q0) && q0 > 0) return q0;
     // Boxes only (Corrugated Step 4B): no foam items, so count the boxes.
+    // Step 39D: a display quote counts displays (its assembly line's qty).
+    const asmLine = requestedBoxes.find((b) => b.style === "assembly");
+    if (isBoxesOnly && asmLine) return Number(asmLine.qty) || 0;
     if (isBoxesOnly && requestedBoxes.length > 0) {
       return requestedBoxes.reduce((sum, b) => sum + (Number(b.qty) || 0), 0);
     }
@@ -1680,6 +1683,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
   // Step 37I: partitions are priced per set, pads per pad.
   const nounFor = (styles: (string | null | undefined)[]) => {
     const s = styles.map((x) => String(x || "").toLowerCase()).filter(Boolean);
+    // Step 39D: a display quote is counted in displays.
+    if (s.includes("assembly")) return { per: "Per display", many: "Displays", total: "Total displays" };
+    if (s.length && s.every((x) => x === "dieline")) return { per: "Each", many: "Parts", total: "Total parts" };
     if (s.length && s.every((x) => x === "partition")) return { per: "Per set", many: "Sets", total: "Total sets" };
     if (s.length && s.every((x) => x === "pad")) return { per: "Per pad", many: "Pads", total: "Total pads" };
     if (s.some((x) => x === "partition" || x === "pad")) return { per: "Each", many: "Packaging", total: "Total pieces" };
@@ -3316,12 +3322,15 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                         const W = displayW;
                         const H = displayH;
 
-                        const dimsOk = Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H);
-                        const dimsText = dimsOk ? `${formatDims(L, W, H)} in` : null;
+                        // Step 39D: die line parts are a flat blank (L x W); the assembly line has no size.
+                        const isAsmLine = rb.style === "assembly";
+                        const isPartLine = rb.style === "dieline";
+                        const dimsOk = !isAsmLine && Number.isFinite(L) && Number.isFinite(W) && Number.isFinite(H) && L > 0 && W > 0;
+                        const dimsText = !dimsOk ? null : isPartLine ? `${formatDims(L, W, 0).replace(/ x 0$/, "")} in` : `${formatDims(L, W, H)} in`;
 
                         const notesParts: string[] = [];
                         // Vendor is intentionally NOT shown on client quote
-                        if (dimsText) notesParts.push(`Inside ${dimsText}`);
+                        if (dimsText) notesParts.push(isPartLine ? `Blank ${dimsText}` : `Inside ${dimsText}`);
 
                         const subLabel = notesParts.length > 0 ? notesParts.join(" · ") : null;
 
@@ -3350,7 +3359,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                   {subLabel && <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
                                 </div>
                                 {/* Step 37I: not after Accept; a boxes-only quote keeps its last size */}
-                                {canChangeOrder && (!isBoxesOnly || requestedBoxes.length > 1) ? (
+                                {canChangeOrder && !isAsmLine && (!isBoxesOnly || requestedBoxes.length > 1) ? (
                                 <button
                                   type="button"
                                   data-remove-carton

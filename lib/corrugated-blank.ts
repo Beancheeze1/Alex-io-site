@@ -93,7 +93,24 @@ export const RATE_FIELDS = [
   { key: "die_per_in_usd", label: "Cutting die: rule", unit: "$ per inch of rule", max: 10000, note: "Rule length is estimated from the blank (cuts + scores)" },
   { key: "pad_per_m", label: "Pad cutting", unit: "$ per 1,000 pads", max: 1000000, note: "Pads / sheets" },
   { key: "partition_per_m", label: "Partition slotting + assembly", unit: "$ per 1,000 sets", max: 1000000, note: "Partition sets" },
+  // Step 39D: displays and multi-part jobs (assembly + packing). All optional; 0 = not used.
+  { key: "asm_per_display_usd", label: "Assembly per display", unit: "$ per display", max: 1000000, note: "A flat charge for each finished display" },
+  { key: "asm_per_part_usd", label: "Assembly per part", unit: "$ per part", max: 1000000, note: "For each part that goes into a display" },
+  { key: "labor_per_hr_usd", label: "Labor rate", unit: "$ per hour", max: 1000000, note: "Used with the labor minutes below" },
+  { key: "labor_min_per_display", label: "Labor time per display", unit: "minutes", max: 100000, note: "Base handling / setup time for each display" },
+  { key: "labor_min_per_part", label: "Labor time per part", unit: "minutes", max: 100000, note: "Folding, gluing and fitting each part" },
+  { key: "kit_per_display_usd", label: "Kitting / packing", unit: "$ per display", max: 1000000, note: "Bagging, banding or packing each display to ship" },
 ] as const;
+
+/** Step 39D: the rate fields shown under "Displays and multi-part jobs" on the admin page. */
+export const DISPLAY_KEYS: ReadonlySet<string> = new Set([
+  "asm_per_display_usd",
+  "asm_per_part_usd",
+  "labor_per_hr_usd",
+  "labor_min_per_display",
+  "labor_min_per_part",
+  "kit_per_display_usd",
+]);
 
 /** Step 27: the rate fields shown under "Other box styles" on the admin page. */
 export const STYLE_RATE_KEYS: ReadonlySet<string> = new Set([

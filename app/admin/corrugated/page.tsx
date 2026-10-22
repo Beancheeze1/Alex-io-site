@@ -18,6 +18,7 @@ import {
   ROUND_TO_OPTIONS,
   SHEET_KEYS,
   SHORT_RUN_KEYS,
+  DISPLAY_KEYS,
   STYLE_RATE_KEYS,
   computeSheet,
   computeStyleBlank,
@@ -772,7 +773,7 @@ export default function CorrugatedSettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key) && !SHEET_KEYS.has(f.key) && !STYLE_RATE_KEYS.has(f.key)).map((f) => (
+                {RATE_FIELDS.filter((f) => !SHORT_RUN_KEYS.has(f.key) && !SHEET_KEYS.has(f.key) && !STYLE_RATE_KEYS.has(f.key) && !DISPLAY_KEYS.has(f.key)).map((f) => (
                   <tr key={f.key} className="border-t border-[var(--border)]">
                     <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
                     <td className={`${TD} w-36`}>
@@ -857,6 +858,48 @@ export default function CorrugatedSettingsPage() {
               </thead>
               <tbody>
                 {RATE_FIELDS.filter((f) => STYLE_RATE_KEYS.has(f.key)).map((f) => (
+                  <tr key={f.key} className="border-t border-[var(--border)]">
+                    <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
+                    <td className={`${TD} w-36`}>
+                      <input
+                        className={INPUT}
+                        inputMode="decimal"
+                        value={rates[f.key]}
+                        aria-label={f.label}
+                        onChange={(e) => setRate(f.key, e.target.value)}
+                      />
+                    </td>
+                    <td className={`${TD} whitespace-nowrap`}>{f.unit}</td>
+                    <td className={`${TD} text-[var(--text-muted)]`}>{f.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Step 39D: displays and multi-part jobs */}
+        <section className={`${CARD} mb-6`} data-display-rates>
+          <div className={SECTION_LABEL}>Displays and multi-part jobs</div>
+          <p className="mb-3 mt-1 text-xs">
+            How you cost assembly and packing when a job is several parts put together, like a display. Fill in only
+            what you use; anything left at 0 is off. Per display: assembly per display + assembly per part × parts +
+            labor rate × (minutes per display + minutes per part × parts) + kitting / packing. Your markup is added,
+            and it shows on the quote as its own &quot;Assembly and packing&quot; line. Staff can change the minutes
+            or the price on any one quote.
+          </p>
+          <div className={TABLE_WRAP}>
+            <table className="min-w-full text-left text-xs">
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TH}>Setting</th>
+                  <th className={TH}>Value</th>
+                  <th className={TH}>Unit</th>
+                  <th className={TH}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {RATE_FIELDS.filter((f) => DISPLAY_KEYS.has(f.key)).map((f) => (
                   <tr key={f.key} className="border-t border-[var(--border)]">
                     <td className={`${TD} text-[var(--text-primary)]`}>{f.label}</td>
                     <td className={`${TD} w-36`}>

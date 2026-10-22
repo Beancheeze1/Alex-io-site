@@ -4,7 +4,7 @@
 // and pricing it as a die-cut box from the file (style "dieline").
 // Run: npm run test:dieline-import   (= npx --yes tsx scripts/test-dieline-import.ts)
 
-import { analyzeDieline, autoRole, parseDielineBlank } from "../lib/dieline-import";
+import { analyzeDieline, autoRole, parseDielineBlank, splitDieline } from "../lib/dieline-import";
 import { dielineDxf, slottedDieline } from "../lib/box-dieline";
 import { DEFAULT_FLUTES, dielineStyleBlank } from "../lib/corrugated-blank";
 import { priceRscBox, type BoxSettings } from "../lib/corrugated-price";
@@ -181,6 +181,32 @@ const p3 = priceRscBox({
   style: "dieline", dieline: dl,
 });
 check("dieline nests by sheet (6 up)", p3.ok && p3.sheet !== null && p3.sheet.up === 6, p3.ok ? p3.sheet : p3);
+
+// 10. Step 39D: split a multi-part file (display parts side by side)
+{
+  // a 30 x 20 base with a 30" crease (red) across it, and a 10 x 8 shelf with a 10" crease, 5" apart
+  const lines = [
+    ...rect(0, 0, 30, 20),
+    { x1: 0, y1: 10, x2: 30, y2: 10, color: 1 },
+    ...rect(35, 0, 10, 8),
+    { x1: 35, y1: 4, x2: 45, y2: 4, color: 1 },
+  ];
+  const sp = splitDieline(dxf(lines, { insunits: 1 }));
+  check("split: 2 parts", sp.ok && sp.pieces.length === 2, sp);
+  if (sp.ok) {
+    const [p1, p2] = sp.pieces;
+    check("split: part 1 = 30 x 20, cut 100, crease 30", p1.length_in === 30 && p1.width_in === 20 && p1.cut_in === 100 && p1.crease_in === 30, p1);
+    check("split: part 2 = 10 x 8, cut 36, crease 10", p2.length_in === 10 && p2.width_in === 8 && p2.cut_in === 36 && p2.crease_in === 10, p2);
+    check("split: no stray lines", sp.stray_in === 0, sp.stray_in);
+    const whole = analyzeDieline(dxf(lines, { insunits: 1 }));
+    check("split: parts' blanks are smaller than the one big rectangle", whole.ok && whole.measure.sqft > p1.sqft + p2.sqft, whole.ok ? whole.measure : whole);
+  }
+  check("split a one-part file -> one_piece", (() => { const r = splitDieline(dxf(rect(0, 0, 10, 10), { insunits: 1 })); return !r.ok && r.error === "one_piece"; })());
+  const pb = parseDielineBlank({ length_in: 10, width_in: 8, cut_in: 36, crease_in: 10, perf_in: 0, rule_in: 46, per_display: 4, piece: 2, label: "Shelf" });
+  check("stored part keeps per display 4, piece 2, label", !!pb && pb.per_display === 4 && pb.piece === 2 && pb.label === "Shelf", pb);
+  check("stored part defaults per display to 1", parseDielineBlank({ length_in: 1, width_in: 1, cut_in: 4, crease_in: 0, perf_in: 0, rule_in: 4 })?.per_display === 1);
+}
+check("dieline style reads as a part", boxStyleInfo("dieline").label === "Die-cut part from your file");
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

@@ -26,7 +26,13 @@ import { EDIT_LINK_MESSAGE, EDIT_LINK_REQUIRED, buyerMayEdit, isQuoteStaff } fro
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { parsePrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
-import { priceQuoteBoxesAtQtys, repriceQuoteBoxes, type BoxBreakPrice } from "@/app/lib/packaging-selection";
+import {
+  displayContext,
+  priceQuoteBoxesAtQtys,
+  repriceQuoteBoxes,
+  setQuoteBoxQty,
+  type BoxBreakPrice,
+} from "@/app/lib/packaging-selection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -275,13 +281,18 @@ export async function POST(req: NextRequest) {
     if (!breaks.includes(qty)) return bad("not_a_break", "Pick one of the quantities on your quote.");
 
     // Step 14: the quantity already on the quote — nothing to change or reprice.
-    const onQuote = await one<{ qty: string | number }>(
-      `SELECT qty FROM public.quote_box_selections WHERE quote_id = $1 ORDER BY id LIMIT 1`,
-      [quote.id],
-    );
+    // Step 39D: on a display quote the quantity is the number of displays.
+    const disp = await displayContext(quote.id);
+    const onQuote = disp.isDisplay
+      ? { qty: disp.displays ?? 0 }
+      : await one<{ qty: string | number }>(
+          `SELECT qty FROM public.quote_box_selections WHERE quote_id = $1 ORDER BY id LIMIT 1`,
+          [quote.id],
+        );
     if (onQuote && Number(onQuote.qty) === qty) return json({ ok: true, qty, unchanged: true });
 
-    await q(`UPDATE public.quote_box_selections SET qty = $2 WHERE quote_id = $1`, [quote.id, qty]);
+    // Step 39D: parts = displays x their per-display count; other lines = qty.
+    await setQuoteBoxQty(quote.id, qty);
     await saveFacts(quoteNo, { ...facts, qty });
     await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), parsePrintSpec(facts.print_spec));
 

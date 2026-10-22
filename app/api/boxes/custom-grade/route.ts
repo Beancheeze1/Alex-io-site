@@ -7,6 +7,7 @@
 // Roles: admin, cs, sales of the quote's own tenant (or the platform owner).
 // Grades and pricing always come from the QUOTE's tenant.
 
+import { parseDielineBlank } from "@/lib/dieline-import"; // Step 39D
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
@@ -70,7 +71,8 @@ export async function GET(req: NextRequest) {
     const grades = await activeGrades(Number(quote.tenant_id));
     const selection = await one<{ id: number; board_grade_id: string | number | null; board_grade_name: string | null }>(
       `SELECT id, board_grade_id, board_grade_name FROM public.quote_box_selections
-        WHERE quote_id = $1 AND kind = 'custom' LIMIT 1`,
+        WHERE quote_id = $1 AND kind = 'custom' AND COALESCE(custom_style, '') <> 'assembly'
+        ORDER BY id LIMIT 1`,
       [quote.id],
     );
     return json({
@@ -116,11 +118,14 @@ export async function POST(req: NextRequest) {
       qty: number;
       cells_across: number | string | null;
       cells_down: number | string | null;
+      dieline: unknown; // Step 39D
     }>(
       `SELECT id, custom_length_in, custom_width_in, custom_height_in, custom_style, qty,
-              custom_cells_across AS cells_across, custom_cells_down AS cells_down
+              custom_cells_across AS cells_across, custom_cells_down AS cells_down,
+              to_jsonb(quote_box_selections) -> 'dieline' AS dieline
          FROM public.quote_box_selections
-        WHERE quote_id = $1 AND kind = 'custom'
+        WHERE quote_id = $1 AND kind = 'custom' AND COALESCE(custom_style, '') <> 'assembly'
+        ORDER BY id
         LIMIT 1`,
       [quote.id],
     );
@@ -141,6 +146,7 @@ export async function POST(req: NextRequest) {
         print: await printSpecForQuote(quote.quote_no),
         method: await quoteRunMethod(quote.quote_no),
         cells: parseCells(row.cells_across, row.cells_down),
+        dieline: parseDielineBlank(row.dieline), // Step 39D: a die line part keeps its measured blank
       },
     );
     const upd = customSelectionUpdate(row.id, resolved);

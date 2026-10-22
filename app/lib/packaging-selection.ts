@@ -31,6 +31,14 @@
 
 import { boxShapeIssue } from "@/lib/box-shape"; // Step 39B
 import { parseDielineBlank, type DielineBlank } from "@/lib/dieline-import"; // Step 39C
+import {
+  ASSEMBLY_STYLE,
+  assemblyDescription,
+  assemblyRatesFrom,
+  parseAssemblyOverride,
+  perDisplayOf,
+  priceAssembly,
+} from "@/lib/display-assembly"; // Step 39D
 import { q, one } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
 import {
@@ -70,7 +78,7 @@ export type ResolvedSelection = {
   extended_price_usd: number | null;
 };
 
-export type PricingSource = "corrugated_engine" | "nearest_stock" | "none";
+export type PricingSource = "corrugated_engine" | "nearest_stock" | "none" | "assembly"; // Step 39D: assembly
 
 export type PrintFields = {
   print_colors: Coverage[] | null; // null = quote not on the per-color model
@@ -307,7 +315,10 @@ export async function resolveCustomSelection(
   // Step 27: any known style is engine-priced.
   const style = parseBoxStyle(customStyle);
   const cells = style === "partition" ? opts.cells ?? null : null;
-  const baseDesc = customBoxBaseDesc(style, L, W, H, cells);
+  // Step 39D: a die line part can carry a name ("Header", "Shelf") and how many go in one display.
+  const partName = style === "dieline" && opts.dieline?.label ? `${opts.dieline.label}: ` : "";
+  const perSet = style === "dieline" && (opts.dieline?.per_display ?? 1) > 1 ? ` (${opts.dieline?.per_display} per display)` : "";
+  const baseDesc = partName + customBoxBaseDesc(style, L, W, H, cells) + perSet;
   const print = opts.print ?? null;
   const printed = !!print && print.colors.length > 0;
   const method = opts.method ?? null; // Step 15: null = auto by quantity
@@ -458,7 +469,7 @@ export function customSelectionInsert(args: {
   qty: number;
   resolved: CustomResolvedSelection;
   cells?: PartitionCells | null; // Step 27: partition sets
-  dieline?: DielineBlank | null; // Step 39C: stored only for style "dieline"
+  dieline?: DielineBlank | Record<string, unknown> | null; // Step 39C: die line parts; 39D: the assembly line's override
 }): { text: string; values: unknown[] } {
   const r = args.resolved;
   // Step 39C: the dieline column exists after migration 049; only die-line
@@ -531,6 +542,73 @@ function rowCells(across: unknown, down: unknown): PartitionCells | null {
   return Number.isInteger(a) && Number.isInteger(d) && a >= 1 && d >= 1 && a * d >= 2 ? { across: a, down: d } : null;
 }
 
+// ---------- Step 39D: displays (multi-part jobs) ----------
+
+/** How a quote's lines make up a display: the assembly line, if any, and parts per display. */
+export async function displayContext(quoteId: number): Promise<{ isDisplay: boolean; partsPerDisplay: number; displays: number | null }> {
+  const rows = await q<{ custom_style: string | null; qty: number | string; dieline: unknown }>(
+    `SELECT qbs.custom_style, qbs.qty, to_jsonb(qbs) -> 'dieline' AS dieline
+       FROM public.quote_box_selections qbs WHERE qbs.quote_id = $1`,
+    [quoteId],
+  );
+  const asm = rows.find((r) => r.custom_style === ASSEMBLY_STYLE);
+  const partsPerDisplay = rows.filter((r) => r.custom_style === "dieline").reduce((n, r) => n + perDisplayOf(r.dieline), 0);
+  return { isDisplay: !!asm, partsPerDisplay, displays: asm ? Math.max(1, Math.round(Number(asm.qty) || 1)) : null };
+}
+
+/** The "Assembly and packing" line for a display quote, priced from the shop's rates (+ any quote override). */
+export async function resolveAssemblySelection(
+  tenantId: number | null,
+  displays: number,
+  partsPerDisplay: number,
+  overrideRaw: unknown,
+): Promise<CustomResolvedSelection> {
+  const cfg = tenantId ? await loadCorrugated(tenantId).catch(() => null) : null;
+  const a = priceAssembly({
+    rates: assemblyRatesFrom((cfg?.settings ?? {}) as Record<string, unknown>),
+    displays,
+    partsPerDisplay,
+    override: parseAssemblyOverride(overrideRaw),
+  });
+  return {
+    description: assemblyDescription(a),
+    unit_price_usd: a.unit_usd,
+    extended_price_usd: a.total_usd,
+    print_colors: null,
+    print_sides: null,
+    print_usd: null,
+    plates_usd: null,
+    board_grade_id: null,
+    board_grade_name: null,
+    pricing_source: "assembly",
+    needs_review: !a.set_up,
+    pricing_note: a.set_up
+      ? null
+      : "No assembly or packing rates are set, so this line is $0. Set them in Pricing → Corrugated boxes → Displays and multi-part jobs, or set a price on this quote.",
+    pricing_detail: { assembly: a },
+    tooling_usd: null,
+  };
+}
+
+/**
+ * Step 39D: set a display quote's quantity: the assembly line = displays,
+ * each die line part = displays x its per-display count, anything else =
+ * displays. Not a display quote: every line = qty (the old behavior).
+ */
+export async function setQuoteBoxQty(quoteId: number, qty: number): Promise<void> {
+  const n = Math.max(1, Math.round(Number(qty) || 1));
+  await q(
+    `UPDATE public.quote_box_selections qbs
+        SET qty = CASE
+          WHEN qbs.custom_style = 'dieline'
+               AND EXISTS (SELECT 1 FROM public.quote_box_selections a WHERE a.quote_id = qbs.quote_id AND a.custom_style = 'assembly')
+            THEN $2 * GREATEST(1, COALESCE(NULLIF((to_jsonb(qbs) -> 'dieline' ->> 'per_display'), '')::int, 1))
+          ELSE $2 END
+      WHERE qbs.quote_id = $1`,
+    [quoteId, n],
+  );
+}
+
 /**
  * Reprice every box on a quote at its current qty with the quote's print
  * spec (Step 3B): stock rows = catalog tier price + print adder; custom rows
@@ -583,11 +661,20 @@ export async function repriceQuoteBoxes(
   );
   // Step 15: the quote's run-method choice (null = auto by quantity).
   const method = rows.length > 0 ? await runMethodForQuoteId(quoteId) : null;
+  // Step 39D: display quotes have an assembly line priced from the parts.
+  const disp = rows.some((r) => r.custom_style === ASSEMBLY_STYLE) ? await displayContext(quoteId) : null;
 
   for (const row of rows) {
     const qty = Math.max(1, Math.round(Number(row.qty) || 1));
     const print: PrintSpec | null =
       printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg;
+
+    if (row.custom_style === ASSEMBLY_STYLE) {
+      const resolved = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline);
+      const upd = customSelectionUpdate(row.id, resolved);
+      await q(upd.text, upd.values);
+      continue;
+    }
 
     if (row.kind === "custom") {
       const resolved = await resolveCustomSelection(
@@ -726,6 +813,9 @@ export async function priceQuoteBoxesAtQtys(
   );
   // Step 15: the quote's run-method choice; auto re-decides at each quantity.
   const method = rows.length > 0 ? await runMethodForQuoteId(quoteId) : null;
+  // Step 39D: on a display quote the quantity is the number of displays:
+  // each part is priced at displays x its per-display count, plus assembly.
+  const disp = rows.length > 0 ? await displayContext(quoteId) : null;
 
   const out: BoxBreakPrice[] = [];
   for (const rawQty of qtys) {
@@ -744,13 +834,18 @@ export async function priceQuoteBoxesAtQtys(
       let pl: number | null = null;
       let tl: number | null = null;
 
-      if (row.kind === "custom") {
+      if (row.custom_style === ASSEMBLY_STYLE) {
+        const r = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline);
+        ext = r.extended_price_usd;
+        u = r.unit_price_usd;
+      } else if (row.kind === "custom") {
+        const rowQty = disp?.isDisplay && row.custom_style === "dieline" ? qty * perDisplayOf(row.dieline) : qty;
         const r = await resolveCustomSelection(
           Number(row.custom_length_in),
           Number(row.custom_width_in),
           Number(row.custom_height_in),
           String(row.custom_style || ""),
-          qty,
+          rowQty,
           tenantId,
           {
             gradeId: row.board_grade_id == null ? null : Number(row.board_grade_id),

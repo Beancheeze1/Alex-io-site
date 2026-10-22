@@ -135,6 +135,13 @@ export async function createReorder(args: {
   const boxQty = new Map(args.input.boxes.map((b) => [b.id, b.qty]));
   const newNo = await newUniqueQuoteNo(args.by === "staff" ? "R" : "A");
 
+  // Step 39D: die line parts and a display's assembly line keep their measured
+  // blank / override (quote_box_selections.dieline, migration 049).
+  const hasDieline = !!(await one<{ x: number }>(
+    `SELECT 1 AS x FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'quote_box_selections' AND column_name = 'dieline'`,
+  ).catch(() => null));
+
   const newId = await withTxn(async (tx) => {
     const ins = await tx.query<{ id: number }>(
       `INSERT INTO public.quotes (tenant_id, quote_no, customer_name, email, phone, company, status, sales_rep_id, is_rush, qty, customer_id, quote_source)
@@ -181,10 +188,10 @@ export async function createReorder(args: {
       `INSERT INTO public.quote_box_selections
          (quote_id, quote_no, kind, box_id, sku, custom_length_in, custom_width_in, custom_height_in, custom_style,
           description, qty, board_grade_id, board_grade_name, print_colors, print_sides,
-          custom_cells_across, custom_cells_down)
+          custom_cells_across, custom_cells_down${hasDieline ? ", dieline" : ""})
        SELECT $1, $2, s.kind, s.box_id, s.sku, s.custom_length_in, s.custom_width_in, s.custom_height_in, s.custom_style,
               s.description, x.qty, s.board_grade_id, s.board_grade_name, s.print_colors, s.print_sides,
-              s.custom_cells_across, s.custom_cells_down
+              s.custom_cells_across, s.custom_cells_down${hasDieline ? ", s.dieline" : ""}
          FROM public.quote_box_selections s
          JOIN unnest($4::bigint[], $5::int[]) AS x(id, qty) ON x.id = s.id
         WHERE s.quote_id = $3 AND x.qty > 0

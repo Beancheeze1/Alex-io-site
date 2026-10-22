@@ -190,17 +190,26 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
             <div style={{ fontSize: 12, color: "var(--text-primary)" }}>
               <div style={{ fontWeight: 500 }}>
+                {(r.style as string) === "assembly" ? (
+                  <>Assembly and packing · {r.qty.toLocaleString("en-US")} display{r.qty === 1 ? "" : "s"}</>
+                ) : (
+                <>
                 {rows.length > 1 ? `Size ${i + 1}: ` : ""}
                 {r.L ?? "?"} × {r.W ?? "?"}
                 {boxStyleInfo(boxStyleOrRsc(r.style)).usesDepth ? ` × ${r.D ?? "?"}` : ""} in {boxStyleInfo(boxStyleOrRsc(r.style)).label}
                 {r.cells_across && r.cells_down ? `, ${r.cells_across} × ${r.cells_down} cells` : ""}
                 {r.kind === "stock" && r.sku ? ` (stock ${r.sku})` : ""} · qty {r.qty.toLocaleString("en-US")}
+                </>
+                )}
               </div>
               {r.description ? <div style={{ color: "var(--text-muted)", marginTop: 2 }}>{r.description}</div> : null}
             </div>
-            {!locked && editing !== r.id ? (
+            {/* Step 39D: assembly and packing is changed on the Display card */}
+            {(r.style as string) === "assembly" ? (
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Set on the Display card</span>
+            ) : !locked && editing !== r.id ? (
               <button type="button" style={btn} onClick={() => startEdit(r)} data-edit-box={r.id}>
-                Edit box
+                {r.style === "dieline" ? "Edit qty / grade / print" : "Edit box"}
               </button>
             ) : null}
           </div>

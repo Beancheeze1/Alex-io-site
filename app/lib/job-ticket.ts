@@ -114,11 +114,18 @@ async function loadBoxRows(quoteId: number): Promise<BoxRow[]> {
 
 function boxFromRow(r: BoxRow, line: number): TicketBox {
   const detail = (r.detail && typeof r.detail === "object" ? r.detail : {}) as Record<string, unknown>;
-  const style = r.kind === "custom" ? parseBoxStyle(r.custom_style) ?? "rsc" : String(r.stock_style || "").toLowerCase() || "stock";
+  // Step 39D: the assembly / packing line of a display, and die line parts (flat blank, no depth).
+  const isAssembly = r.custom_style === "assembly";
+  const isPart = r.custom_style === "dieline";
+  const style = isAssembly
+    ? "assembly"
+    : r.kind === "custom"
+      ? parseBoxStyle(r.custom_style) ?? "rsc"
+      : String(r.stock_style || "").toLowerCase() || "stock";
   const L = pos(r.inside_length_in);
   const W = pos(r.inside_width_in);
   const D = Number(r.inside_height_in);
-  const inside = L && W && Number.isFinite(D) && D >= 0 ? { L, W, D } : null;
+  const inside = !isAssembly && !isPart && L && W && Number.isFinite(D) && D >= 0 ? { L, W, D } : null;
   let colors: unknown = r.print_colors;
   if (typeof colors === "string") {
     try {
@@ -137,7 +144,15 @@ function boxFromRow(r: BoxRow, line: number): TicketBox {
     kind: r.kind,
     qty: Number(r.qty) || 0,
     style,
-    style_label: r.kind === "custom" ? boxStyleLabel(style) : r.stock_style ? `Stock ${String(r.stock_style).toUpperCase()}` : "Stock box",
+    style_label: isAssembly
+      ? "Assembly and packing (qty = displays)"
+      : isPart
+        ? String(r.description || "Die-cut part from file").split(" · ")[0]
+        : r.kind === "custom"
+          ? boxStyleLabel(style)
+          : r.stock_style
+            ? `Stock ${String(r.stock_style).toUpperCase()}`
+            : "Stock box",
     sku: r.sku,
     vendor: r.vendor,
     description: r.description,
@@ -145,8 +160,8 @@ function boxFromRow(r: BoxRow, line: number): TicketBox {
     grade: r.board_grade_name,
     flute: r.flute,
     cells: r.cells_across && r.cells_down ? { across: Number(r.cells_across), down: Number(r.cells_down) } : null,
-    print: describePrintSpec(spec, method === "digital" ? "digital" : method === "plates" ? "plates" : null),
-    run: r.kind === "custom" ? runText(method) : null,
+    print: isAssembly ? "—" : describePrintSpec(spec, method === "digital" ? "digital" : method === "plates" ? "plates" : null),
+    run: r.kind === "custom" && !isAssembly ? runText(method) : null,
     blank: blank && pos(blank.length_in) && pos(blank.width_in) ? { length_in: Number(blank.length_in), width_in: Number(blank.width_in) } : null,
     sheet:
       sheet && pos(sheet.length_in) && pos(sheet.width_in)

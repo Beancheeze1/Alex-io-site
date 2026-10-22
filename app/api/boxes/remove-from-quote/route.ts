@@ -112,9 +112,10 @@ export async function POST(req: NextRequest) {
     // 2) Fetch selection SKU (so we can delete its shadow quote_items rows)
     const sel = await one<{
       sku: string | null;
+      custom_style: string | null;
     }>(
       `
-      SELECT sku
+      SELECT sku, custom_style
       FROM public."quote_box_selections"
       WHERE id = $1
         AND quote_id = $2
@@ -122,6 +123,15 @@ export async function POST(req: NextRequest) {
       `,
       [selIdNum, quoteId],
     );
+
+    // Step 39D: a display's assembly / packing line goes with the display;
+    // it's managed on the admin quote page, not removed like a box.
+    if (sel?.custom_style === "assembly") {
+      return NextResponse.json(
+        { ok: false, error: "ASSEMBLY_LINE", message: "Assembly and packing is part of the display. Ask the shop to change it." },
+        { status: 400 },
+      );
+    }
 
     const sku = sel?.sku?.trim() || null;
 

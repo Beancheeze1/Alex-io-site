@@ -54,6 +54,8 @@ check("foam cartons (24x18x18 at 85%)", p1.cartons, 10);
 check("actual incl. cartons", p1.actual_lb, 96.4);
 check("RSC blank area 12x10x8", blankAreaIn2({ l: 12, w: 10, h: 8, style: "rsc" }), 819);
 check("pad blank area 12x10", blankAreaIn2({ l: 12, w: 10, h: 0, style: "pad" }), 120);
+check("die line part blank area = its flat blank 30x20", blankAreaIn2({ l: 30, w: 20, h: 0, style: "dieline" }), 600);
+check("assembly line ships nothing", blankAreaIn2({ l: 0, w: 0, h: 0, style: "assembly" }), 0);
 const boxes500 = [{ l: 12, w: 10, h: 8, qty: 500, style: "rsc", flute: "C" }];
 const p2 = packLoad([], boxes500, S);
 check("500 RSC C-flute weight", p2.box_lb, 341.3);

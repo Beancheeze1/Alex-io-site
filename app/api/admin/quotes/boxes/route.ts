@@ -158,7 +158,8 @@ export async function GET(req: NextRequest) {
           L: Number(custom ? row.custom_length_in : row.b_length) || null,
           W: Number(custom ? row.custom_width_in : row.b_width) || null,
           D: Number(custom ? row.custom_height_in : row.b_height) || null,
-          style: styleOf(custom ? row.custom_style : row.b_style),
+          // Step 39D: the display's assembly line keeps its own style (not editable here).
+          style: (custom && row.custom_style === "assembly" ? "assembly" : styleOf(custom ? row.custom_style : row.b_style)) as BoxStyle,
           cells_across: row.custom_cells_across == null ? null : Number(row.custom_cells_across),
           cells_down: row.custom_cells_down == null ? null : Number(row.custom_cells_down),
           grade_id: row.board_grade_id == null ? null : Number(row.board_grade_id),
@@ -202,6 +203,10 @@ export async function POST(req: NextRequest) {
     // ---- Validate (Step 27: any style; pads have no depth, partitions need cells) ----
     // Step 39C: a box priced from a die line keeps its file's size and style;
     // only the quantity, grade and printing change here (Edit lines re-reads the file).
+    // Step 39D: the assembly line is set on the Display card, not here.
+    if (row.custom_style === "assembly") {
+      return json({ ok: false, error: "assembly_line", message: "Change assembly and packing on the Display card." }, 400);
+    }
     const isDieline = row.custom_style === "dieline";
     const parsed = isDieline
       ? ({

@@ -1778,9 +1778,10 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
           custom_style: string;
           board_grade_id: string | number | null;
         }>(
+          // Step 39D: die line parts and assembly lines are priced by their own routes.
           `SELECT id, custom_length_in, custom_width_in, custom_height_in, custom_style, board_grade_id
              FROM public.quote_box_selections
-            WHERE quote_id = $1 AND kind = 'custom'`,
+            WHERE quote_id = $1 AND kind = 'custom' AND COALESCE(custom_style, '') NOT IN ('dieline', 'assembly')`,
           [quote.id],
         );
         const runMethod = customRows.length > 0 ? await quoteRunMethod(String(quoteNo)) : null;
@@ -2538,7 +2539,9 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
                 );
 
                 await q(
-                  `DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'custom'`,
+                  // Step 39D: never die line parts or a display's assembly line.
+                  `DELETE FROM public.quote_box_selections
+                    WHERE quote_id = $1 AND kind = 'custom' AND COALESCE(custom_style, '') NOT IN ('dieline', 'assembly')`,
                   [quote.id],
                 );
                 const ins = customSelectionInsert({

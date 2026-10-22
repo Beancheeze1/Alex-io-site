@@ -438,9 +438,22 @@ export async function sendQuoteEmail(opts: {
         id: pkg.id,
         label: [pkg.description, pkg.sku].filter(Boolean).join(" ").trim() || "Carton",
         // Step 37J: "RSC / shipper", not the bare style key
-        sublabel: pkg.style ? boxStyleLabel(pkg.style) : pkg.vendor || null,
-        dims: (pkg.inside_length_in && pkg.inside_width_in && pkg.inside_height_in)
-          ? `${pkg.inside_length_in} × ${pkg.inside_width_in} × ${pkg.inside_height_in} in` : "—",
+        // Step 39D: die line parts are a flat blank; the assembly line has no size.
+        sublabel:
+          pkg.style === "assembly"
+            ? "Assembly and packing"
+            : pkg.style === "dieline"
+              ? "Die-cut part"
+              : pkg.style
+                ? boxStyleLabel(pkg.style)
+                : pkg.vendor || null,
+        dims:
+          pkg.style === "assembly"
+            ? "—"
+            : pkg.style === "dieline" && Number(pkg.inside_length_in) > 0 && Number(pkg.inside_width_in) > 0
+              ? `${Number(pkg.inside_length_in)} × ${Number(pkg.inside_width_in)} in blank`
+              : (pkg.inside_length_in && pkg.inside_width_in && pkg.inside_height_in)
+                ? `${pkg.inside_length_in} × ${pkg.inside_width_in} × ${pkg.inside_height_in} in` : "—",
         qty: Number(pkg.qty) || 1,
         unitPrice: pkg.unit_price_usd != null ? Number(pkg.unit_price_usd) : null,
         lineTotal: pkg.extended_price_usd != null ? Number(pkg.extended_price_usd) : null,
