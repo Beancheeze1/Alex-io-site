@@ -12,6 +12,8 @@ import {
   pricePrintAdder,
   priceRscBox,
   resolveRunMethod,
+  shortRunsOn,
+  cadHours,
   type BoxSettings,
   type PriceRscInput,
 } from "../lib/corrugated-price";
@@ -32,7 +34,8 @@ const settings: BoxSettings = {
   // Step 15: short runs off here; tested below with their own settings.
   digital_under_qty: 0,
   cad_setup_usd: 0,
-  cad_cut_per_box_usd: 0,
+  cad_cut_per_hr_usd: 0,
+  cad_speed_in_per_min: 0,
   digital_setup_usd: 0,
   digital_per_sqft_usd: 0,
   // Step 26: sheet settings (only used with board_method "sheet").
@@ -163,14 +166,20 @@ const sr: BoxSettings = {
   ...settings,
   digital_under_qty: 50,
   cad_setup_usd: 40,
-  cad_cut_per_box_usd: 2,
+  // Step 39A: CAD cut by time. $60/hr at 600 in/min = $1 per 600 in of path.
+  cad_cut_per_hr_usd: 60,
+  cad_speed_in_per_min: 600,
   digital_setup_usd: 25,
   digital_per_sqft_usd: 0.5,
   min_order_usd: 0,
 };
 check("auto: 49 is digital", resolveRunMethod(null, 49, sr) === "digital");
 check("auto: 50 is plates", resolveRunMethod(null, 50, sr) === "plates");
-check("auto: off without a CAD cut rate", resolveRunMethod(null, 10, { ...sr, cad_cut_per_box_usd: 0 }) === "plates");
+check("auto: off without a CAD table rate", resolveRunMethod(null, 10, { ...sr, cad_cut_per_hr_usd: 0 }) === "plates");
+check("auto: off without a CAD table speed", resolveRunMethod(null, 10, { ...sr, cad_speed_in_per_min: 0 }) === "plates");
+check("shortRunsOn needs cutoff + rate + speed", shortRunsOn(sr) && !shortRunsOn({ ...sr, cad_speed_in_per_min: 0 }));
+check("cadHours: 100 x 300 in at 600 in/min = 0.8333 h", near(cadHours(100, 300, 600), 0.8333, 0.0001));
+check("cadHours: 0 speed = 0", cadHours(100, 300, 0) === 0);
 check("auto: off with cutoff 0", resolveRunMethod(null, 10, { ...sr, digital_under_qty: 0 }) === "plates");
 check("choice wins", resolveRunMethod("plates", 10, sr) === "plates" && resolveRunMethod("digital", 5000, sr) === "digital");
 
@@ -180,10 +189,13 @@ if (!d1.ok) {
 } else {
   const [q25, q1000] = d1.quantities;
   const sq = d1.blank.sqft_each;
-  // 25 boxes: converting = 25 x $2; print = 25 x sq ft x $0.50; setup = $40 + $25
+  // 25 boxes: converting = 25 x 284.6 in / 600 in/min / 60 x $60/hr = $11.86;
+  // print = 25 x sq ft x $0.50; setup = $40 + $25
   check("25 is digital", q25.method === "digital", q25);
   check("25: no plates", q25.plates_line_usd === 0, q25);
-  check("25: CAD converting $50", q25.converting_usd === 50, q25);
+  check("25: CAD converting by time $11.86", q25.converting_usd === 11.86, q25);
+  check("25: CAD minutes 11.9", q25.cad_minutes === 11.9, q25);
+  check("1000 (plates) has no CAD minutes", d1.quantities[1].cad_minutes === undefined, d1.quantities[1]);
   check("25: digital print run", near(q25.print_run_usd, 25 * sq * 0.5), { got: q25.print_run_usd, want: 25 * sq * 0.5 });
   check("25: setup $65", q25.setup_usd === 65, q25);
   check("1000 is plates", q1000.method === "plates" && q1000.plates_line_usd === 455, q1000);
@@ -196,8 +208,12 @@ check(
 );
 const d3 = priceRscBox({ ...base, settings: sr, quantities: [25], method: "plates" });
 check("staff choice: plates at 25", d3.ok && d3.quantities[0].method === "plates" && d3.quantities[0].plates_line_usd === 195, d3);
-const d4 = priceRscBox({ ...base, settings: { ...sr, cad_cut_per_box_usd: 0 }, quantities: [25], method: "digital" });
-check("forced digital with $0 CAD rate warns", d4.ok && d4.warnings.includes("CAD cut rate is $0."), d4);
+const d4 = priceRscBox({ ...base, settings: { ...sr, cad_cut_per_hr_usd: 0, cad_speed_in_per_min: 0 }, quantities: [25], method: "digital" });
+check(
+  "forced digital with no CAD rate / speed warns",
+  d4.ok && d4.warnings.includes("CAD table rate is $0.") && d4.warnings.includes("CAD table speed is 0.") && d4.quantities[0].converting_usd === 0,
+  d4,
+);
 
 const da = pricePrintAdder(20, { colors: ["spot"], sides: 2 }, sr, { sqftEach: 4 });
 // run = 20 x 4 x 0.50 x 2 = 80; setup 25; x 1.3 = 136.50
@@ -262,18 +278,26 @@ const bFol = computeStyleBlank("fol", { L: 12, W: 10, D: 8 }, C, lay);
 check("FOL 12x10x8: 46.125 x 28.375 (full-width flaps)", bFol.length_in === 46.125 && bFol.width_in === 28.375, bFol);
 const bRsc = computeStyleBlank("rsc", { L: 12, W: 10, D: 8 }, C, lay);
 check("RSC through computeStyleBlank unchanged", bRsc.length_in === 46.125 && bRsc.width_in === 18.375 && bRsc.rule_in === 0, bRsc);
+// Step 39A: CAD path. RSC = outline 129 + 6 slots x 5.09375 + 2 x 46.125 + 4 x 8.1875 = 284.5625
+check("RSC 12x10x8 CAD path 284.6", bRsc.cad_path_in === 284.6, bRsc.cad_path_in);
+check("HSC 12x10x8 CAD path 213.1", bHsc.cad_path_in === 213.1, bHsc.cad_path_in);
+check("FOL 12x10x8 CAD path 334.6", bFol.cad_path_in === 334.6, bFol.cad_path_in);
 const bPad = computeStyleBlank("pad", { L: 12, W: 10, D: 0 }, C, lay);
 check("pad 12 x 10", bPad.length_in === 12 && bPad.width_in === 10 && near(bPad.sqft_each, 0.8333, 0.0001), bPad);
+check("pad CAD path = outline 44", bPad.cad_path_in === 44, bPad.cad_path_in);
 const bTray = computeStyleBlank("tray", { L: 12, W: 10, D: 8 }, C, lay);
 check("tray 12x10x8: 28.375 x 26.375, rule 185.5", bTray.length_in === 28.375 && bTray.width_in === 26.375 && bTray.rule_in === 185.5, bTray);
 const bMail = computeStyleBlank("mailer", { L: 12, W: 10, D: 3 }, C, lay);
 check("mailer 12x10x3: 24.75 x 32.125, rule 237.75", bMail.length_in === 24.75 && bMail.width_in === 32.125 && bMail.rule_in === 237.75, bMail);
+check("die-cut CAD path = die rule (tray 185.5, mailer 237.8)", bTray.cad_path_in === 185.5 && bMail.cad_path_in === 237.8, [bTray.cad_path_in, bMail.cad_path_in]);
 const bPart = computeStyleBlank("partition", { L: 12, W: 10, D: 6 }, C, lay, { across: 3, down: 4 });
 check(
   "partition 12x10x6, 3 x 4 cells: 3 long 12x6 + 2 short 10x6 = 2.3333 sq ft, 5 pieces",
   bPart.pieces.length === 2 && bPart.pieces[0].count === 3 && bPart.pieces[1].count === 2 && near(bPart.sqft_each, 2.3333, 0.0001) && bPart.pieces_per_box === 5,
   bPart,
 );
+// 3 long strips (36 + 2 slots x 3) + 2 short strips (32 + 3 slots x 3) = 126 + 82
+check("partition 3 x 4 CAD path 208", bPart.cad_path_in === 208, bPart.cad_path_in);
 
 const st = { ...settings, diecut_per_m: 100, die_base_usd: 150, die_per_in_usd: 0.5, pad_per_m: 40, partition_per_m: 200 };
 const t1 = priceRscBox({ ...base, settings: st, style: "tray", quantities: [1000] });
@@ -287,7 +311,7 @@ if (!t1.ok) {
 }
 const t0 = priceRscBox({ ...base, style: "tray", quantities: [1000] });
 check("tray with $0 die rates warns", t0.ok && t0.warnings.includes("Cutting die cost is $0.") && t0.warnings.includes("Die-cut converting cost is $0."), t0.ok ? t0.warnings : t0);
-const t2 = priceRscBox({ ...base, settings: { ...st, digital_under_qty: 50, cad_cut_per_box_usd: 2 }, style: "tray", quantities: [25] });
+const t2 = priceRscBox({ ...base, settings: { ...st, digital_under_qty: 50, cad_cut_per_hr_usd: 60, cad_speed_in_per_min: 600 }, style: "tray", quantities: [25] });
 check("tray short run: CAD cut, no die", t2.ok && t2.quantities[0].method === "digital" && t2.quantities[0].die_line_usd === 0, t2.ok ? t2.quantities[0] : t2);
 const t3 = priceRscBox({ ...base, settings: { ...st, min_order_usd: 1000 }, style: "tray", quantities: [10], print: { colors: [], sides: 1 } });
 check(
@@ -308,13 +332,14 @@ const p0 = priceRscBox({ ...base, style: "partition", cells: null, dims: { L: 12
 check("partition without cells -> invalid_cells", !p0.ok && p0.error === "invalid_cells", p0);
 const p2 = priceRscBox({
   ...base,
-  settings: { ...st, digital_under_qty: 50, cad_cut_per_box_usd: 2 },
+  settings: { ...st, digital_under_qty: 50, cad_cut_per_hr_usd: 60, cad_speed_in_per_min: 600 },
   style: "partition",
   cells: { across: 3, down: 4 },
   dims: { L: 12, W: 10, D: 6 },
   quantities: [10],
 });
-check("partition short run: CAD cut per piece (10 sets x 5 x $2 = $100)", p2.ok && p2.quantities[0].converting_usd === 100, p2.ok ? p2.quantities[0] : p2);
+// Step 39A: 10 sets x 208 in / 600 in/min / 60 x $60/hr = $3.47
+check("partition short run: CAD cut by time (10 sets x 208 in = $3.47)", p2.ok && p2.quantities[0].converting_usd === 3.47, p2.ok ? p2.quantities[0] : p2);
 const p3 = priceRscBox({
   ...base,
   settings: { ...st, board_method: "sheet" },

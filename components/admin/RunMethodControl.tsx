@@ -64,7 +64,7 @@ export default function RunMethodControl({ quoteNo }: { quoteNo: string }) {
 
   const autoText = info.short_runs_on
     ? `Auto: under ${info.cutoff.toLocaleString("en-US")} boxes is digital print + CAD cut (no plates).`
-    : "Auto: short runs are off for this shop. Set the cutoff and a CAD cut rate in Admin → Corrugated.";
+    : "Auto: short runs are off for this shop. Set the cutoff, CAD table rate and CAD table speed in Pricing → Corrugated boxes.";
 
   return (
     <div style={{ marginBottom: 10, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }} data-run-method-control>

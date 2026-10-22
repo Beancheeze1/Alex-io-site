@@ -176,6 +176,7 @@ type PriceCheckRow = {
   msf?: number;
   min_msf_applied?: boolean;
   die_line_usd?: number; // Step 27
+  cad_minutes?: number; // Step 39A: CAD table minutes (short runs)
 };
 
 type SheetInfo = {
@@ -798,8 +799,10 @@ export default function CorrugatedSettingsPage() {
           <p className="mb-3 mt-1 text-xs">
             Small orders that are digitally printed and cut on the CAD table: no plates, no press setup, no
             converting line. Buyer quotes under the cutoff use these rates automatically; staff can pick print
-            plates or digital on any quote. Short runs stay off until the cutoff and a CAD cut rate are both set.
-            Board, markup and the minimum order still apply.
+            plates or digital on any quote. CAD cut is priced by time: the box&apos;s cut + score path (inches,
+            shown in the blank preview) ÷ your table speed, times your table rate per hour. Short runs stay off
+            until the cutoff, the CAD table rate and its speed are all set. Board, markup and the minimum order
+            still apply.
           </p>
           <div className={TABLE_WRAP}>
             <table className="min-w-full text-left text-xs">
@@ -1181,6 +1184,16 @@ export default function CorrugatedSettingsPage() {
                     Cutting die rule ≈ {preview.blank.rule_in.toFixed(1)} in
                   </div>
                 ) : null}
+                {/* Step 39A: CAD table path and time per box / set */}
+                <div className="mt-1 text-[11px] text-[var(--text-secondary)]" data-preview-cad>
+                  CAD cut + score path ≈ {preview.blank.cad_path_in.toFixed(1)} in
+                  {(() => {
+                    const speed = parseNum(rates.cad_speed_in_per_min);
+                    if (speed === null || !(speed > 0)) return " (set the CAD table speed to see the time)";
+                    const sec = (preview.blank.cad_path_in / speed) * 60;
+                    return ` · ≈ ${sec.toFixed(1)} sec per ${preview.styleInfo.cells ? "set" : "box"} at ${speed} in/min`;
+                  })()}
+                </div>
                 <dl className="mt-3 grid grid-cols-2 gap-y-1 text-[11px]">
                   <dt>Board per box</dt>
                   <dd className="text-right text-[var(--text-primary)]">{preview.blank.sqft_each.toFixed(3)} sq ft</dd>
@@ -1394,7 +1407,11 @@ export default function CorrugatedSettingsPage() {
                       {(pcResult.quantities ?? []).map((qr) => (
                         <tr key={qr.quantity} className="border-t border-[var(--border)]">
                           <td className={TD}>{qr.quantity.toLocaleString("en-US")}</td>
-                          <td className={TD}>{qr.method === "digital" ? "Digital + CAD cut" : "Plates"}</td>
+                          <td className={TD}>
+                            {qr.method === "digital"
+                              ? `Digital + CAD cut${typeof qr.cad_minutes === "number" ? ` (${qr.cad_minutes} min)` : ""}`
+                              : "Plates"}
+                          </td>
                           {pcResult.sheet ? (
                             <td className={`${TD} text-right`}>
                               {(qr.sheets ?? 0).toLocaleString("en-US")} / {(qr.msf ?? 0).toFixed(3)}
@@ -1429,7 +1446,7 @@ export default function CorrugatedSettingsPage() {
                 <p className="mt-2 text-[11px] text-[var(--text-faint)]">
                   Board, converting, print run and setup are your costs before markup. Box total and unit price
                   include markup and the minimum order; plates include markup. Short runs show CAD cut under
-                  Converting and digital print under Print run. With board from sheets, Sheets / MSF is what you
+                  Converting (table minutes × your rate per hour) and digital print under Print run. With board from sheets, Sheets / MSF is what you
                   buy from the corrugator, spoilage and their minimum included.
                 </p>
               </div>

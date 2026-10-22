@@ -14,12 +14,13 @@
 //
 // Step 15, short runs (run method "digital"): digitally printed and CAD cut,
 // no plates and no press. Per quantity:
-//   Converting = qty x CAD cut $/box
+//   Converting = CAD table hours x $/hour (Step 39A; was qty x CAD cut $/box),
+//                hours = qty x CAD path per box (cuts + scores, in) / speed (in/min) / 60
 //   Print run  = qty x blank sq ft (no waste) x digital $/sq ft x sides
 //   Setup      = CAD setup + (printed ? digital setup : 0)
 //   Plates     = 0
 // The method is "plates" or "digital"; with no choice (auto) a quantity under
-// the shop's short-run cutoff is digital, once the shop has a CAD cut rate.
+// the shop's short-run cutoff is digital, once the shop has a CAD table rate and speed.
 //
 // Step 26, board bought as sheets (settings.board_method "sheet"): step 1
 // becomes, per quantity,
@@ -87,11 +88,18 @@ export function parseRunMethod(raw: unknown): RunMethod | null {
   return raw === "plates" || raw === "digital" ? raw : null;
 }
 
-type ShortRunRates = { digital_under_qty: number; cad_cut_per_box_usd: number };
+type ShortRunRates = { digital_under_qty: number; cad_cut_per_hr_usd: number; cad_speed_in_per_min: number };
 
-/** Short runs are on when the shop has a cutoff and a CAD cut rate. */
+/** Short runs are on when the shop has a cutoff, a CAD table rate and a CAD table speed (Step 39A). */
 export function shortRunsOn(s: ShortRunRates): boolean {
-  return Number(s.digital_under_qty) > 0 && Number(s.cad_cut_per_box_usd) > 0;
+  return Number(s.digital_under_qty) > 0 && Number(s.cad_cut_per_hr_usd) > 0 && Number(s.cad_speed_in_per_min) > 0;
+}
+
+/** Step 39A: CAD table hours for a quantity (path in inches per box / set). */
+export function cadHours(qty: number, pathIn: number, speedInPerMin: number): number {
+  const speed = Number(speedInPerMin);
+  if (!(speed > 0) || !(pathIn > 0) || !(qty > 0)) return 0;
+  return (qty * pathIn) / speed / 60;
 }
 
 /** The method used at a quantity: the staff choice, else auto by the shop's cutoff. */
@@ -129,6 +137,7 @@ export type QtyPrice = {
   msf?: number; // Step 26 (sheet method): MSF charged (at least the minimum)
   min_msf_applied?: boolean; // Step 26: the corrugator minimum was charged
   die_line_usd: number; // Step 27: cutting die at this quantity (0 unless die-cut on the press)
+  cad_minutes?: number; // Step 39A: CAD table minutes for the quantity (short runs only)
 };
 
 export type BoxPriceOk = {
@@ -280,9 +289,12 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     let setup: number;
     let platesLine: number;
     let dieLine: number;
+    let cadHrs = 0;
     if (method === "digital") {
       // Step 15: short run, digitally printed and CAD cut. No plates, no press, no die.
-      converting = qty * blank.pieces_per_box * s.cad_cut_per_box_usd;
+      // Step 39A: CAD cut by time: path (cuts + scores) ÷ table speed × $/hour.
+      cadHrs = cadHours(qty, blank.cad_path_in, s.cad_speed_in_per_min);
+      converting = cadHrs * (Number(s.cad_cut_per_hr_usd) || 0);
       run = printed ? qty * blank.sqft_each * s.digital_per_sqft_usd * sides : 0;
       setup = s.cad_setup_usd + (printed ? s.digital_setup_usd : 0);
       platesLine = 0;
@@ -319,6 +331,7 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
       plates_line_usd: r2(platesLine),
       ...sheetInfo,
       die_line_usd: r2(dieLine),
+      ...(method === "digital" ? { cad_minutes: Math.round(cadHrs * 600) / 10 } : {}),
     };
   });
 
@@ -346,7 +359,8 @@ export function priceRscBox(inp: PriceRscInput): BoxPriceResult {
     if (flood > 0 && s.plate_flood_usd === 0) warnings.push("Flood plate cost is $0.");
   }
   if (anyDigital) {
-    if (s.cad_cut_per_box_usd === 0) warnings.push("CAD cut rate is $0.");
+    if (!(Number(s.cad_cut_per_hr_usd) > 0)) warnings.push("CAD table rate is $0.");
+    if (!(Number(s.cad_speed_in_per_min) > 0)) warnings.push("CAD table speed is 0.");
     if (printed && s.digital_per_sqft_usd === 0) warnings.push("Digital print rate is $0.");
   }
   if (!info.printable && askedColors.length > 0) warnings.push("Partitions are priced unprinted.");

@@ -73,9 +73,11 @@ export const RATE_FIELDS = [
   { key: "markup_pct", label: "Markup", unit: "%", max: 1000, note: "Applied to total cost, plates included" },
   { key: "min_order_usd", label: "Minimum order", unit: "$", max: 1000000, note: "Floor on boxes + plates" },
   // Step 15: short runs, digitally printed and CAD cut (no plates, no press).
-  { key: "digital_under_qty", label: "Short-run cutoff", unit: "boxes", max: 1000000, note: "Quantities under this are digitally printed and CAD cut. 0 = off. Starts once a CAD cut rate is set." },
+  { key: "digital_under_qty", label: "Short-run cutoff", unit: "boxes", max: 1000000, note: "Quantities under this are digitally printed and CAD cut. 0 = off. Starts once the CAD table rate and speed are set." },
   { key: "cad_setup_usd", label: "CAD table setup", unit: "$ per order", max: 1000000, note: "Short runs: replaces order setup" },
-  { key: "cad_cut_per_box_usd", label: "CAD cut", unit: "$ per box", max: 1000000, note: "Short runs: replaces converting" },
+  // Step 39A: CAD cut by time (was a flat $ per box).
+  { key: "cad_cut_per_hr_usd", label: "CAD table rate", unit: "$ per hour", max: 1000000, note: "Short runs: replaces converting. Time = cut + score path ÷ table speed" },
+  { key: "cad_speed_in_per_min", label: "CAD table speed", unit: "in per minute", max: 100000, note: "Average speed over cuts and scores, moves included" },
   { key: "digital_setup_usd", label: "Digital print setup", unit: "$ per order", max: 1000000, note: "File prep; printed short runs only" },
   { key: "digital_per_sqft_usd", label: "Digital print", unit: "$ per sq ft per side", max: 1000000, note: "Blank area, full color; no plates" },
   // Step 26: board bought as sheets from a corrugator (used when board_method = "sheet").
@@ -129,7 +131,8 @@ export function parseBoardMethod(raw: unknown): BoardMethod {
 export const SHORT_RUN_KEYS: ReadonlySet<string> = new Set([
   "digital_under_qty",
   "cad_setup_usd",
-  "cad_cut_per_box_usd",
+  "cad_cut_per_hr_usd",
+  "cad_speed_in_per_min",
   "digital_setup_usd",
   "digital_per_sqft_usd",
 ]);
@@ -145,6 +148,8 @@ export type BlankResult = {
   sqft_each: number; // blank area, no waste
   sqft_each_with_waste: number; // also = MSF per 1,000 boxes
 };
+
+const r1 = (n: number) => Math.round(n * 10) / 10;
 
 function roundUp(x: number, inc: number): number {
   if (!(inc > 0)) return x;
@@ -186,6 +191,7 @@ export type StyleBlank = BlankResult & {
   pieces: BlankPiece[]; // one per box, except partitions (strips per set)
   pieces_per_box: number; // total pieces in one box / set
   rule_in: number; // cutting-die rule estimate (die-cut styles), 0 otherwise
+  cad_path_in: number; // Step 39A: CAD table cut + score path for one box / set (every style)
 };
 
 /**
@@ -204,6 +210,10 @@ export type StyleBlank = BlankResult & {
  * Die rule (estimate, for the cutting-die charge):
  *   tray   = blank perimeter + 2(L + W) base scores + 4D corner slits
  *   mailer = blank perimeter + 5L + 4W + 8D (fold scores + dust-flap cuts)
+ * CAD table path (Step 39A, short runs): mailer / tray = the die rule above;
+ *   rsc / fol = outline + 6 flap slots + 2 flap scores + 4 panel scores;
+ *   hsc = outline + 3 slots + 1 flap score + 4 panel scores; pad = outline;
+ *   partition = each strip's outline + half-depth slots at each crossing.
  * These are estimating formulas: check the blank preview against a box you run.
  */
 export function computeStyleBlank(
@@ -218,7 +228,8 @@ export function computeStyleBlank(
   const t = layout.edge_trim_in;
   const inc = layout.round_to_in;
   const waste = 1 + layout.waste_pct / 100;
-  const one = (rawL: number, rawW: number, rule: number, label = "Blank"): StyleBlank => {
+  // Step 39A: cad = the CAD table path (cuts + scores) for one blank; null = same as the die rule.
+  const one = (rawL: number, rawW: number, rule: number, label = "Blank", cad: number | null = null): StyleBlank => {
     const length_in = roundUp(rawL, inc);
     const width_in = roundUp(rawW, inc);
     const sqft_each = (length_in * width_in) / 144;
@@ -233,22 +244,40 @@ export function computeStyleBlank(
       pieces: [{ label, length_in, width_in, count: 1 }],
       pieces_per_box: 1,
       rule_in: rule,
+      cad_path_in: r1(cad ?? rule),
     };
   };
 
   if (style === "rsc" || style === "hsc" || style === "fol") {
     const rsc = computeRscBlank(dims, flute, layout);
+    // Step 39A: CAD path = blank outline + flap slots (one per panel line, per
+    // flap side) + the flap score(s) along the blank + the panel scores
+    // (3 panel lines + the joint) across the depth.
+    const panelD = D + flute.depth_allow_in;
+    const slotsAndScores = (bl: number, bw: number, flapSides: 1 | 2) => {
+      const flap = Math.max(0, (bw - panelD) / flapSides);
+      return 2 * (bl + bw) + 3 * flapSides * flap + flapSides * bl + 4 * panelD;
+    };
     if (style === "rsc") {
-      return { ...rsc, style, pieces: [{ label: "Blank", length_in: rsc.length_in, width_in: rsc.width_in, count: 1 }], pieces_per_box: 1, rule_in: 0 };
+      return {
+        ...rsc,
+        style,
+        pieces: [{ label: "Blank", length_in: rsc.length_in, width_in: rsc.width_in, count: 1 }],
+        pieces_per_box: 1,
+        rule_in: 0,
+        cad_path_in: r1(slotsAndScores(rsc.length_in, rsc.width_in, 2)),
+      };
     }
     const s = layout.flap_pct / 100;
     const rawW =
       style === "hsc"
         ? D + flute.depth_allow_in + (s * W + flute.flap_allow_in) + t
         : D + flute.depth_allow_in + 2 * (W + flute.flap_allow_in) + t;
-    return one(rsc.raw_length_in, rawW, 0);
+    const bl = roundUp(rsc.raw_length_in, inc);
+    const bw = roundUp(rawW, inc);
+    return one(rsc.raw_length_in, rawW, 0, "Blank", slotsAndScores(bl, bw, style === "hsc" ? 1 : 2));
   }
-  if (style === "pad") return one(L + t, W + t, 0, "Pad");
+  if (style === "pad") return one(L + t, W + t, 0, "Pad", 2 * (roundUp(L + t, inc) + roundUp(W + t, inc)));
   if (style === "tray") {
     const bl = roundUp(L + 2 * D + 2 * a + t, inc);
     const bw = roundUp(W + 2 * D + 2 * a + t, inc);
@@ -270,6 +299,12 @@ export function computeStyleBlank(
   if (c.across > 1) pieces.push({ label: "Short strips", length_in: roundUp(W + t, inc), width_in: roundUp(D + t, inc), count: c.across - 1 });
   const sqft_each = pieces.reduce((sum, p) => sum + (p.length_in * p.width_in * p.count) / 144, 0);
   const first = pieces[0] ?? { length_in: 0, width_in: 0 };
+  // Step 39A: CAD path per set = each strip's outline + its half-depth slots
+  // (one per crossing strip).
+  const cadPath = pieces.reduce((sum, p) => {
+    const crossings = p.label === "Long strips" ? c.across - 1 : c.down - 1;
+    return sum + p.count * (2 * (p.length_in + p.width_in) + Math.max(0, crossings) * (D / 2));
+  }, 0);
   return {
     style,
     raw_length_in: L + t,
@@ -281,6 +316,7 @@ export function computeStyleBlank(
     pieces,
     pieces_per_box: pieces.reduce((n, p) => n + p.count, 0),
     rule_in: 0,
+    cad_path_in: r1(cadPath),
   };
 }
 
