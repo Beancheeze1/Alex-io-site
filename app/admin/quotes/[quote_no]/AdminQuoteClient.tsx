@@ -37,6 +37,7 @@ import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
 import { partCustomName, partName } from "@/app/lib/foam-terms";
+import CommissionCard from "@/components/admin/CommissionCard";
 
 
 type QuoteRow = {
@@ -2563,6 +2564,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       </div>
                     ) : null}
                   </div>
+                  {/* Step 39O: who gets the commission (admin can change it until release / payout) */}
+                  <CommissionCard quoteNo={quoteState.quote_no} labelStyle={labelStyle} />
                   {customerNotes ? (
                     <div data-admin-customer-notes>
                       <div style={labelStyle}>Customer notes</div>

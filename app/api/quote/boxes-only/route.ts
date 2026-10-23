@@ -55,6 +55,7 @@ import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { addEditGrant } from "@/lib/quote-edit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
+import { fillAccountRep } from "@/app/lib/account-rep";
 import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { sendNewBoxQuoteEmail } from "@/app/lib/send-quote-email";
@@ -307,6 +308,8 @@ export async function POST(req: NextRequest) {
         console.warn("[boxes-only] sales_rep_slug skipped", { quoteNo, err: String(e) });
       }
     }
+    // Step 39O: still no rep -> the customer's account rep (unless staff chose on the form)
+    await fillAccountRep(Number(quote.id), tenantId);
 
     // ---- Facts: per-color print model + boxes-only marker ----
     const prev = (await loadFacts(quote.quote_no)) || {};

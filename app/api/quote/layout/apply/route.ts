@@ -78,6 +78,7 @@ import { resolveTenantFromHost } from "@/lib/tenant";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { buildStepFromLayout } from "@/lib/cad/step";
 import { findOrCreateCustomer } from "@/app/lib/customers";
+import { fillAccountRep } from "@/app/lib/account-rep";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { tenantQuoteTypes } from "@/lib/quote-types-server";
 import { cleanQtyList } from "@/app/lib/pricing/qty-list";
@@ -1903,6 +1904,10 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
         }
       }
     }
+
+    // Step 39O: still no rep -> the customer's account rep (unless staff chose
+    // on the form, or the quote is released). A /q/<slug> link was set above.
+    if (!quote.locked) await fillAccountRep(Number(quote.id), tenantId);
 
     let materialLegend: string | null = null;
     let materialNameForFacts: string | null = null;

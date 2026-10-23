@@ -9,6 +9,8 @@ import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { loadFacts } from "@/app/lib/memory";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { findOrCreateCustomer } from "@/app/lib/customers";
+import { commissionChoice, resolveCommission } from "@/app/lib/account-rep-core";
+import { customerAccountRepId, markRepSetByStaff } from "@/app/lib/account-rep";
 import { displayRevisionLabel } from "@/app/lib/revision-label";
 import { isInternalCall } from "@/lib/internal-call";
 
@@ -210,7 +212,9 @@ export async function POST(req: NextRequest) {
       qty: rawQty = null,
       qty_breaks: rawQtyBreaks = null,
       internal_notes = null,
+      commission_to: rawCommissionTo = null, // Step 39O: "none" = staff chose no commission
     } = body;
+    const choice = commissionChoice(rawCommissionTo, rawSalesRepId, rawSalesRepSlug);
 
     const qty =
       rawQty !== null && rawQty !== undefined && Number.isFinite(Number(rawQty))
@@ -231,6 +235,8 @@ export async function POST(req: NextRequest) {
     // 1) If a numeric id was provided, trust it (but keep within tenant by constraining the upsert).
     // 2) Else, if a slug was provided, look up users.id where sales_slug = slug AND tenant_id = current tenant.
     // 3) Else, if the caller is SALES, default to their own user.id.
+    //    Step 39O: (2b) the customer's account rep comes before (3); "No
+    //    commission" from the form leaves it empty (resolveCommission below).
     let salesRepId: number | null = null;
 
     if (
@@ -279,6 +285,15 @@ export async function POST(req: NextRequest) {
       email,
       phone,
     });
+
+    // Step 39O: the commission rule (app/lib/account-rep-core.ts).
+    const resolved = resolveCommission({
+      choice,
+      namedRepId: choice === "named" ? salesRepId : null,
+      accountRepId: choice === "auto" ? await customerAccountRepId(tenantId, customer?.id) : null,
+      creator: user ? { id: Number(user.id), role: String(user.role || "") } : null,
+    });
+    salesRepId = resolved.repId;
 
     // Tenant-scoped upsert: quote_no unique is global today, so we must prevent cross-tenant overwrite.
     // We enforce tenant_id in insert and also in ON CONFLICT by keeping tenant_id unchanged.
@@ -366,6 +381,9 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
+
+    // Step 39O: staff chose the rep on the form: the account rep never overrides it later.
+    if (resolved.setByStaff && (row as { id?: number }).id) await markRepSetByStaff(Number((row as { id: number }).id), tenantId);
 
     return NextResponse.json({ ok: true, quote: row }, { status: 201 });
   } catch (err: any) {

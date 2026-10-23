@@ -45,6 +45,7 @@ import DielineUploadCard, {
   dielinePartsPayload,
   type DielineUpload,
 } from "@/components/start-quote/DielineUploadCard"; // Step 39H
+import { repLabel, type RepOption } from "@/app/lib/account-rep-core"; // Step 39O
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
 // Step 27: BoxStyle comes from lib/box-styles (boxes only: every style).
@@ -252,9 +253,53 @@ export default function RepStartQuoteModal({
   const [customerName, setCustomerName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
+  // Step 39O: "Commission to": "" = automatic (the customer's account rep), "none", or a rep's slug.
   const [salesRepSlug, setSalesRepSlug] = React.useState("");
+  const [reps, setReps] = React.useState<RepOption[]>([]);
+  const [accountRepId, setAccountRepId] = React.useState<number | null>(null);
 
   const [customerOptions, setCustomerOptions] = React.useState<CustomerOption[]>([]);
+
+  // Step 39O: the team members who can get commission, and this customer's account rep (by email)
+  React.useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch("/api/admin/reps", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => alive && setReps(Array.isArray(j?.reps) ? j.reps : []))
+      .catch(() => null);
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+  React.useEffect(() => {
+    const e = email.trim();
+    if (!open || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      setAccountRepId(null);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(`/api/admin/reps?email=${encodeURIComponent(e)}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j) => alive && setAccountRepId(j?.account?.account_rep_id ? Number(j.account.account_rep_id) : null))
+        .catch(() => null);
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [open, email]);
+  const accountRep = reps.find((r) => r.id === accountRepId) ?? null;
+  const automaticLabel = accountRep ? `Account rep: ${repLabel(accountRep)}` : "Automatic (the customer's account rep, if any)";
+  const commissionShown =
+    salesRepSlug === "none"
+      ? "No commission"
+      : salesRepSlug
+        ? repLabel(reps.find((r) => r.slug === salesRepSlug) ?? { name: salesRepSlug, role: "" })
+        : accountRep
+          ? `${repLabel(accountRep)} (account rep)`
+          : "Automatic";
 
   React.useEffect(() => {
     if (!open) return;
@@ -717,6 +762,8 @@ export default function RepStartQuoteModal({
     }
 
     setSubmitting(true);
+    // Step 39O: "No commission" sends no slug (commission_to: "none" on the quote row)
+    const repSlugOut = salesRepSlug === "none" ? "" : salesRepSlug.trim();
     try {
       const quote_no = await fetchNewQuoteNo("R");
 
@@ -736,7 +783,8 @@ export default function RepStartQuoteModal({
           email: email.trim() || null,
           phone: phone.trim() || null,
           status: "draft",
-          sales_rep_slug: salesRepSlug.trim() || undefined,
+          sales_rep_slug: repSlugOut || undefined,
+          commission_to: salesRepSlug === "none" ? "none" : undefined,
           po_number: poNumber.trim() || null,
           is_rush: isRush,
           qty: toNumOrNull(qty),
@@ -795,7 +843,7 @@ export default function RepStartQuoteModal({
             "payload",
             JSON.stringify({
               quote_no,
-              sales_rep_slug: salesRepSlug.trim() || null,
+              sales_rep_slug: repSlugOut || null,
               customer: repCustomer,
               qty: toNumOrNull(qty),
               box: { grade_id: /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null },
@@ -817,7 +865,7 @@ export default function RepStartQuoteModal({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   quote_no,
-                  sales_rep_slug: salesRepSlug.trim() || null,
+                  sales_rep_slug: repSlugOut || null,
                   customer: repCustomer,
                   notes: customerNotes.trim() || null,
                   run_method: runMethod === "auto" ? null : runMethod,
@@ -837,7 +885,7 @@ export default function RepStartQuoteModal({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   quote_no,
-                  sales_rep_slug: salesRepSlug.trim() || null,
+                  sales_rep_slug: repSlugOut || null,
                   customer: repCustomer,
                   qty: toNumOrNull(qty),
                   box: size1Box,
@@ -863,7 +911,7 @@ export default function RepStartQuoteModal({
       // /quote/layout opens pre-filled.
       const p = new URLSearchParams();
       p.set("quote_no", quote_no);
-      if (salesRepSlug.trim()) p.set("sales_rep_slug", salesRepSlug.trim());
+      if (repSlugOut) p.set("sales_rep_slug", repSlugOut);
       if (toNumOrNull(qty)) p.set("qty", String(toNumOrNull(qty)));
       // internalNotes is staff-only (persisted separately via internal_notes
       // above) and must NEVER be threaded into the editor's "notes" param —
@@ -1052,8 +1100,22 @@ export default function RepStartQuoteModal({
                             ))}
                           </datalist>
                         </Field>
-                        <Field label="Sales rep slug">
-                          <Input value={salesRepSlug} onChange={setSalesRepSlug} placeholder="chuck" />
+                        <Field label="Commission to">
+                          <select
+                            aria-label="Commission to"
+                            value={salesRepSlug}
+                            onChange={(e) => setSalesRepSlug(e.target.value)}
+                            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--action-primary)] focus:outline-none"
+                            data-commission-to
+                          >
+                            <option value="">{automaticLabel}</option>
+                            {reps.map((r) => (
+                              <option key={r.id} value={r.slug}>
+                                {repLabel(r)}
+                              </option>
+                            ))}
+                            <option value="none">No commission</option>
+                          </select>
                         </Field>
                         <Field label="Email">
                           <Input value={email} onChange={setEmail} placeholder="buyer@acme.com" />
@@ -1942,7 +2004,7 @@ export default function RepStartQuoteModal({
                     <StepCard title="Review" hint="Confirm before creating the quote">
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <ReviewRow label="Customer" value={customerName || "—"} />
-                        <ReviewRow label="Sales rep" value={salesRepSlug || "—"} />
+                        <ReviewRow label="Commission to" value={commissionShown} />
                         <ReviewRow label="Email" value={email || "—"} />
                         <ReviewRow label="Phone" value={phone || "—"} />
                         <ReviewRow label="PO #" value={poNumber || "—"} />

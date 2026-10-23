@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getCurrentUserFromCookies } from "@/lib/auth";
 import { one, q } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
+import AccountRepCard from "@/components/admin/AccountRepCard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,6 +105,8 @@ export default async function CustomerDetailPage({
           <div className="mt-2 text-xs text-[var(--text-muted)]">
             Customer since {fmtDate(customer!.created_at)}
           </div>
+          {/* Step 39O: who new quotes for this customer are credited to */}
+          <AccountRepCard customerId={customer!.id} />
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">

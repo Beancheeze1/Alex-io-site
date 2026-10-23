@@ -167,6 +167,9 @@ export async function DELETE(req: NextRequest) {
         `UPDATE public.quotes SET sales_rep_id = NULL WHERE sales_rep_id = ANY(ARRAY[${idList}]::int[])`
       );
 
+      // Step 39O: they're no longer anyone's account rep (column from migration 051)
+      await safeDelete(`UPDATE public.customers SET account_rep_id = NULL WHERE account_rep_id = ANY(ARRAY[${idList}]::int[])`);
+
       // Delete commission payouts (optional table)
       await safeDelete(`DELETE FROM public.commission_payouts WHERE user_id = ANY(ARRAY[${idList}]::int[])`);
 
