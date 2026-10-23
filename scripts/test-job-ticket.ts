@@ -70,6 +70,8 @@ const gb = foamBuildForTicket({ geom: glued, labels: [null, null], quoteNo: "Q-A
 check("glued: glue step between layers", gb?.steps.includes("Glue layer 1 to layer 2 (1 glue line)."), true);
 check("glued: 1.5\" layer skived from 2\" stock", gb?.sheets[0].skived === true && gb?.sheets[0].stock_in === 2, true);
 check("glued: one solid file for both layers", gb?.files.length, 1);
+const plainNames = foamBuildForTicket({ geom, labels: ["Layer 1", "Layer 2"], quoteNo: "Q-A-3", revision: null });
+check("steps: default layer names aren't repeated", plainNames?.steps[0], "Layer 1: laminate sheets 1-4 (3 glue lines), sheet 1 on the cavity face.");
 check("no sheets: no build", foamBuildForTicket({ geom: foamGeometry(layout, { L: 10, W: 10, H: 8 }), labels: [], quoteNo: "x", revision: null }), null);
 
 // Sheet DXFs: outline + only the cavities cut through that sheet

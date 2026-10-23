@@ -109,8 +109,9 @@ export function foamBuildForTicket(args: {
     });
   }
   const layerName = (n: number) => {
-    const label = args.labels[n - 1];
-    return `Layer ${n}${label ? ` ${label}` : ""}`;
+    const label = String(args.labels[n - 1] ?? "").trim();
+    // Step 39M2: the editor's default name ("Layer 1") isn't repeated
+    return `Layer ${n}${label && label.toLowerCase() !== `layer ${n}` ? ` ${label}` : ""}`;
   };
   for (const f of files) {
     const mine = sheets.filter((s) => fileOf.get(s.pattern) === f.file);
