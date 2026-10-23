@@ -1,7 +1,8 @@
 // lib/pdf/job-ticket.ts
 //
 // Step 33: the job ticket as a Letter PDF (pdf-lib, standard fonts). Page 1:
-// header, customer / ship-to, foam build, box build, proof, notes, sign-off.
+// header, customer / ship-to, foam build (Step 39M: with the sheet build),
+// box build, proof, notes, sign-off.
 // Then one page per custom RSC / HSC / FOL box line with its flat blank
 // drawn to fit (cut = solid, crease = dashed). No prices.
 
@@ -212,6 +213,49 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
       ]),
     );
     text(c, `Full package: ${f.package_file} (.dxf / .step / .svg) - download from the admin quote page.`, { size: 8.5, color: MUTED });
+
+    // Step 39M: how each piece is laminated from stock sheets, and a cut file per different sheet
+    const b = f.build;
+    if (b) {
+      c.y -= 4;
+      text(
+        c,
+        `Sheet build: ${b.sheets_per_part} sheet${b.sheets_per_part === 1 ? "" : "s"} per set, ${b.glue_lines} glue line${b.glue_lines === 1 ? "" : "s"} per set${
+          b.stock_in.length ? `; stock ${b.stock_in.map(inch).join(", ")}` : "; no stock sizes set"
+        }.`,
+        { size: 10, bold: true },
+      );
+      if (b.note) text(c, b.note, { size: 8.5, color: RED });
+      table(
+        c,
+        ["Layer / sheet", "From cavity face", "Thick", "Stock", "Cavities through", "File"],
+        [90, 110, 50, 115, 90, 77],
+        b.sheets.map((s) => [
+          `Layer ${s.layer}, sheet ${s.n}`,
+          `${inch(s.from_in)} to ${inch(s.from_in + s.thickness_in)}`,
+          inch(s.thickness_in),
+          `${s.stock_in ? inch(s.stock_in) : "-"}${s.skived ? ` (skive to ${inch(s.thickness_in)})` : ""}`,
+          s.cavities ? String(s.cavities) : "solid",
+          `Sheet ${s.file}`,
+        ]),
+      );
+      table(
+        c,
+        ["Sheet file (.dxf)", "Per set", "Total", "Used in"],
+        [230, 50, 60, 192],
+        b.files.map((x) => [
+          `Sheet ${x.file}: ${x.cavities ? `${x.cavities} cavit${x.cavities === 1 ? "y" : "ies"}` : "solid"}\n${x.name}`,
+          String(x.per_part),
+          (x.per_part * f.sets).toLocaleString("en-US"),
+          x.used_in,
+        ]),
+      );
+      for (const s of b.steps) text(c, `- ${s}`, { size: 9.5 });
+      text(c, "Cut from these sheet files (download them from the job ticket page); the layer files above show every cavity in the layer.", {
+        size: 8.5,
+        color: MUTED,
+      });
+    }
   }
 
   if (t.boxes.length) {

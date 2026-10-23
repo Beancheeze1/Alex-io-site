@@ -5,11 +5,17 @@
 // foam lines, box lines, approval, ship-to, kept freight and proofs. No prices.
 // Also: the flat blank die line for a custom RSC / HSC / FOL box line
 // (lib/box-dieline.ts) with the shop's current corrugated settings.
+// Step 39M: the foam's sheet build (how each piece is laminated from the
+// shop's stock sheets, withSheets) and one DXF per different sheet
+// (foamSheetDxf), using the stock sizes the quote was priced with.
 
 import { one, q } from "@/lib/db";
 import { loadFacts } from "@/app/lib/memory";
 import { getPricingSettings } from "@/app/lib/pricing/settings";
-import { foamGeometry } from "@/app/lib/pricing/foam-geometry";
+import { foamGeometry, withSheets } from "@/app/lib/pricing/foam-geometry";
+import { foamStockList, LAM_RULE_SHEETS, pickFoamProcess } from "@/app/lib/pricing/foam-process";
+import { lockedChargeSettings } from "@/app/lib/pricing/foam-lock";
+import { buildDxfForLayer } from "@/app/lib/layout/layer-dxf";
 import { loadApprovalRow, quoteTerms } from "@/app/lib/quote-approval";
 import { computeApproval } from "@/app/lib/quote-approval-core";
 import { effectiveTerms, loadShipTo, shopFreightSettings } from "@/app/lib/freight";
@@ -20,7 +26,16 @@ import { boxStyleLabel, parseBoxStyle } from "@/lib/box-styles";
 import { describePrintSpec, parsePrintSpec } from "@/lib/corrugated-price";
 import { loadCorrugated } from "@/lib/corrugated";
 import { isSlottedStyle, slottedDieline, type Dieline } from "@/lib/box-dieline";
-import { TERMS_SHORT, addressLines, runText, type JobTicket, type TicketBox, type TicketFoam } from "@/app/lib/job-ticket-core";
+import {
+  TERMS_SHORT,
+  addressLines,
+  foamBuildForTicket,
+  runText,
+  sheetLayout,
+  type JobTicket,
+  type TicketBox,
+  type TicketFoam,
+} from "@/app/lib/job-ticket-core";
 
 type QuoteRow = {
   id: number;
@@ -171,7 +186,23 @@ function boxFromRow(r: BoxRow, line: number): TicketBox {
   };
 }
 
-async function foamSection(quoteId: number, quoteNo: string, revision: string | null): Promise<TicketFoam | null> {
+/**
+ * Step 39M: the stock sheet sizes for the build: the ones the quote was priced
+ * with (its charge lock), else (a quote priced before Step 39L) today's.
+ */
+async function buildStock(quoteNo: string, tenantId: number): Promise<{ stock: number[]; note: string | null }> {
+  const live = await getPricingSettings(tenantId).catch(() => null);
+  const today = pickFoamProcess(live);
+  const charges = await lockedChargeSettings(quoteNo, live, false).catch(() => null);
+  const fp = charges?.foam_process ?? null;
+  if (fp && fp.lam_rule >= LAM_RULE_SHEETS) return { stock: foamStockList(fp), note: null };
+  return {
+    stock: foamStockList(today),
+    note: "This quote was priced before sheet-by-sheet lamination; the build below uses today's stock sheet sizes.",
+  };
+}
+
+async function foamSection(quoteId: number, quoteNo: string, revision: string | null, tenantId: number): Promise<TicketFoam | null> {
   const items = await q<ItemRow>(
     `SELECT qi.id, qi.length_in, qi.width_in, qi.height_in, qi.qty, m.name AS material_name, qi.notes
        FROM public.quote_items qi
@@ -220,6 +251,16 @@ async function foamSection(quoteId: number, quoteNo: string, revision: string | 
     layers,
     package_file: buildFullPackageFilename({ quoteNo, ext: "dxf", revision }).replace(/\.dxf$/, ""),
     release_pkg_id: pkg ? Number(pkg.id) : null,
+    build: await (async () => {
+      const { stock, note } = await buildStock(quoteNo, tenantId);
+      return foamBuildForTicket({
+        geom: withSheets(geom, stock),
+        labels: layers.map((l) => l.label),
+        quoteNo,
+        revision,
+        note,
+      });
+    })().catch(() => null),
   };
 }
 
@@ -243,7 +284,7 @@ export async function buildJobTicket(quoteNo: string, tenantId: number): Promise
     shopFreightSettings(tenantId),
     proofSummary({ id: quote.id, quote_no: quote.quote_no }).catch(() => null),
     loadBoxRows(quote.id),
-    foamSection(quote.id, quote.quote_no, revision),
+    foamSection(quote.id, quote.quote_no, revision, tenantId),
     one<{ l: Record<string, unknown> | null }>(`SELECT to_jsonb(q) -> 'freight_lock' AS l FROM public.quotes q WHERE q.id = $1`, [quote.id]).catch(
       () => null,
     ),
@@ -346,4 +387,37 @@ export async function boxDieline(quoteNo: string, tenantId: number, selectionId:
   const differs =
     !!box.blank && (Math.abs(box.blank.length_in - dl.blank.length_in) > 0.001 || Math.abs(box.blank.width_in - dl.blank.width_in) > 0.001);
   return { ok: true, dieline: dl, line: idx + 1, box, priced_blank_differs: differs };
+}
+
+export type SheetDxfResult = { ok: true; dxf: string; filename: string } | { ok: false; status: number; error: string; message: string };
+
+/**
+ * Step 39M: the DXF for one sheet cut file of the quote's foam (the outline
+ * plus only the cavities cut through that sheet), sized like the layer DXFs.
+ */
+export async function foamSheetDxf(quoteNo: string, tenantId: number, file: number): Promise<SheetDxfResult> {
+  const quote = await loadQuote(quoteNo, tenantId);
+  if (!quote) return { ok: false, status: 404, error: "not_found", message: "Quote not found." };
+  const facts = ((await loadFacts(quote.quote_no).catch(() => null)) || {}) as Record<string, unknown>;
+  const revision = String(facts.released_rev || facts.revision || "").replace(/^rev\s*/i, "").trim() || null;
+  const foam = await foamSection(quote.id, quote.quote_no, revision, tenantId);
+  const f = foam?.build?.files.find((x) => x.file === file);
+  if (!foam || !f) return { ok: false, status: 404, error: "no_sheet", message: "That sheet file isn't on this quote." };
+  const pkg = await one<{ layout_json: unknown }>(
+    `SELECT layout_json FROM public.quote_layout_packages
+      WHERE quote_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [quote.id],
+  );
+  const layout = typeof pkg?.layout_json === "string" ? (JSON.parse(pkg.layout_json) as unknown) : pkg?.layout_json;
+  // Sized like the per-layer DXFs (/api/quote/layout/dxf-layer): the first foam line's L x W.
+  const primary = await one<{ length_in: string; width_in: string }>(
+    `SELECT length_in, width_in FROM public.quote_items WHERE quote_id = $1 ORDER BY id ASC LIMIT 1`,
+    [quote.id],
+  );
+  const L = Number(primary?.length_in);
+  const W = Number(primary?.width_in);
+  const lay = sheetLayout(layout, f);
+  const dxf = lay ? buildDxfForLayer(lay, f.layer_index, L > 0 && W > 0 ? { L, W } : undefined) : null;
+  if (!dxf) return { ok: false, status: 422, error: "no_layout", message: "This quote has no foam layout to draw." };
+  return { ok: true, dxf, filename: `${f.name}.dxf` };
 }

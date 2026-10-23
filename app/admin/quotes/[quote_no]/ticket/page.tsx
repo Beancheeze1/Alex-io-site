@@ -3,6 +3,8 @@
 // Step 33: the printable job ticket for a released quote
 // (GET /api/admin/quotes/ticket). Print, PDF download, and a flat blank DXF
 // per custom RSC / HSC / FOL box line (GET /api/admin/quotes/box-dxf).
+// Step 39M: the foam sheet build (sheets, stock, skiving, glue steps) and a
+// DXF per sheet cut file (GET /api/admin/quotes/foam-sheet-dxf).
 // No prices: this is the floor copy.
 
 "use client";
@@ -160,6 +162,96 @@ export default function JobTicketPage() {
               <div className="mt-1 text-[11px] text-[var(--text-muted)]">
                 Full package: <span className="font-mono">{ticket.foam.package_file}</span> (.dxf / .step / .svg). Download the files from the quote page.
               </div>
+
+              {ticket.foam.build ? (
+                <div data-ticket-build>
+                  <div className="mt-4 mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Sheet build</div>
+                  <div className="mb-2 text-[13px]">
+                    {ticket.foam.build.sheets_per_part} sheet{ticket.foam.build.sheets_per_part === 1 ? "" : "s"} per set,{" "}
+                    {ticket.foam.build.glue_lines} glue line{ticket.foam.build.glue_lines === 1 ? "" : "s"} per set
+                    {ticket.foam.build.stock_in.length ? ` · stock ${ticket.foam.build.stock_in.map(inch).join(", ")}` : " · no stock sizes set"}
+                    {ticket.foam.build.note ? <div className="text-[11px] text-[var(--attention)]">{ticket.foam.build.note}</div> : null}
+                  </div>
+                  <table className="w-full text-[13px]">
+                    <thead>
+                      <tr>
+                        <th className={head}>Layer / sheet</th>
+                        <th className={head}>From cavity face</th>
+                        <th className={head}>Thick</th>
+                        <th className={head}>Stock</th>
+                        <th className={head}>Cavities cut through</th>
+                        <th className={head}>File</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ticket.foam.build.sheets.map((s) => (
+                        <tr key={`${s.layer}-${s.n}`} data-ticket-sheet={`${s.layer}-${s.n}`}>
+                          <td className={cell}>
+                            Layer {s.layer}, sheet {s.n}
+                          </td>
+                          <td className={cell}>
+                            {inch(s.from_in)} to {inch(s.from_in + s.thickness_in)}
+                          </td>
+                          <td className={cell}>{inch(s.thickness_in)}</td>
+                          <td className={cell}>
+                            {s.stock_in ? inch(s.stock_in) : "—"}
+                            {s.skived ? <span className="text-[var(--attention)]">{` skive to ${inch(s.thickness_in)}`}</span> : null}
+                          </td>
+                          <td className={cell}>{s.cavities ? s.cavities : "solid"}</td>
+                          <td className={cell}>Sheet {s.file}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <table className="mt-3 w-full text-[13px]">
+                    <thead>
+                      <tr>
+                        <th className={head}>Sheet file (.dxf)</th>
+                        <th className={head}>Per set</th>
+                        <th className={head}>Total</th>
+                        <th className={head}>Used in</th>
+                        <th className={head} data-no-print>
+                          DXF
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ticket.foam.build.files.map((f) => (
+                        <tr key={f.file} data-ticket-sheet-file={f.file}>
+                          <td className={cell}>
+                            Sheet {f.file}: {f.cavities ? `${f.cavities} cavit${f.cavities === 1 ? "y" : "ies"}` : "solid"}
+                            <div className="font-mono text-[11px] text-[var(--text-muted)]">{f.name}</div>
+                          </td>
+                          <td className={cell}>{f.per_part}</td>
+                          <td className={cell}>{(f.per_part * ticket.foam!.sets).toLocaleString("en-US")}</td>
+                          <td className={cell}>{f.used_in}</td>
+                          <td className={cell} data-no-print>
+                            <a
+                              className="text-[var(--action-primary)] underline"
+                              href={`/api/admin/quotes/foam-sheet-dxf?quote_no=${enc}&file=${f.file}`}
+                              data-sheet-dxf={f.file}
+                            >
+                              Sheet DXF
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                    Cut from these sheet files; the layer files above show every cavity in the layer.
+                  </div>
+                  {ticket.foam.build.steps.length ? (
+                    <ul className="mt-2 list-disc pl-5 text-[13px]" data-ticket-steps>
+                      {ticket.foam.build.steps.map((s) => (
+                        <li key={s}>{s}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           ) : null}
 

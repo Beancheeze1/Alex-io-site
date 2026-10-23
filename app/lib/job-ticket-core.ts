@@ -6,6 +6,8 @@
 // No prices: the ticket is the floor copy.
 
 import type { FreightTerms } from "@/app/lib/freight-core";
+import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
+import { sanitizeFilenamePart } from "@/app/lib/cad-download";
 
 export type TicketFoamLayer = {
   n: number; // 1-based, bottom of the stack first (as the editor lists them)
@@ -24,7 +26,156 @@ export type TicketFoam = {
   layers: TicketFoamLayer[];
   package_file: string; // full-package DXF / STEP base name (no extension)
   release_pkg_id: number | null;
+  build?: TicketFoamBuild | null; // Step 39M: how each piece is laminated from stock sheets
 };
+
+/** Step 39M: one sheet of a finished part, as the floor cuts and glues it. */
+export type TicketFoamSheet = {
+  layer: number; // 1-based layer (bottom of the stack first)
+  n: number; // 1-based sheet in its layer, from the cavity face
+  from_in: number; // where it sits, measured from the cavity face
+  thickness_in: number; // finished (after skiving)
+  stock_in: number | null; // stock sheet it's cut from (null = no stock sizes set)
+  skived: boolean;
+  cavities: number; // cavities cut through it
+  file: number; // sheet cut file (TicketSheetFile.file)
+};
+
+/** Step 39M: one sheet cut file = one steel-rule die / CNC program. */
+export type TicketSheetFile = {
+  file: number; // 1-based
+  name: string; // DXF base name (no extension)
+  per_part: number; // sheets cut with it per finished part
+  cavities: number; // cavities cut through
+  used_in: string; // "Layer 1 sheets 3-4, Layer 2 sheet 1"
+  layer_index: number; // 0-based layer the DXF is drawn from
+  cavity_index: number[]; // that layer's cavities drawn in it
+};
+
+export type TicketFoamBuild = {
+  stock_in: number[]; // stock sheet thicknesses used (empty = none set)
+  sheets_per_part: number;
+  glue_lines: number; // per finished part
+  sheets: TicketFoamSheet[];
+  files: TicketSheetFile[];
+  steps: string[]; // laminate / glue / pack loose, layer by layer
+  note: string | null;
+};
+
+/** "3-4" or "3" (sheet numbers in one layer). */
+function runList(ns: number[]): string {
+  const s = [...ns].sort((a, b) => a - b);
+  const out: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    let j = i;
+    while (j + 1 < s.length && s[j + 1] === s[j] + 1) j++;
+    out.push(i === j ? String(s[i]) : `${s[i]}-${s[j]}`);
+    i = j;
+  }
+  return out.join(", ");
+}
+
+/**
+ * Step 39M: the ticket's sheet build from a geometry that has its sheets
+ * (withSheets in app/lib/pricing/foam-geometry.ts). Sheets that are cut the
+ * same (same outline, same cavities through) share one cut file.
+ */
+export function foamBuildForTicket(args: {
+  geom: FoamGeometry;
+  labels: (string | null)[]; // layer names, same order as geom.layers
+  quoteNo: string;
+  revision: string | null;
+  note?: string | null;
+}): TicketFoamBuild | null {
+  const sheets = args.geom.sheets;
+  if (!sheets || sheets.length === 0) return null;
+  const fileOf = new Map<string, number>();
+  const files: TicketSheetFile[] = [];
+  const q = sanitizeFilenamePart(args.quoteNo || "quote");
+  const rev = sanitizeFilenamePart(args.revision || "");
+  for (const s of sheets) {
+    if (fileOf.has(s.pattern)) continue;
+    const file = files.length + 1;
+    fileOf.set(s.pattern, file);
+    const cav = s.cavity_index.length;
+    files.push({
+      file,
+      name: [q, rev, `Sheet-${file}`, cav ? `${cav}-cavit${cav === 1 ? "y" : "ies"}` : "solid"].filter(Boolean).join("__"),
+      per_part: 0,
+      cavities: cav,
+      used_in: "",
+      layer_index: s.layer - 1,
+      cavity_index: [...s.cavity_index],
+    });
+  }
+  const layerName = (n: number) => {
+    const label = args.labels[n - 1];
+    return `Layer ${n}${label ? ` ${label}` : ""}`;
+  };
+  for (const f of files) {
+    const mine = sheets.filter((s) => fileOf.get(s.pattern) === f.file);
+    f.per_part = mine.length;
+    const layers = Array.from(new Set(mine.map((s) => s.layer))).sort((a, b) => a - b);
+    f.used_in = layers
+      .map((ly) => {
+        const ns = mine.filter((s) => s.layer === ly).map((s) => s.n);
+        return `Layer ${ly} sheet${ns.length > 1 ? "s" : ""} ${runList(ns)}`;
+      })
+      .join(", ");
+  }
+
+  const steps: string[] = [];
+  args.geom.layers.forEach((ly, i) => {
+    const n = i + 1;
+    const k = sheets.filter((s) => s.layer === n).length;
+    if (k > 1) steps.push(`${layerName(n)}: laminate sheets 1-${k} (${k - 1} glue line${k - 1 === 1 ? "" : "s"}), sheet 1 on the cavity face.`);
+    else if (k === 1) steps.push(`${layerName(n)}: one sheet, no lamination.`);
+    const next = args.geom.layers[i + 1];
+    if (next) {
+      if (!ly.loose && !next.loose) steps.push(`Glue layer ${n} to layer ${n + 1} (1 glue line).`);
+    }
+    if (ly.loose && args.geom.layers.length > 1) steps.push(`${layerName(n)}: separate piece, pack loose (not glued).`);
+  });
+
+  return {
+    stock_in: args.geom.stock_in ?? [],
+    sheets_per_part: sheets.length,
+    glue_lines: args.geom.glue_lines,
+    sheets: sheets.map((s) => ({
+      layer: s.layer,
+      n: s.n,
+      from_in: s.from_in,
+      thickness_in: s.thickness_in,
+      stock_in: s.stock_in,
+      skived: s.skived,
+      cavities: s.cavity_index.length,
+      file: fileOf.get(s.pattern) ?? 0,
+    })),
+    files,
+    steps,
+    note: args.note ?? null,
+  };
+}
+
+/** Step 39M: the layout with one layer cut down to the cavities a sheet file has (its DXF). */
+export function sheetLayout(layout: unknown, file: Pick<TicketSheetFile, "layer_index" | "cavity_index">): Record<string, unknown> | null {
+  if (!layout || typeof layout !== "object") return null;
+  const lay = layout as Record<string, unknown>;
+  const block = (lay.block && typeof lay.block === "object" ? lay.block : {}) as Record<string, unknown>;
+  const stack: Record<string, unknown>[] =
+    Array.isArray(lay.stack) && lay.stack.length > 0
+      ? (lay.stack as Record<string, unknown>[])
+      : [{ thicknessIn: block.thicknessIn, cavities: Array.isArray(lay.cavities) ? lay.cavities : [] }];
+  const keep = new Set(file.cavity_index);
+  return {
+    ...lay,
+    stack: stack.map((ly, i) =>
+      i === file.layer_index
+        ? { ...ly, cavities: (Array.isArray(ly.cavities) ? (ly.cavities as unknown[]) : []).filter((_, k) => keep.has(k)) }
+        : ly,
+    ),
+  };
+}
 
 export type TicketBox = {
   line: number; // 1-based, in the order the quote lists them

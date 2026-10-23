@@ -49,19 +49,21 @@ export type FoamLayerGeom = {
   /** Marked loose: true on the layout (the rule for quotes priced before Step 39L). */
   loose_marked: boolean;
   signature: string;
-  /** Step 39L: each cavity's depth (capped at the layer), outline and pattern key. */
-  cavities: { depth_in: number; perimeter_in: number; key: string }[];
+  /** Step 39L: each cavity's depth (capped at the layer), outline and pattern key; index = its place in the layer's cavities (Step 39M). */
+  cavities: { index: number; depth_in: number; perimeter_in: number; key: string }[];
 };
 
 /** Step 39L: one sheet of foam in a finished part (withSheets). */
 export type FoamSheet = {
   layer: number; // 1-based layer
+  n: number; // Step 39M: 1-based sheet in its layer, from the cavity face
   from_in: number; // depth of its top face in the layer
   thickness_in: number; // after skiving
   stock_in: number | null; // the stock sheet it's cut from (null = no stock sizes set)
   skived: boolean;
   pattern: string;
   cut_in: number; // outline + cavities cut through it
+  cavity_index: number[]; // Step 39M: the layer's cavities cut through it (their index in the layer)
 };
 
 export type FoamGeometry = {
@@ -267,19 +269,22 @@ export function foamGeometry(layout: unknown, fallback: { L: number; W: number; 
 
   const layers: FoamLayerGeom[] = rawLayers.map((ly, li) => {
     const t = pos(ly.thicknessIn ?? ly.thickness_in) ?? 0;
-    const cavs = (Array.isArray(ly.cavities) ? ly.cavities : []).filter((c) => c && typeof c === "object") as AnyObj[];
+    // Step 39M: keep each cavity's place in the layer (the job ticket's sheet DXFs pick cavities by it)
+    const cavs = (Array.isArray(ly.cavities) ? ly.cavities : [])
+      .map((c, index) => ({ c, index }))
+      .filter((x) => x.c && typeof x.c === "object") as { c: AnyObj; index: number }[];
     let cavity_ci = 0;
     let cavity_perimeter_in = 0;
     const sig: string[] = [];
     const cavities: FoamLayerGeom["cavities"] = [];
-    for (const c of cavs) {
+    for (const { c, index } of cavs) {
       const o = cavityOutline(c, L, W);
       const depth = Math.min(pos(c.depthIn ?? c.depth_in) ?? t, t);
       cavity_ci += o.area * depth;
       cavity_perimeter_in += o.perimeter;
       const key = `${r3(o.area)}:${r3(o.perimeter)}:${r3(n(c.x))}:${r3(n(c.y))}`;
       sig.push(key);
-      cavities.push({ depth_in: r3(depth), perimeter_in: o.perimeter, key });
+      cavities.push({ index, depth_in: r3(depth), perimeter_in: o.perimeter, key });
     }
     const outline_in = outlinePerimeter(L, W, block, ly);
     sig.sort();
@@ -349,7 +354,17 @@ export function withSheets(geom: FoamGeometry, stock: number[]): FoamGeometry {
       build.forEach((sheet, i) => {
         const skived = extra > 0.001 && i === build.length - 1;
         const thick = r3(skived ? sheet - extra : sheet);
-        sheets.push({ layer: li + 1, from_in: r3(at), thickness_in: thick, stock_in: st.length ? sheet : null, skived, pattern, cut_in: r3(bandCut) });
+        sheets.push({
+          layer: li + 1,
+          n: inLayer + i + 1,
+          from_in: r3(at),
+          thickness_in: thick,
+          stock_in: st.length ? sheet : null,
+          skived,
+          pattern,
+          cut_in: r3(bandCut),
+          cavity_index: through.map((c) => c.index),
+        });
         at += thick;
       });
       inLayer += build.length;
