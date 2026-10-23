@@ -58,7 +58,7 @@ export type TemplatePricing = {
 
 export type TemplateLineItem = {
   id: number;
-  label: string;           // e.g. "Foam set — layered construction" or material name
+  label: string;           // e.g. "Foam set" or material name
   sublabel?: string | null; // e.g. material/family line
   dims: string;            // "L × W × H in"
   qty: number;

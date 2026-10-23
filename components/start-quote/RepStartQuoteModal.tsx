@@ -519,7 +519,7 @@ export default function RepStartQuoteModal({
         { index: 2, label: "Top Pad" },
       ];
     }
-    return [{ index: 1, label: "Layer 1" }];
+    return [{ index: 1, label: "Part 1" }]; // Step 39N: shown only (the layer_label sent stays "Layer 1")
   }, [quoteType, foamConfig]);
 
   // Sensible default depth for cavities on a given layer, sourced from the
@@ -1238,7 +1238,7 @@ export default function RepStartQuoteModal({
                             <Field label="Width (in)">
                               <Input value={insertW} onChange={setInsertW} placeholder="10" />
                             </Field>
-                            <Field label={extraInsertLayers.length > 0 ? "Layer 1 thickness (in)" : "Depth (in)"}>
+                            <Field label={extraInsertLayers.length > 0 ? "Part 1 thickness (in)" : "Depth (in)"}>
                               <Input value={insertD} onChange={setInsertD} placeholder="2" />
                             </Field>
                           </div>
@@ -1246,12 +1246,12 @@ export default function RepStartQuoteModal({
                           {extraInsertLayers.length > 0 ? (
                             <div className="mt-4 space-y-3">
                               <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
-                                ADDITIONAL LAYERS (bonded on top of Layer 1)
+                                MORE PARTS (on top of part 1)
                               </div>
                               {extraInsertLayers.map((layer, i) => (
                                 <div key={layer.id} className="flex items-end gap-3">
                                   <div className="flex-1">
-                                    <Field label={`Layer ${i + 2} thickness (in)`}>
+                                    <Field label={`Part ${i + 2} thickness (in)`}>
                                       <Input
                                         value={layer.thicknessIn}
                                         onChange={(v) => updateExtraInsertLayerThickness(layer.id, v)}
@@ -1277,10 +1277,10 @@ export default function RepStartQuoteModal({
                               onClick={addExtraInsertLayer}
                               className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
                             >
-                              + Add layer
+                              + Add part
                             </button>
                             <div className="mt-2 text-xs text-[var(--text-muted)]">
-                              Add a bonded foam layer (e.g. a top pad) on top of the block above. Layers share the same length/width and can be fine-tuned further in the layout editor.
+                              Add another foam part on top of the one above (e.g. a top pad). Parts share the same length/width; the top part is packed loose and the others are glued, which you can change in the layout editor.
                             </div>
                           </div>
 
@@ -1291,7 +1291,7 @@ export default function RepStartQuoteModal({
                               onChange={(e) => setInsertCropCorners(e.target.checked)}
                               className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--surface-card)]"
                             />
-                            Cropped corners? (applies to every layer above, no price change)
+                            Cropped corners? (applies to every part above, no price change)
                           </label>
                         </>
                       ) : (
@@ -1702,7 +1702,7 @@ export default function RepStartQuoteModal({
 
                               {layerOptions.length > 1 ? (
                                 <div className="w-36">
-                                  <Field label="Layer">
+                                  <Field label="Part">
                                     <select
                                       value={String(layerIndex)}
                                       onChange={(e) =>

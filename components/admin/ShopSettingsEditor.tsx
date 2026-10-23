@@ -27,10 +27,10 @@ const FOAM_FIELDS = [
   { key: "press_setup_usd", label: "Press setup ($ per order)", step: "0.01" },
   { key: "press_rate_per_hr", label: "Press rate ($ / hour)", step: "0.01" },
   { key: "press_hits_per_hr", label: "Press hits per hour", step: "1" },
-  { key: "press_parts_per_hit", label: "Parts per hit", step: "1" },
+  { key: "press_parts_per_hit", label: "Layers cut per hit (multi-up die)", step: "1" },
   { key: "lam_setup_usd", label: "Lamination setup ($ per order)", step: "0.01" },
-  { key: "lam_per_glue_line_usd", label: "Lamination ($ per glue line, per part)", step: "0.01" },
-  // Step 39L: the sheets parts are laminated from
+  { key: "lam_per_glue_line_usd", label: "Lamination ($ per glue line, per set)", step: "0.01" },
+  // Step 39L: the stock sheets a part's layers are cut from
   { key: "foam_stock_1_in", label: "Stock sheet thickness 1 (in, 0 = not used)", step: "0.125" },
   { key: "foam_stock_2_in", label: "Stock sheet thickness 2 (in)", step: "0.125" },
   { key: "foam_stock_3_in", label: "Stock sheet thickness 3 (in)", step: "0.125" },
@@ -44,7 +44,7 @@ const REVIEW_FIELDS = [
   { key: "foam_min_feature_in", label: "Narrowest cavity (in)", step: "0.01", dflt: 0.25 },
   { key: "foam_max_block_l_in", label: "Largest block length (in, 0 = don't check)", step: "0.1", dflt: 0 },
   { key: "foam_max_block_w_in", label: "Largest block width (in)", step: "0.1", dflt: 0 },
-  { key: "foam_max_block_t_in", label: "Thickest block / layer (in, 0 = don't check)", step: "0.1", dflt: 0 },
+  { key: "foam_max_block_t_in", label: "Thickest block / part (in, 0 = don't check)", step: "0.1", dflt: 0 },
 ] as const;
 type ReviewKey = (typeof REVIEW_FIELDS)[number]["key"];
 
@@ -622,24 +622,26 @@ export default function ShopSettingsEditor({
                   ))}
                 </div>
                 <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-                  Your costs; your markup is added. CNC short run = setup + (inches
-                  of cut per part ÷ feed rate) × qty × $/minute. Steel-rule die =
-                  base fee + inches of rule × $/inch, once per part (each
-                  different layer gets its own die). Press = setup + hits ÷ hits
-                  per hour × $/hour. Lamination = setup + glue lines × qty ×
-                  $/glue line. Leave CNC and die at 0 to keep the flat
-                  die-cutting charge above.
+                  Your costs; your markup is added. A set is everything for one
+                  unit of the customer&apos;s product; each part of the set is
+                  laminated from layers. CNC short run = setup + (inches of cut
+                  per set ÷ feed rate) × qty × $/minute. Steel-rule die = base
+                  fee + inches of rule × $/inch, once per job (each different
+                  layer gets its own die). Press = setup + hits ÷ hits per hour ×
+                  $/hour. Lamination = setup + glue lines × qty × $/glue line.
+                  Leave CNC and die at 0 to keep the flat die-cutting charge
+                  above.
                 </p>
                 <p className="mt-2 text-[11px] text-[var(--text-faint)]" data-stock-help>
-                  Stock sheets: each foam piece is built from these thicknesses
-                  with the fewest sheets (one is skived when they come out
-                  thicker). There&apos;s a glue line between sheets, at the floor
-                  of every cavity that doesn&apos;t go all the way through, and
-                  between layers that are glued together (the top layer of a set
-                  is packed loose). Each different sheet gets its own die and
-                  each sheet is a press hit. Leave all four at 0 to build each
-                  piece from one sheet per cavity depth. Applies to quotes
-                  priced from now on; reprice an older quote to use it.
+                  Stock sheets: each part is laminated from layers cut from these
+                  thicknesses, with the fewest layers (one is skived when they
+                  come out thicker). There&apos;s a glue line between layers, at
+                  the floor of every cavity that doesn&apos;t go all the way
+                  through, and between parts that are glued together (the top
+                  part of a set is packed loose). Each different layer gets its
+                  own die and each layer is a press hit. Leave all four at 0 to
+                  build each part from one layer per cavity depth. Applies to
+                  quotes priced from now on; reprice an older quote to use it.
                 </p>
               </div>
 

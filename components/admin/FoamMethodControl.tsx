@@ -98,10 +98,10 @@ export default function FoamMethodControl({ quoteNo }: { quoteNo: string }) {
 
   const d = info.detail || {};
   const facts = [
-    d.cut_in_per_piece != null ? `${Number(d.cut_in_per_piece).toFixed(1)}" of cut per part` : null,
+    d.cut_in_per_piece != null ? `${Number(d.cut_in_per_piece).toFixed(1)}" of cut per set` : null,
     d.rule_in_total != null ? `${Number(d.rule_in_total).toFixed(1)}" of rule` : null,
     d.dies ? `${d.dies} die${d.dies > 1 ? "s" : ""}` : null,
-    d.layers ? `${d.layers} layer${d.layers > 1 ? "s" : ""}` : null,
+    d.layers ? `${d.layers} layer${d.layers > 1 ? "s" : ""} cut per set` : null,
     d.glue_lines ? `${d.glue_lines} glue line${d.glue_lines > 1 ? "s" : ""}` : null,
     d.cavity_ci ? `${Number(d.cavity_ci).toFixed(1)} cu in of cavities removed` : null,
   ].filter(Boolean);

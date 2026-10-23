@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
         {
           ok: false,
           error: "NOT_INCLUDED_LAYER",
-          message: "Only included-layer rows can be removed.",
+          message: "Only included-part rows can be removed.",
         },
         { status: 400 },
       );
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
         {
           ok: false,
           error: "not_deletable",
-          message: "Included layer could not be removed.",
+          message: "Included part could not be removed.",
         },
         { status: 400 },
       );
@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: "SERVER_ERROR",
-        message: err?.message || "Unexpected error removing included layer.",
+        message: err?.message || "Unexpected error removing included part.",
       },
       { status: 500 },
     );

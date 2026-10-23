@@ -49,13 +49,13 @@ check(
 );
 check("build: 3 sheet files (= 3 dies)", build.files.length, 3);
 check("build: file per-set counts", build.files.map((f) => f.per_part).join(","), "1,1,3");
-check("build: solid file used by both layers", build.files[2].used_in, "Layer 1 sheets 3-4, Layer 2 sheet 1");
-check("build: file names", build.files.map((f) => f.name).join(" | "), "Q-A-1__A__Sheet-1__2-cavities | Q-A-1__A__Sheet-2__1-cavity | Q-A-1__A__Sheet-3__solid");
+check("build: solid file used by both layers", build.files[2].used_in, "Part 1 layers 3-4, Part 2 layer 1");
+check("build: file names", build.files.map((f) => f.name).join(" | "), "Q-A-1__A__Cut-1__2-cavities | Q-A-1__A__Cut-2__1-cavity | Q-A-1__A__Cut-3__solid");
 check("build: sheet 2 file keeps only the deep cavity", build.files[1].cavity_index.join(","), "0");
 check(
   "build: steps",
   build.steps.join(" / "),
-  "Layer 1 Bottom Insert: laminate sheets 1-4 (3 glue lines), sheet 1 on the cavity face. / Layer 2 Top Pad: one sheet, no lamination. / Layer 2 Top Pad: separate piece, pack loose (not glued).",
+  "Part 1 Bottom Insert: laminate layers 1-4 (3 glue lines), layer 1 on the cavity face. / Part 2 Top Pad: one layer, no lamination. / Part 2 Top Pad: separate part, pack loose (not glued).",
 );
 
 // Glued layers get a glue step; a skived sheet is flagged
@@ -67,11 +67,11 @@ const glued = withSheets(
   [2, 1],
 );
 const gb = foamBuildForTicket({ geom: glued, labels: [null, null], quoteNo: "Q-A-2", revision: null });
-check("glued: glue step between layers", gb?.steps.includes("Glue layer 1 to layer 2 (1 glue line)."), true);
+check("glued: glue step between layers", gb?.steps.includes("Glue part 1 to part 2 (1 glue line)."), true);
 check("glued: 1.5\" layer skived from 2\" stock", gb?.sheets[0].skived === true && gb?.sheets[0].stock_in === 2, true);
 check("glued: one solid file for both layers", gb?.files.length, 1);
 const plainNames = foamBuildForTicket({ geom, labels: ["Layer 1", "Layer 2"], quoteNo: "Q-A-3", revision: null });
-check("steps: default layer names aren't repeated", plainNames?.steps[0], "Layer 1: laminate sheets 1-4 (3 glue lines), sheet 1 on the cavity face.");
+check("steps: default layer names aren't repeated", plainNames?.steps[0], "Part 1: laminate layers 1-4 (3 glue lines), layer 1 on the cavity face.");
 check("no sheets: no build", foamBuildForTicket({ geom: foamGeometry(layout, { L: 10, W: 10, H: 8 }), labels: [], quoteNo: "x", revision: null }), null);
 
 // Sheet DXFs: outline + only the cavities cut through that sheet

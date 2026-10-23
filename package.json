@@ -28,6 +28,7 @@
   "test:dieline-pdf": "npx --yes tsx scripts/test-dieline-pdf.ts",
   "test:revision": "npx --yes tsx scripts/test-revision.ts",
   "test:ticket": "npx --yes tsx scripts/test-job-ticket.ts",
+  "test:terms": "npx --yes tsx scripts/test-foam-terms.ts",
   "test:grade": "npx --yes tsx scripts/test-grade.ts",
   "test:quote-email": "npx --yes tsx scripts/test-quote-email.ts",
   "docker:build": "docker build -t alex-io:latest .",

@@ -12,6 +12,7 @@
 
 import { createHash } from "crypto";
 import { buildOuterOutlinePolyline } from "./outline";
+import { partLabelShown } from "@/app/lib/foam-terms";
 
 export type LayoutExportBundle = {
   svg: string;
@@ -681,8 +682,8 @@ function buildSvgStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const title =
       (typeof layer.label === "string" && layer.label.trim().length > 0
-        ? layer.label.trim()
-        : `Layer ${i + 1}`) +
+        ? partLabelShown(layer.label)
+        : `Part ${i + 1}`) + // Step 39N
       (layer.thicknessIn != null && Number.isFinite(Number(layer.thicknessIn)) && Number(layer.thicknessIn) > 0
         ? `  (${Number(layer.thicknessIn)} in)`
         : "") +

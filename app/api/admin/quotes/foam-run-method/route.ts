@@ -95,7 +95,8 @@ export async function GET(req: NextRequest) {
       has_foam: true,
       resolved: settings.model === 2 ? resolveFoamMethod(choice, qty, settings.foam_process) : null,
       lines: proc.lines,
-      detail: { ...proc.detail, glue_lines: geom.glue_lines, layers: geom.layers_cut, cavity_ci: geom.cavity_ci },
+      // Step 39N: glue lines and layers as priced (sheet by sheet on quotes priced from Step 39L on)
+      detail: { ...proc.detail, glue_lines: proc.detail.glue_lines, layers: proc.detail.layers_cut, cavity_ci: geom.cavity_ci },
     });
   } catch (e) {
     console.error("[admin/quotes/foam-run-method] GET failed:", e);

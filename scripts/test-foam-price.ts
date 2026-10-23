@@ -289,8 +289,8 @@ check("no rates, under the old trigger: nothing", noRatesLow.lines.length, 0);
 const proc39 = pickFoamProcess({ ...proc, foam_stock_1_in: 1, foam_stock_2_in: 2, lam_rule: 2 });
 check("settings: lam_rule and stock read", `${proc39.lam_rule}|${proc39.foam_stock_1_in}|${proc39.foam_stock_2_in}`, "2|1|2");
 const die39 = priceFoamProcess({ model: 2, geom: setGeom, qty: 1000, settings: proc39, markup: 1.45, legacy });
-check("lam_rule 2: lamination says 2 glue lines", die39.lines.find((l) => l.key === "lamination")?.label, "Lamination (2 glue lines per part)");
-check("lam_rule 2: lamination note counts sheets", die39.lines.find((l) => l.key === "lamination")?.note, "4 sheets per part");
+check("lam_rule 2: lamination says 2 glue lines", die39.lines.find((l) => l.key === "lamination")?.label, "Lamination (2 glue lines per set)");
+check("lam_rule 2: lamination note counts sheets", die39.lines.find((l) => l.key === "lamination")?.note, "4 layers per set");
 check("lam_rule 2: press hits = qty × sheets", die39.detail.press_hits, 4000);
 check("lam_rule 2: 3 dies", die39.detail.dies, 3);
 //   lamination: 25 + 1000 × 2 × 0.10 = 225 × 1.45 = 326.25

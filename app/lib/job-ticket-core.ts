@@ -4,10 +4,13 @@
 // helpers, safe in the browser). Built by app/lib/job-ticket.ts, shown at
 // /admin/quotes/[quote_no]/ticket and as a PDF (lib/pdf/job-ticket.ts).
 // No prices: the ticket is the floor copy.
+// Step 39N: on the ticket a stack entry is a "part" and each laminated sheet a
+// "layer" (app/lib/foam-terms.ts); the type and field names keep the old words.
 
 import type { FreightTerms } from "@/app/lib/freight-core";
 import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 import { sanitizeFilenamePart } from "@/app/lib/cad-download";
+import { partName } from "@/app/lib/foam-terms";
 
 export type TicketFoamLayer = {
   n: number; // 1-based, bottom of the stack first (as the editor lists them)
@@ -47,7 +50,7 @@ export type TicketSheetFile = {
   name: string; // DXF base name (no extension)
   per_part: number; // sheets cut with it per finished part
   cavities: number; // cavities cut through
-  used_in: string; // "Layer 1 sheets 3-4, Layer 2 sheet 1"
+  used_in: string; // "Part 1 layers 3-4, Part 2 layer 1"
   layer_index: number; // 0-based layer the DXF is drawn from
   cavity_index: number[]; // that layer's cavities drawn in it
 };
@@ -100,7 +103,7 @@ export function foamBuildForTicket(args: {
     const cav = s.cavity_index.length;
     files.push({
       file,
-      name: [q, rev, `Sheet-${file}`, cav ? `${cav}-cavit${cav === 1 ? "y" : "ies"}` : "solid"].filter(Boolean).join("__"),
+      name: [q, rev, `Cut-${file}`, cav ? `${cav}-cavit${cav === 1 ? "y" : "ies"}` : "solid"].filter(Boolean).join("__"),
       per_part: 0,
       cavities: cav,
       used_in: "",
@@ -108,11 +111,8 @@ export function foamBuildForTicket(args: {
       cavity_index: [...s.cavity_index],
     });
   }
-  const layerName = (n: number) => {
-    const label = String(args.labels[n - 1] ?? "").trim();
-    // Step 39M2: the editor's default name ("Layer 1") isn't repeated
-    return `Layer ${n}${label && label.toLowerCase() !== `layer ${n}` ? ` ${label}` : ""}`;
-  };
+  // Step 39M2 / 39N: "Part 2 Top Pad", or "Part 1" when it only has the default name
+  const layerName = (n: number) => partName(args.labels[n - 1], n - 1);
   for (const f of files) {
     const mine = sheets.filter((s) => fileOf.get(s.pattern) === f.file);
     f.per_part = mine.length;
@@ -120,7 +120,7 @@ export function foamBuildForTicket(args: {
     f.used_in = layers
       .map((ly) => {
         const ns = mine.filter((s) => s.layer === ly).map((s) => s.n);
-        return `Layer ${ly} sheet${ns.length > 1 ? "s" : ""} ${runList(ns)}`;
+        return `Part ${ly} layer${ns.length > 1 ? "s" : ""} ${runList(ns)}`;
       })
       .join(", ");
   }
@@ -129,13 +129,13 @@ export function foamBuildForTicket(args: {
   args.geom.layers.forEach((ly, i) => {
     const n = i + 1;
     const k = sheets.filter((s) => s.layer === n).length;
-    if (k > 1) steps.push(`${layerName(n)}: laminate sheets 1-${k} (${k - 1} glue line${k - 1 === 1 ? "" : "s"}), sheet 1 on the cavity face.`);
-    else if (k === 1) steps.push(`${layerName(n)}: one sheet, no lamination.`);
+    if (k > 1) steps.push(`${layerName(n)}: laminate layers 1-${k} (${k - 1} glue line${k - 1 === 1 ? "" : "s"}), layer 1 on the cavity face.`);
+    else if (k === 1) steps.push(`${layerName(n)}: one layer, no lamination.`);
     const next = args.geom.layers[i + 1];
     if (next) {
-      if (!ly.loose && !next.loose) steps.push(`Glue layer ${n} to layer ${n + 1} (1 glue line).`);
+      if (!ly.loose && !next.loose) steps.push(`Glue part ${n} to part ${n + 1} (1 glue line).`);
     }
-    if (ly.loose && args.geom.layers.length > 1) steps.push(`${layerName(n)}: separate piece, pack loose (not glued).`);
+    if (ly.loose && args.geom.layers.length > 1) steps.push(`${layerName(n)}: separate part, pack loose (not glued).`);
   });
 
   return {

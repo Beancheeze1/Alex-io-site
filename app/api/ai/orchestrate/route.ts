@@ -1964,7 +1964,7 @@ if (!facts.dims && Array.isArray(facts.cavityDims) && facts.cavityDims.length) {
           layerExtract.thicknesses[missing0].confidence = 0.4;
           layerExtract.thicknesses[missing0].evidence = [`Inferred from total H=${H} minus known sum=${knownSum}`];
         }
-        layerExtract.warnings.push(`Layer ${missing0 + 1} thickness inferred from overall height`);
+        layerExtract.warnings.push(`Part ${missing0 + 1} thickness inferred from overall height`);
       }
 
       for (let i = 0; i < thicknesses1.length; i++) {
@@ -1975,7 +1975,7 @@ if (!facts.dims && Array.isArray(facts.cavityDims) && facts.cavityDims.length) {
             layerExtract.thicknesses[i].confidence = 0.15;
             layerExtract.thicknesses[i].evidence = ['Defaulted to 1" (missing in email)'];
           }
-          layerExtract.warnings.push(`Layer ${i + 1} thickness defaulted to 1" (missing)`);
+          layerExtract.warnings.push(`Part ${i + 1} thickness defaulted to 1" (missing)`);
         } else {
           const v = Number(thicknesses1[i]);
           if (layerExtract.thicknesses?.[i]) {
@@ -2844,7 +2844,7 @@ if (merged.dims) {
 
           // Additive: a tiny hint the template/UI can show later without any new API contract.
           if ((merged as any).layout_confidence === "medium") {
-            (merged as any).layout_hint = "Layer thicknesses were interpreted automatically—please confirm in the editor.";
+            (merged as any).layout_hint = "Part thicknesses were interpreted automatically—please confirm in the editor.";
           }
         }
       }

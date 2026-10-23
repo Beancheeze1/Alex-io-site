@@ -410,8 +410,8 @@ export async function sendQuoteEmail(opts: {
     if (primaryItem) {
       emailLineItems.push({
         id: primaryItem.id,
-        label: hasLayerRows ? "Foam set — layered construction" : (primaryItem.material_name || `Material #${primaryItem.material_id}`),
-        sublabel: hasLayerRows ? "Includes all bonded layers shown below (for reference)." : (primaryItem.material_family || null),
+        label: hasLayerRows ? "Foam set" : (primaryItem.material_name || `Material #${primaryItem.material_id}`),
+        sublabel: hasLayerRows ? "Includes all parts shown below (for reference)." : (primaryItem.material_family || null),
         dims: `${Number(primaryItem.length_in)} × ${Number(primaryItem.width_in)} × ${Number(primaryItem.height_in)} in`,
         qty: Number(primaryItem.qty),
         unitPrice: primaryItem.price_unit_usd,
@@ -424,7 +424,7 @@ export async function sendQuoteEmail(opts: {
     for (const it of items.filter(i => isLayoutLayerRow(i.notes))) {
       emailLineItems.push({
         id: it.id,
-        label: "Included layer",
+        label: "Included part", // Step 39N: a stack entry is a part
         sublabel: [it.material_name, it.material_family].filter(Boolean).join(" · ") || null,
         dims: `${Number(it.length_in)} × ${Number(it.width_in)} × ${Number(it.height_in)} in`,
         qty: Number(it.qty),

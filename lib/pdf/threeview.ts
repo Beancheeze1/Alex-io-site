@@ -5,6 +5,7 @@
 // Notes & Material Callout | Title Block
 
 import { PDFDocument, PDFPage, rgb, StandardFonts } from "pdf-lib";
+import { partName } from "@/app/lib/foam-terms";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -563,7 +564,7 @@ function notesPanel(
 
   // ── Right: layer details ──────────────────────────────────────────────────
   let ry = y + h - LABEL_H - colPad - 6;
-  const layerName = layer.label || `Layer ${layerIdx+1}`;
+  const layerName = partName(layer.label, layerIdx); // Step 39N: "Part 2 Top Pad"
 
   const modifiers: string[] = [];
   if (layer.roundCorners && layer.roundRadiusIn) modifiers.push(`Rounded r=${layer.roundRadiusIn}"`);
@@ -586,11 +587,11 @@ function notesPanel(
   // correctly uses layer.thicknessIn; this was the one place that didn't.
   const blockDimsVal = `${input.block.lengthIn.toFixed(3)}" \xD7 ${input.block.widthIn.toFixed(3)}" \xD7 ${layer.thicknessIn.toFixed(3)}"`;
 
-  page.drawText("LAYER DETAILS:", { x:midX+colPad, y:ry, size:7, font:fontBold, color:C.black });
+  page.drawText("PART DETAILS:", { x:midX+colPad, y:ry, size:7, font:fontBold, color:C.black });
   ry -= 11;
 
   const details: Array<[string, string]> = [
-    ["Layer",       `${layerName}  (${layerIdx+1} of ${totalLayers})`],
+    ["Part",        `${layerName}  (${layerIdx+1} of ${totalLayers})`],
     ["Thickness",   `${layer.thicknessIn.toFixed(3)}"`],
     ["Material",    layer.materialName || "\u2014"],
     ["Block Dims",  blockDimsVal],

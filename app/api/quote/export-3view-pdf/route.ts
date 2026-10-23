@@ -198,7 +198,7 @@ function layoutToDrawingInput(layoutJson: any, quote: QuoteRow, items: ItemRow[]
         // later layers to show the first layer's material name. Use a safe per-index
         // lookup with a label fallback instead.
         const item = items[i] ?? null;
-        const materialName = item?.material_name || `Layer ${i + 1}`;
+        const materialName = item?.material_name || `Part ${i + 1}`;
 
         const cavities: Cavity3D[] = [];
         const cavs = layerData?.cavities || [];

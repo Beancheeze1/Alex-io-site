@@ -20,6 +20,7 @@ import { usePageTracker } from "@/hooks/usePageTracker";
 import { findTightCavityWalls, MIN_WALL_IN } from "./editor/spacingWarnings";
 import { findUnconfirmedDepthCavities } from "./editor/depthWarnings";
 import { layerIsLoose } from "@/app/lib/pricing/foam-geometry";
+import { partCustomName, partName, partTitle } from "@/app/lib/foam-terms";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -2216,8 +2217,8 @@ function LayoutEditorHostReady(props: {
   const guidedSteps = React.useMemo<GuidedStep[]>(
     () => [
       { id: "customer-info", label: "Customer info" },
-      { id: "layers", label: "Layers" },
-      { id: "layer-details", label: "Layer details" },
+      { id: "layers", label: "Parts" },
+      { id: "layer-details", label: "Part details" },
       { id: "cavity-palette", label: "Cavity palette" },
       { id: "cavity-editor", label: "Cavity editor" },
       { id: "foam-material", label: "Foam material" },
@@ -2325,14 +2326,15 @@ function LayoutEditorHostReady(props: {
   const effectiveActiveLayerId =
     layers && layers.length > 0 ? activeLayerId ?? layers[0].id : null;
 
-  const layerDisplayLabel = (index: number) => `Layer ${index + 1}`;
+  // Step 39N: each entry of the stack is a "part" on screen (a part is laminated from layers)
+  const layerDisplayLabel = (index: number) => partTitle(index);
   const activeLayerIndex =
     layers && layers.length > 0
       ? layers.findIndex((layer) => layer.id === effectiveActiveLayerId)
       : -1;
   const activeLayerDisplayLabel =
     layers && layers.length > 0
-      ? layerDisplayLabel(activeLayerIndex >= 0 ? activeLayerIndex : 0)
+      ? partName(layers[activeLayerIndex >= 0 ? activeLayerIndex : 0]?.label, activeLayerIndex >= 0 ? activeLayerIndex : 0)
       : null;
 
   // Total stack thickness used for box/carton suggestions.
@@ -3658,7 +3660,7 @@ else nextYIn = snapInches(nextYIn);
 
       if (shouldPrompt && typeof window !== "undefined") {
         const ok = window.confirm(
-          "Import DXF:\nOK = Add as new layer (recommended)\nCancel = Replace current layer",
+          "Import DXF:\nOK = Add as a new part (recommended)\nCancel = Replace the current part",
         );
         importMode = ok ? "append" : "replace";
       }
@@ -4695,7 +4697,7 @@ const tenantCssVars = React.useMemo(() => {
               fontSize: 13, lineHeight: 1.8,
             }}>
               <div><strong>Shipping carton:</strong> 16 × 12 × 10 in, RSC</div>
-              <div><strong>Foam insert:</strong> 2-layer, polyethylene 1.7 PCF</div>
+              <div><strong>Foam insert:</strong> 2 parts, polyethylene 1.7 PCF</div>
               <div><strong>Pockets:</strong> 2× circular, 3.5&quot; dia × 2&quot; deep</div>
               <div><strong>Quantity:</strong> 100 units</div>
             </div>
@@ -4842,13 +4844,13 @@ const tenantCssVars = React.useMemo(() => {
                   <div className="flex items-start justify-between gap-3 mb-1.5">
                     <div className="flex flex-col gap-0.5">
                       <span className="uppercase tracking-[0.14em] text-[10px] text-[var(--text-muted)]">
-                        Layers
+                        Parts
                       </span>
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--text-secondary)]">
                         <span>
                           {layers && layers.length > 0 ? (
                             <>
-                              {layers.length} layer{layers.length > 1 ? "s" : ""} · Active:{" "}
+                              {layers.length} part{layers.length > 1 ? "s" : ""} · Active:{" "}
                               <span className="font-medium text-[var(--text-primary)]">
                                 {activeLayerDisplayLabel}
                               </span>
@@ -4870,9 +4872,9 @@ const tenantCssVars = React.useMemo(() => {
                     <button
                       type="button"
                       onClick={addLayer}
-                      className="inline-flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:text-[var(--text-primary)] transition"
+                      className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--tenant-secondary)] hover:bg-[color:color-mix(in_srgb,var(--tenant-secondary)_10%,transparent)] hover:text-[var(--text-primary)] transition"
                     >
-                      + Layer
+                      + Part
                     </button>
                   </div>
 
@@ -4916,7 +4918,7 @@ const tenantCssVars = React.useMemo(() => {
 
                     </label>
                     <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] text-[var(--text-muted)]">Active layer thick (in)</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">Active part thick (in)</span>
                       <input
                         type="number"
                         step={0.125}
@@ -5219,7 +5221,7 @@ const tenantCssVars = React.useMemo(() => {
                       <span>
                         {`This drawing has ${dxfInsertsNotice.inserts.length} inserts. Insert ${
                           dxfInsertsNotice.shown + 1
-                        } is in the layer now.`}
+                        } is in the part now.`}
                       </span>
                       <button
                         type="button"
@@ -5227,7 +5229,7 @@ const tenantCssVars = React.useMemo(() => {
                         className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
                         data-dxf-add-all
                       >
-                        {`Add the other ${dxfInsertsNotice.inserts.length - 1} as layers`}
+                        {`Add the other ${dxfInsertsNotice.inserts.length - 1} as parts`}
                       </button>
                       {dxfInsertsNotice.inserts.map((ins, i) =>
                         i === dxfInsertsNotice.shown ? null : (
@@ -5289,12 +5291,12 @@ const tenantCssVars = React.useMemo(() => {
                   {footprintChangeNotice ? (
                     <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-2 py-1.5 text-[11px] text-[var(--attention)]">
                       <span>
-                        {`This layer's own real size (${footprintChangeNotice.newLengthIn.toFixed(2)} × ${footprintChangeNotice.newWidthIn.toFixed(
+                        {`This part's own real size (${footprintChangeNotice.newLengthIn.toFixed(2)} × ${footprintChangeNotice.newWidthIn.toFixed(
                           2,
                         )}in) is different from the block's previous footprint (${footprintChangeNotice.oldLengthIn.toFixed(
                           2,
                         )} × ${footprintChangeNotice.oldWidthIn.toFixed(2)}in). `}
-                        {"The block footprint has been updated to match this layer -- double-check other layers' cavity positions still make sense."}
+                        {"The block footprint has been updated to match this part -- double-check the other parts' cavity positions still make sense."}
                       </span>
                     </div>
                   ) : null}
@@ -5308,7 +5310,7 @@ const tenantCssVars = React.useMemo(() => {
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex flex-col gap-0.5">
                       <span className="uppercase tracking-[0.14em] text-[10px] text-[var(--text-muted)]">
-                        Layer details
+                        Part details
                       </span>
                       <span className="text-xs text-[var(--text-secondary)]">
                         Stack depth:{" "}
@@ -5317,7 +5319,7 @@ const tenantCssVars = React.useMemo(() => {
 
                       {/* NEW: subtle helper line (visual density only) */}
                       <span className="text-[10px] text-[var(--text-faint)]">
-                        Per-layer thickness &amp; edge treatment
+                        Per-part thickness &amp; edge treatment
                       </span>
                     </div>
                   </div>
@@ -5351,11 +5353,12 @@ const tenantCssVars = React.useMemo(() => {
                                   type="button"
                                   onClick={() => setActiveLayerId(layer.id)}
                                   className={
-                                    "text-xs font-medium " +
+                                    "text-xs font-medium whitespace-nowrap " +
                                     (isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")
                                   }
+                                  title={partName(layer.label, layerIndex)}
                                 >
-                                  {layerDisplayLabel(layerIndex)}
+                                  {partTitle(layerIndex)}
                                 </button>
                                 <span className="text-[10px] text-[var(--text-muted)]">· Thickness (in)</span>
                                 <input
@@ -5434,7 +5437,7 @@ const tenantCssVars = React.useMemo(() => {
                               {layers.length > 1 ? (
                                 <label
                                   className="flex items-center gap-1 text-xs text-[var(--text-muted)]"
-                                  title="On for a loose piece, like the set's top pad (the top layer starts this way). Off when this layer is glued to the next one."
+                                  title="On for a loose part, like the set's top pad (the top part starts this way). Off when this part is glued to the next one."
                                   data-layer-loose
                                 >
                                   <input
@@ -5442,7 +5445,10 @@ const tenantCssVars = React.useMemo(() => {
                                     checked={layerIsLoose(layer, layerIndex === layers.length - 1)}
                                     onChange={(e) => setLayerLoose(layer.id, e.currentTarget.checked)}
                                   />
-                                  Separate piece (not glued)
+                                  Separate part (not glued)
+                                  {partCustomName(layer.label) ? (
+                                    <span className="ml-2 text-[var(--text-faint)]">· {partCustomName(layer.label)}</span>
+                                  ) : null}
                                 </label>
                               ) : null}
                               {/* Per-layer material override — only shown when "Per layer" is selected in the Foam material dropdown */}
@@ -5497,7 +5503,7 @@ const tenantCssVars = React.useMemo(() => {
                     </div>
                   ) : (
                     <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-                      Single-layer foam block. Add layers from the panel on the left if this layout needs multiple pads.
+                      One-part foam set. Add parts from the panel on the left if this layout needs more pieces (a top pad, a lid).
                     </div>
                   )}
                 </div>
@@ -5600,7 +5606,7 @@ const tenantCssVars = React.useMemo(() => {
                     <option value="">
                       {materialsLoading ? "Loading materials…" : "Select material"}
                     </option>
-                    <option value="per-layer">⚡ Per layer (set per layer below)</option>
+                    <option value="per-layer">⚡ Per part (set per part below)</option>
                     {materialsByFamily.map(([family, list]) => (
                       <optgroup key={family} label={family}>
                         {list.map((m) => (
@@ -5614,7 +5620,7 @@ const tenantCssVars = React.useMemo(() => {
                   </select>
                   {perLayerMaterialMode && (
                     <div className="mt-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
-                      Per-layer mode active — set each layer's material in the Layer details panel above.
+                      Per-part mode active — set each part's material in the Part details panel above.
                     </div>
                   )}
                   {materialsError && <div className="mt-1 text-[11px] text-[var(--attention)]">{materialsError}</div>}
@@ -6052,8 +6058,8 @@ const tenantCssVars = React.useMemo(() => {
                             <div className="text-[11px] text-[var(--attention)] space-y-1">
                               <div className="font-medium">
                                 {tightWallWarnings.length === 1
-                                  ? "One wall on this layer is thinner than recommended:"
-                                  : `${tightWallWarnings.length} walls on this layer are thinner than recommended:`}
+                                  ? "One wall on this part is thinner than recommended:"
+                                  : `${tightWallWarnings.length} walls on this part are thinner than recommended:`}
                               </div>
                               {tightWallWarnings.map((w, i) => (
                                 <div key={`${w.cavityIdA}-${w.cavityIdB}-${i}`}>

@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     if (!ex.dims) missing.push("final outside dimensions (L × W × H)");
     if (!ex.qty) missing.push("quantity");
     if (!ex.density_pcf) missing.push("foam density (e.g., 1.7 pcf)");
-    if (ex.thickness_under_in == null) missing.push("thickness under the part");
+    if (ex.thickness_under_in == null) missing.push("thickness under the product");
     if (!ex.unitsMentioned) missing.push("units (in or mm)");
 
     const quote_ready =

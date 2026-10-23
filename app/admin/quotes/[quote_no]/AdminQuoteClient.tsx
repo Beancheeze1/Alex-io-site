@@ -36,6 +36,7 @@ import ReorderButton from "@/components/quote/ReorderButton";
 import BuyerLinkButton from "@/components/admin/BuyerLinkButton";
 import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } from "@/app/lib/cad-download";
 import { parseBoxStyle } from "@/lib/box-styles";
+import { partCustomName, partName } from "@/app/lib/foam-terms";
 
 
 type QuoteRow = {
@@ -245,7 +246,7 @@ function buildLineLabels(items: ItemRow[]): string[] {
       return "Primary";
     }
     layerNum += 1;
-    return `Layer ${layerNum}`;
+    return `Part ${layerNum}`; // Step 39N
   });
 }
 
@@ -355,7 +356,8 @@ function buildLayerFilename(opts: {
 }): string {
   const q = sanitizeFilenamePart(opts.quoteNo || "quote");
   const layerNum = opts.layerIndex + 1;
-  const label = sanitizeFilenamePart(opts.layerLabel || "");
+  // Step 39N: "Part-2__Top-Pad"; a default name ("Layer 2") isn't repeated
+  const label = sanitizeFilenamePart(partCustomName(opts.layerLabel) || "");
   const thick = formatThicknessForName(opts.thicknessIn);
 
   const parts: string[] = [];
@@ -363,7 +365,7 @@ function buildLayerFilename(opts: {
     const rev = sanitizeFilenamePart(opts.revision || "");
   if (rev) parts.push(rev);
 
-  parts.push(`Layer-${layerNum}`);
+  parts.push(`Part-${layerNum}`);
   if (label) parts.push(label);
   if (thick) parts.push(thick);
 
@@ -538,17 +540,14 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
   return [];
 }
 
+// Step 39N: a stack entry is a "part": its own name, else "Part N" (a saved "Layer N" counts as no name).
 function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
-  if (!layer) return `Layer ${idx + 1}`;
+  if (!layer) return partName(null, idx);
 
   // IMPORTANT: keep this neutral (numbers), no “top/middle/bottom” assumptions
   const raw = layer.label ?? layer.name ?? layer.title ?? null;
 
-  if (typeof raw === "string" && raw.trim().length > 0) {
-    return raw.trim();
-  }
-
-  return `Layer ${idx + 1}`;
+  return partCustomName(raw) ?? partName(null, idx);
 }
 
 function getLayerThicknessIn(layer: LayoutLayer | null | undefined): number | null {
@@ -1925,7 +1924,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
         const blob = await res.blob();
         const baseName = quoteState?.quote_no || quoteNoValue || "quote";
-        const label = layerLabel || `Layer${layerIndex + 1}`;
+        const label = layerLabel || `Part${layerIndex + 1}`;
         const filename = `${baseName}_${label}_3View${revisionValue ? `_Rev${revisionValue}` : ""}.pdf`;
 
         triggerBlobDownload(blob, filename);
@@ -1984,7 +1983,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       const baseName = quoteState?.quote_no || quoteNoValue || "quote";
       const layers = getLayersFromLayout(layoutPkg.layout_json);
       if (!layers || layers.length === 0) {
-        setZipError("No layers found in this layout package.");
+        setZipError("No parts found in this layout package.");
         return;
       }
 
@@ -1996,7 +1995,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       const targetDims = getTargetDims();
 
       // Create a friendly folder
-      const folderName = `${sanitizeFilenamePart(baseName)}__Layers`;
+      const folderName = `${sanitizeFilenamePart(baseName)}__Parts`;
       const root = zip.folder(folderName) || zip;
 
       for (let i = 0; i < layers.length; i++) {
@@ -2039,12 +2038,12 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
             root.file(stepName, buf);
           } else {
             // Don’t fail the whole zip—just include a note.
-            const noteName = `Layer-${i + 1}__STEP-FAILED.txt`;
-            root.file(noteName, `STEP download failed (HTTP ${res.status}) for layer ${i + 1}.`);
+            const noteName = `Part-${i + 1}__STEP-FAILED.txt`;
+            root.file(noteName, `STEP download failed (HTTP ${res.status}) for part ${i + 1}.`);
           }
         } catch (e: any) {
-          const noteName = `Layer-${i + 1}__STEP-FAILED.txt`;
-          root.file(noteName, `STEP download failed for layer ${i + 1}: ${String(e?.message ?? e)}`);
+          const noteName = `Part-${i + 1}__STEP-FAILED.txt`;
+          root.file(noteName, `STEP download failed for part ${i + 1}: ${String(e?.message ?? e)}`);
         }
       }
 
@@ -2052,14 +2051,14 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       const manifestLines: string[] = [];
       manifestLines.push(`Quote: ${baseName}`);
       manifestLines.push(`Generated: ${new Date().toLocaleString()}`);
-      manifestLines.push(`Layers: ${layers.length}`);
+      manifestLines.push(`Parts: ${layers.length}`);
       manifestLines.push("");
       for (let i = 0; i < layers.length; i++) {
         const layer = layers[i];
         const label = getLayerLabel(layer, i);
         const thicknessIn = getLayerThicknessInFromLayout(layoutPkg.layout_json, i);
         const thick = formatThicknessForName(thicknessIn) || "—";
-        manifestLines.push(`Layer ${i + 1}: ${label} (thickness ${thick})`);
+        manifestLines.push(`Part ${i + 1}: ${label} (thickness ${thick})`);
       }
       root.file("MANIFEST.txt", manifestLines.join("\n"));
 
@@ -3282,7 +3281,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               cursor: layoutPkg.layout_json ? "pointer" : "not-allowed",
                               opacity: layoutPkg.layout_json ? 1 : 0.6,
                             }}
-                            title="Full Package DXF (on-demand). Uses the same correct scaling logic as the per-layer DXFs."
+                            title="Full Package DXF (on-demand). Uses the same correct scaling logic as the per-part DXFs."
                           >
                             Download DXF
                           </button>
@@ -3341,9 +3340,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                               cursor: zipBusy ? "not-allowed" : "pointer",
                               opacity: zipBusy ? 0.6 : 1,
                             }}
-                            title="Downloads a ZIP containing per-layer DXF + STEP with manufacturer-friendly filenames."
+                            title="Downloads a ZIP containing per-part DXF + STEP with manufacturer-friendly filenames."
                           >
-                            {zipBusy ? "Building ZIP..." : "Download All Layers (ZIP)"}
+                            {zipBusy ? "Building ZIP..." : "Download All Parts (ZIP)"}
                           </button>
 
                           {zipOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)" }}>✅ ZIP: {zipOkAt}</span>}
@@ -3356,7 +3355,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                     {/* Per-layer previews + buttons */}
                     {layersForDxf && layersForDxf.length > 0 && layoutPkg.layout_json && (
                       <div style={{ marginTop: 12 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Layers (preview + downloads)</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>Parts (preview + downloads)</div>
 
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
                           {layersForDxf.map((layer, idx) => {
@@ -3392,7 +3391,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                   cursor: "pointer",
                                   outline: "none",
                                 }}
-                                title="Click to set the large preview to this layer"
+                                title="Click to set the large preview to this part"
                               >
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                   <div>
@@ -3401,7 +3400,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                     <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Pocket depth: {pocket.text}</div>
                                   </div>
                                   <div style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
-                                    Layer {idx + 1}/{layersForDxf.length}
+                                    Part {idx + 1}/{layersForDxf.length}
                                   </div>
                                 </div>
 
@@ -3441,7 +3440,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                       cursor: "pointer",
                                     }}
                                   >
-                                    Download DXF (layer)
+                                    Download DXF (part)
                                   </button>
 
                                   <button
@@ -3460,9 +3459,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                       fontWeight: 700,
                                       cursor: "pointer",
                                     }}
-                                    title="Generates a STEP for this single layer (including only this layer’s cavities) via /api/quote/layout/step-layer"
+                                    title="Generates a STEP for this single part (including only this part’s cavities) via /api/quote/layout/step-layer"
                                   >
-                                    Download STEP (layer)
+                                    Download STEP (part)
                                   </button>
                                 </div>
 
@@ -3472,7 +3471,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                                   </div>
                                 )}
 
-                                <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>Preview shows foam outline + cavity geometry (layer-specific).</div>
+                                <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>Preview shows foam outline + cavity geometry (part-specific).</div>
                               </div>
                             );
                           })}
@@ -3499,9 +3498,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
                             return (
                               <div style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 6 }}>
-                                Selected layer preview:{" "}
+                                Selected part preview:{" "}
                                 <span style={{ fontWeight: 700 }}>
-                                  {selLabel} (Layer {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/{layersForDxf.length})
+                                  {selLabel} (Part {Math.min(selectedLayerIdx + 1, layersForDxf.length)}/{layersForDxf.length})
                                 </span>
                                 {" · "}
                                 <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>Thickness: {selT ? `${selT.toFixed(3)} in` : "—"}</span>

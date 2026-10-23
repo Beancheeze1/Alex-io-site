@@ -125,7 +125,7 @@ export function reviewFoam(args: {
 
   layers.forEach((ly, li) => {
     const t = n(ly.thicknessIn ?? ly.thickness_in);
-    const where = multi ? ` in layer ${li + 1}` : "";
+    const where = multi ? ` in part ${li + 1}` : ""; // Step 39N: a stack entry is a part
     const cavs = (Array.isArray(ly.cavities) ? ly.cavities : []).filter((c) => c && typeof c === "object") as AnyObj[];
     const boxes: Box[] = [];
     cavs.forEach((c, ci) => {
@@ -133,7 +133,7 @@ export function reviewFoam(args: {
       const bx = cavityBox(c, L, W, name);
       const depth = n(c.depthIn ?? c.depth_in);
       if (t > 0 && depth > t + EPS) {
-        flags.push({ code: "cavity_too_deep", message: `${name} is ${inch(depth)} deep but its layer is only ${inch(t)} thick.` });
+        flags.push({ code: "cavity_too_deep", message: `${name} is ${inch(depth)} deep but its part is only ${inch(t)} thick.` });
       }
       if (!bx) return;
       boxes.push(bx);
@@ -190,7 +190,7 @@ export function reviewFoam(args: {
       if (tk > maxT + EPS) {
         flags.push({
           code: "oversize",
-          message: `${layers.length > 1 ? `Layer ${i + 1}` : "The part"} is ${inch(tk)} thick; the thickest block is ${inch(maxT)}.`,
+          message: `${layers.length > 1 ? `Part ${i + 1}` : "The part"} is ${inch(tk)} thick; the thickest block is ${inch(maxT)}.`,
         });
       }
     });

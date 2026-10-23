@@ -478,7 +478,7 @@ async function callOpenAI(params: {
     "- Propose up to 6 quick replies when useful.\n\n" +
     "Fields you care about:\n" +
     "- OUTSIDE FOAM SIZE (outsideL, outsideW, outsideH): The OVERALL dimensions of the entire foam block or insert, in inches.\n" +
-    "  This is the outer envelope of the part — ALWAYS the largest set of dimensions the user mentions.\n" +
+    "  This is the outer envelope of the product — ALWAYS the largest set of dimensions the user mentions.\n" +
     "  CRITICAL: Do NOT confuse outside size with cavity/pocket size. Outside = the block itself, NOT holes cut into it.\n" +
     "  Example: '10x8x3 foam with a 4x3x2 pocket' → outsideL=10, outsideW=8, outsideH=3 (the block), cavity='4x3x2' (the pocket).\n" +
     "- qty\n" +

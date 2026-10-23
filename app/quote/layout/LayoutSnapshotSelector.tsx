@@ -252,7 +252,7 @@ export default function LayoutSnapshotSelector({
                         </div>
 
                         <div className="text-xs text-gray-500 mt-0.5">
-                          {pkg.layerCount} {pkg.layerCount === 1 ? "layer" : "layers"} • {pkg.cavityCount}{" "}
+                          {pkg.layerCount} {pkg.layerCount === 1 ? "part" : "parts"} • {pkg.cavityCount}{" "}
                           {pkg.cavityCount === 1 ? "cavity" : "cavities"}
                         </div>
 

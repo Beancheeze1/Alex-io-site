@@ -28,6 +28,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download";
+import { partCustomName, partLabelShown, partName } from "@/app/lib/foam-terms";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, uploadArtwork } from "@/lib/artwork";
 import QuoteApprovalCard, { type QuoteApprovalView } from "@/components/quote/QuoteApprovalCard";
@@ -306,11 +307,11 @@ function getLayersFromLayout(layout: any): LayoutLayer[] {
   return [];
 }
 
+// Step 39N: a stack entry is a "part": its own name, else "Part N" (a saved "Layer N" counts as no name).
 function getLayerLabel(layer: LayoutLayer | null | undefined, idx: number): string {
-  if (!layer) return `Layer ${idx + 1}`;
+  if (!layer) return partName(null, idx);
   const raw = layer.label ?? layer.name ?? layer.title ?? null;
-  if (typeof raw === "string" && raw.trim().length > 0) return raw.trim();
-  return `Layer ${idx + 1}`;
+  return partCustomName(raw) ?? partName(null, idx);
 }
 
 function readPositiveNumber(val: any): number | null {
@@ -1611,7 +1612,7 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
       if (Number.isFinite(dn) && dn > 0) sub.push(`${dn.toFixed(1)} lb/ft³`);
       // Derive a short label from the notes field: "[LAYOUT-LAYER] Bottom pad" → "Bottom pad"
       const rawNotes = String(it.notes || "");
-      const layerLabel = rawNotes.replace(/\[LAYOUT-LAYER\]\s*/i, "").trim() || name;
+      const layerLabel = partLabelShown(rawNotes.replace(/\[LAYOUT-LAYER\]\s*/i, "").trim()) || name; // Step 39N: "Layer 2" reads "Part 2"
       layerMaterials.push({ name, subline: sub.length ? sub.join(" · ") : null, layerLabel });
     }
   }
@@ -1862,7 +1863,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
       const T = Number(tRaw);
       if (!Number.isFinite(T) || T <= 0) return;
 
-      const name = (typeof layer.name === "string" && layer.name.trim()) || `Layer ${index + 1}`;
+      const name = partName(layer.name ?? layer.label, index); // Step 39N
 
       const dimsStr = `${L} × ${W} × ${T}`;
       const qty = primaryItem?.qty ?? 1;
@@ -2787,9 +2788,10 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <div style={{ marginTop: 2 }}>
                       <div style={labelStyle}>Construction</div>
                       <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.45 }}>
-                        This foam set is built from multiple bonded layers as needed at manufacturer discretion. Top-most
-                        layer will always be packed loose unless specifically called out otherwise in notes area. If you
-                        have any other construction requirement, please explain in the notes area.
+                        This foam set is made of one or more parts, each built from bonded layers of foam as needed at
+                        manufacturer discretion. The top-most part will always be packed loose unless specifically called
+                        out otherwise in the notes area. If you have any other construction requirement, please explain
+                        in the notes area.
                       </div>
                     </div>
                   </div>
@@ -2964,7 +2966,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       ) : (
                         <>
                           No foam layout has been saved yet. Use the layout editor link in your emailed quote to place cavities
-                          where you’d like your parts to sit, then click <strong>Apply to quote</strong> to store the layout
+                          where you’d like your products to sit, then click <strong>Apply to quote</strong> to store the layout
                           with this quote.
                         </>
                       )}
@@ -3203,14 +3205,14 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                             <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
                               {isPrimary ? (
                                 <>
-                                  <div style={{ fontWeight: 600 }}>Foam set — layered construction</div>
+                                  <div style={{ fontWeight: 600 }}>Foam set</div>
                                   <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.35 }}>
-                                    Includes all bonded layers shown below (for reference).
+                                    Includes all parts shown below (for reference).
                                   </div>
                                 </>
                               ) : (
                                 <>
-                                  <div style={{ fontWeight: 500 }}>Included layer</div>
+                                  <div style={{ fontWeight: 500 }}>Included part</div>
                                   <div style={{ color: "var(--text-muted)" }}>
                                     {baseLabel}
                                     {subLabel && <div style={{ fontSize: 11, marginTop: 2 }}>{subLabel}</div>}
@@ -3272,9 +3274,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       {layerDisplayRows.map((layer) => (
                         <tr key={layer.key}>
                           <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>
-                            <div style={{ fontWeight: 500 }}>Foam layer: {layer.name}</div>
+                            <div style={{ fontWeight: 500 }}>Foam part: {layer.name}</div>
                             <div style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 2 }}>
-                              Layer details from saved layout (for reference; included in foam pricing above).
+                              Part details from saved layout (for reference; included in foam pricing above).
                             </div>
                           </td>
                           <td style={{ padding: 8, borderBottom: "1px solid var(--surface-subtle)" }}>{layer.dims}</td>
@@ -3846,7 +3848,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     <thead>
                       <tr style={{ background: "var(--surface-subtle)", color: "var(--text-primary)" }}>
                         <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid var(--border)" }}>Quantity</th>
-                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per part</th>
+                        <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Per set</th>
                         <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Foam</th>
                         {foamBreaks.some((b) => b.cutting_usd > 0) && (
                           <th style={{ textAlign: "right", padding: 8, borderBottom: "1px solid var(--border)" }}>Cutting</th>
@@ -4021,7 +4023,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               color: "var(--text-muted)",
                             }}
                           >
-                            Layout saved, but no layers were found to preview.
+                            Layout saved, but no parts were found to preview.
                           </div>
                         );
                       }
@@ -4029,7 +4031,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       return (
                         <div style={{ marginTop: 12 }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8 }}>
-                            Layers (preview)
+                            Parts (preview)
                           </div>
 
                           <div
@@ -4079,7 +4081,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                     cursor: "pointer",
                                     outline: "none",
                                   }}
-                                  title="Click to focus this layer"
+                                  title="Click to focus this part"
                                 >
                                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                     <div>
@@ -4092,7 +4094,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                       </div>
                                     </div>
                                     <div style={{ fontSize: 11, color: "var(--text-faint)", whiteSpace: "nowrap" }}>
-                                      Layer {idx + 1}/{layersForPreview.length}
+                                      Part {idx + 1}/{layersForPreview.length}
                                     </div>
                                   </div>
 
@@ -4147,7 +4149,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                             cursor: "pointer",
                                           }}
                                         >
-                                          Download DXF (layer)
+                                          Download DXF (part)
                                         </button>
                                       ) : null}
 
@@ -4158,7 +4160,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                             e.stopPropagation();
                                             handleDownloadLayerStep(idx, label, t);
                                           }}
-                                          title="Staff only — generates a STEP for this single layer via /api/quote/layout/step-layer"
+                                          title="Staff only — generates a STEP for this single part via /api/quote/layout/step-layer"
                                           style={{
                                             padding: "4px 10px",
                                             borderRadius: 999,
@@ -4170,7 +4172,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                                             cursor: "pointer",
                                           }}
                                         >
-                                          Download STEP (layer)
+                                          Download STEP (part)
                                         </button>
                                       ) : null}
                                     </div>
@@ -4215,9 +4217,9 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                               return (
                                 <>
                                   <div style={{ fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
-                                    Selected layer preview:{" "}
+                                    Selected part preview:{" "}
                                     <span style={{ fontWeight: 700 }}>
-                                      {getLayerLabel(layersForPreview[selIdx] || null, selIdx)} (Layer{" "}
+                                      {getLayerLabel(layersForPreview[selIdx] || null, selIdx)} (Part{" "}
                                       {Math.min(selIdx + 1, layersForPreview.length)}/{layersForPreview.length})
                                     </span>
                                     {t ? (

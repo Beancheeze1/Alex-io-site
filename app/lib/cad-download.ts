@@ -7,6 +7,8 @@
 // as one shared implementation rather than a second copy, given how many
 // real bugs this project has traced back to exactly that pattern.
 
+import { partCustomName } from "@/app/lib/foam-terms";
+
 export function sanitizeFilenamePart(input: string): string {
   const s = (input || "").trim();
   if (!s) return "";
@@ -50,14 +52,15 @@ export function buildLayerFilename(opts: {
 }): string {
   const q = sanitizeFilenamePart(opts.quoteNo || "quote");
   const layerNum = opts.layerIndex + 1;
-  const label = sanitizeFilenamePart(opts.layerLabel || "");
+  // Step 39N: "Part-2__Top-Pad"; a default name ("Layer 2") isn't repeated
+  const label = sanitizeFilenamePart(partCustomName(opts.layerLabel) || "");
   const thick = formatThicknessForName(opts.thicknessIn);
 
   const parts: string[] = [q];
   const rev = sanitizeFilenamePart(opts.revision || "");
   if (rev) parts.push(rev);
 
-  parts.push(`Layer-${layerNum}`);
+  parts.push(`Part-${layerNum}`);
   if (label) parts.push(label);
   if (thick) parts.push(thick);
 

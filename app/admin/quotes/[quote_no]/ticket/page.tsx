@@ -3,8 +3,9 @@
 // Step 33: the printable job ticket for a released quote
 // (GET /api/admin/quotes/ticket). Print, PDF download, and a flat blank DXF
 // per custom RSC / HSC / FOL box line (GET /api/admin/quotes/box-dxf).
-// Step 39M: the foam sheet build (sheets, stock, skiving, glue steps) and a
-// DXF per sheet cut file (GET /api/admin/quotes/foam-sheet-dxf).
+// Step 39M: the foam layer build (layers, stock sheets, skiving, glue steps)
+// and a DXF per cut file (GET /api/admin/quotes/foam-sheet-dxf). Step 39N:
+// a stack entry is a "part", each laminated sheet a "layer".
 // No prices: this is the floor copy.
 
 "use client";
@@ -14,6 +15,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { dimsText, ticketDate, type JobTicket } from "@/app/lib/job-ticket-core";
 import { formatInches } from "@/lib/corrugated-blank";
+import { partName } from "@/app/lib/foam-terms";
 
 const inch = (n: number) => `${formatInches(n)}"`;
 
@@ -136,19 +138,18 @@ export default function JobTicketPage() {
               <table className="w-full text-[13px]">
                 <thead>
                   <tr>
-                    <th className={head}>Layer</th>
+                    <th className={head}>Part</th>
                     <th className={head}>Material</th>
                     <th className={head}>Thick</th>
                     <th className={head}>Cavities</th>
-                    <th className={head}>Cut file (.dxf / .step)</th>
+                    <th className={head}>Part file (.dxf / .step)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ticket.foam.layers.map((l) => (
                     <tr key={l.n} data-ticket-layer={l.n}>
                       <td className={cell}>
-                        {l.n}
-                        {l.label ? ` ${l.label}` : ""}
+                        {partName(l.label, l.n - 1)}
                         {l.loose ? " (loose)" : ""}
                       </td>
                       <td className={cell}>{l.material || "—"}</td>
@@ -165,29 +166,29 @@ export default function JobTicketPage() {
 
               {ticket.foam.build ? (
                 <div data-ticket-build>
-                  <div className="mt-4 mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Sheet build</div>
+                  <div className="mt-4 mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Layer build</div>
                   <div className="mb-2 text-[13px]">
-                    {ticket.foam.build.sheets_per_part} sheet{ticket.foam.build.sheets_per_part === 1 ? "" : "s"} per set,{" "}
+                    {ticket.foam.build.sheets_per_part} layer{ticket.foam.build.sheets_per_part === 1 ? "" : "s"} per set,{" "}
                     {ticket.foam.build.glue_lines} glue line{ticket.foam.build.glue_lines === 1 ? "" : "s"} per set
-                    {ticket.foam.build.stock_in.length ? ` · stock ${ticket.foam.build.stock_in.map(inch).join(", ")}` : " · no stock sizes set"}
+                    {ticket.foam.build.stock_in.length ? ` · stock sheets ${ticket.foam.build.stock_in.map(inch).join(", ")}` : " · no stock sheet sizes set"}
                     {ticket.foam.build.note ? <div className="text-[11px] text-[var(--attention)]">{ticket.foam.build.note}</div> : null}
                   </div>
                   <table className="w-full text-[13px]">
                     <thead>
                       <tr>
-                        <th className={head}>Layer / sheet</th>
+                        <th className={head}>Part / layer</th>
                         <th className={head}>From cavity face</th>
                         <th className={head}>Thick</th>
-                        <th className={head}>Stock</th>
+                        <th className={head}>Stock sheet</th>
                         <th className={head}>Cavities cut through</th>
-                        <th className={head}>File</th>
+                        <th className={head}>Cut file</th>
                       </tr>
                     </thead>
                     <tbody>
                       {ticket.foam.build.sheets.map((s) => (
                         <tr key={`${s.layer}-${s.n}`} data-ticket-sheet={`${s.layer}-${s.n}`}>
                           <td className={cell}>
-                            Layer {s.layer}, sheet {s.n}
+                            Part {s.layer}, layer {s.n}
                           </td>
                           <td className={cell}>
                             {inch(s.from_in)} to {inch(s.from_in + s.thickness_in)}
@@ -198,7 +199,7 @@ export default function JobTicketPage() {
                             {s.skived ? <span className="text-[var(--attention)]">{` skive to ${inch(s.thickness_in)}`}</span> : null}
                           </td>
                           <td className={cell}>{s.cavities ? s.cavities : "solid"}</td>
-                          <td className={cell}>Sheet {s.file}</td>
+                          <td className={cell}>Cut {s.file}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -207,7 +208,7 @@ export default function JobTicketPage() {
                   <table className="mt-3 w-full text-[13px]">
                     <thead>
                       <tr>
-                        <th className={head}>Sheet file (.dxf)</th>
+                        <th className={head}>Cut file (.dxf)</th>
                         <th className={head}>Per set</th>
                         <th className={head}>Total</th>
                         <th className={head}>Used in</th>
@@ -220,7 +221,7 @@ export default function JobTicketPage() {
                       {ticket.foam.build.files.map((f) => (
                         <tr key={f.file} data-ticket-sheet-file={f.file}>
                           <td className={cell}>
-                            Sheet {f.file}: {f.cavities ? `${f.cavities} cavit${f.cavities === 1 ? "y" : "ies"}` : "solid"}
+                            Cut {f.file}: {f.cavities ? `${f.cavities} cavit${f.cavities === 1 ? "y" : "ies"}` : "solid"}
                             <div className="font-mono text-[11px] text-[var(--text-muted)]">{f.name}</div>
                           </td>
                           <td className={cell}>{f.per_part}</td>
@@ -232,7 +233,7 @@ export default function JobTicketPage() {
                               href={`/api/admin/quotes/foam-sheet-dxf?quote_no=${enc}&file=${f.file}`}
                               data-sheet-dxf={f.file}
                             >
-                              Sheet DXF
+                              Cut DXF
                             </a>
                           </td>
                         </tr>
@@ -241,7 +242,7 @@ export default function JobTicketPage() {
                   </table>
 
                   <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-                    Cut from these sheet files; the layer files above show every cavity in the layer.
+                    Cut each layer from these files; the part files above show every cavity in the part.
                   </div>
                   {ticket.foam.build.steps.length ? (
                     <ul className="mt-2 list-disc pl-5 text-[13px]" data-ticket-steps>

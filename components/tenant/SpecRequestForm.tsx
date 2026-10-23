@@ -121,7 +121,7 @@ export default function SpecRequestForm({
         <textarea
           name="notes"
           rows={5}
-          placeholder="Part size and weight, quantity, how it ships, any material you have in mind…"
+          placeholder="Product size and weight, quantity, how it ships, any material you have in mind…"
           className={inputCls}
           style={inputStyle}
         />

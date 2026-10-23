@@ -84,6 +84,8 @@ export type FoamProcessResult = {
     die_owned: boolean;
     press_hits: number | null;
     glue_lines: number;
+    /** Step 39N: layers (sheets) cut per set: the press hits per set. */
+    layers_cut: number;
     /** Step 39B: staff chose a method whose rates aren't set (no charge added for it). */
     missing_rates: FoamRunMethod | null;
   };
@@ -161,6 +163,7 @@ export function priceFoamProcess(args: {
     die_owned: args.dieOwned === true,
     press_hits: null,
     glue_lines: geom.glue_lines,
+    layers_cut: geom.layers_cut,
     missing_rates: null,
   };
 
@@ -198,7 +201,7 @@ export function priceFoamProcess(args: {
         key: "cnc",
         label: "CNC cutting (short run, no tooling)",
         amount: r2(cost * mk),
-        note: `${geom.cut_in_per_piece.toFixed(1)}" of cut per part`,
+        note: `${geom.cut_in_per_piece.toFixed(1)}" of cut per set`,
       });
     } else if (m === "die") {
       method = "die";
@@ -234,9 +237,9 @@ export function priceFoamProcess(args: {
       const lam = s.lam_setup_usd + qty * geom.glue_lines * s.lam_per_glue_line_usd;
       lines.push({
         key: "lamination",
-        label: `Lamination (${geom.glue_lines} glue line${geom.glue_lines > 1 ? "s" : ""} per part)`,
+        label: `Lamination (${geom.glue_lines} glue line${geom.glue_lines > 1 ? "s" : ""} per set)`,
         amount: r2(lam * mk),
-        note: geom.sheets ? `${geom.sheets.length} sheet${geom.sheets.length === 1 ? "" : "s"} per part` : null,
+        note: geom.sheets ? `${geom.sheets.length} layer${geom.sheets.length === 1 ? "" : "s"} per set` : null,
       });
     }
   }

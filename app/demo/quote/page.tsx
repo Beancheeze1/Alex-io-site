@@ -176,7 +176,7 @@ const LOCKED_ACTIONS: Array<{
   desc: string;
 }> = [
   { id: "price", label: "Price this foam set", desc: "Uses live price books + qty breaks." },
-  { id: "apply", label: "Apply to quote", desc: "Writes layout + layers back to the quote." },
+  { id: "apply", label: "Apply to quote", desc: "Writes layout + parts back to the quote." },
   { id: "export", label: "Export DXF / STEP", desc: "Per-layer CAD package for vendors." },
   { id: "email", label: "Email first response", desc: "Auto-reply with specs + pricing + link." },
 ];
@@ -461,7 +461,7 @@ export default function DemoQuotePage() {
                   <DeliverableRow
                     src="/splash/layer-previews.png"
                     title="Per-layer previews"
-                    desc="Layers, cavities, crop corners — previewed exactly as built."
+                    desc="Parts, cavities, crop corners — previewed exactly as built."
                   />
                   <DeliverableRow
                     src="/splash/cad-step.png"
@@ -490,7 +490,7 @@ export default function DemoQuotePage() {
                 <ol className="list-decimal space-y-1 pl-5 text-slate-300">
                   <li>Email specs (size, qty, material, cavities)</li>
                   <li>Auto-pricing + first response</li>
-                  <li>Layout + previews (layers, tools, checks)</li>
+                  <li>Layout + previews (parts, tools, checks)</li>
                   <li>Per-layer DXF/STEP exports</li>
                 </ol>
 

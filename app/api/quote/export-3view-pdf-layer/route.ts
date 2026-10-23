@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { generate3ViewPDF, type Drawing3DInput, type Layer3D, type Cavity3D } from "@/lib/pdf/threeview";
+import { partCustomName } from "@/app/lib/foam-terms";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { requirePlan, planGateResponse, PlanGateError } from "@/lib/plan";
 
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest) {
 
     // ── Plan gate: CAD exports require Pro or Shop ─────────────────────────
     try {
-      await requirePlan(user.tenant_id, "pro", "CAD / per-layer PDF exports");
+      await requirePlan(user.tenant_id, "pro", "CAD / per-part PDF exports");
     } catch (e) {
       if (e instanceof PlanGateError) {
         return NextResponse.json(planGateResponse(e), { status: 402 });
@@ -136,7 +137,7 @@ export async function GET(req: NextRequest) {
     const drawingInput = layoutToSingleLayerDrawing(layout.layout_json, quote, items, layerIndex);
 
     if (!drawingInput) {
-      return err("CONVERSION_FAILED", "Could not convert layer to 3D drawing", 500);
+      return err("CONVERSION_FAILED", "Could not convert this part to a 3D drawing", 500);
     }
 
     // Generate PDF
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Return as downloadable file
-    const layerLabel = drawingInput.layers[0]?.label || `Layer${layerIndex + 1}`;
+    const layerLabel = (partCustomName(drawingInput.layers[0]?.label) || `Part${layerIndex + 1}`).replace(/[^a-zA-Z0-9._-]+/g, "-"); // Step 39N
     const filename = `${quoteNo}_${layerLabel}_3View.pdf`;
 
     // Convert Buffer to Uint8Array for NextResponse
@@ -200,7 +201,7 @@ function layoutToSingleLayerDrawing(
       return null;
     }
 
-    const materialName = item?.material_name || `Layer ${layerIndex + 1}`;
+    const materialName = item?.material_name || `Part ${layerIndex + 1}`;
 
     const cavities: Cavity3D[] = [];
     const cavs = layerData?.cavities || [];

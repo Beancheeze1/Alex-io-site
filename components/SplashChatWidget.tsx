@@ -262,9 +262,9 @@ function summarizeFacts(facts: WidgetFacts) {
 
   const layers =
     Array.isArray(facts.layerThicknesses) && facts.layerThicknesses.length > 0
-      ? `Layers: ${facts.layerThicknesses.join(" / ")} in`
+      ? `Parts: ${facts.layerThicknesses.join(" / ")} in`
       : facts.layerCount && facts.layerCount !== "1"
-      ? `Layers: ${facts.layerCount} (thicknesses not set)`
+      ? `Parts: ${facts.layerCount} (thicknesses not set)`
       : null;
 
   const packaging = facts.packagingSku
@@ -661,7 +661,7 @@ export default function SplashChatWidget({
                 <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
                   {brand
                     ? shopHasFoam
-                      ? "Describe your part — we’ll build the quote."
+                      ? "Describe your product — we’ll build the quote."
                       : "Tell us about your boxes — we’ll build the quote."
                     : "Talk to me like a human. I’ll keep it tight."}
                 </div>

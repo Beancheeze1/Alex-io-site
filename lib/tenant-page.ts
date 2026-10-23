@@ -14,7 +14,7 @@ export const PRODUCT_INFO: Record<ProductKey, { label: string; desc: string }> =
   rsc: { label: "Corrugated boxes", desc: "Regular slotted cartons in single and double wall." },
   printed: { label: "Printed packaging", desc: "Boxes printed with your logo and handling marks." },
   mailer: { label: "Die-cut mailers", desc: "Self-locking mailers for shipping and retail." },
-  foam: { label: "Foam inserts", desc: "Foam cut to hold your part in place." },
+  foam: { label: "Foam inserts", desc: "Foam cut to hold your product in place." },
   kit: { label: "Foam-in-box kits", desc: "Box and insert quoted together as one kit." },
 };
 

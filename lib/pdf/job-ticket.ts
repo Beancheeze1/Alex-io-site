@@ -11,6 +11,7 @@ import type { JobTicket } from "@/app/lib/job-ticket-core";
 import { dimsText, ticketDate } from "@/app/lib/job-ticket-core";
 import type { Dieline } from "@/lib/box-dieline";
 import { formatInches } from "@/lib/corrugated-blank";
+import { partName } from "@/app/lib/foam-terms";
 
 const PAGE_W = 612;
 const PAGE_H = 792;
@@ -202,10 +203,10 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
     ]);
     table(
       c,
-      ["Layer", "Material", "Thick", "Cavities", "Cut file (.dxf / .step)"],
+      ["Part", "Material", "Thick", "Cavities", "Part file (.dxf / .step)"],
       [70, 150, 50, 55, 207],
       f.layers.map((l) => [
-        `${l.n}${l.label ? ` ${l.label}` : ""}${l.loose ? " (loose)" : ""}`,
+        `${partName(l.label, l.n - 1)}${l.loose ? " (loose)" : ""}`,
         l.material || "-",
         inch(l.thickness_in),
         String(l.cavities),
@@ -214,44 +215,44 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
     );
     text(c, `Full package: ${f.package_file} (.dxf / .step / .svg) - download from the admin quote page.`, { size: 8.5, color: MUTED });
 
-    // Step 39M: how each piece is laminated from stock sheets, and a cut file per different sheet
+    // Step 39M / 39N: how each part is laminated from layers (cut from stock sheets), and a cut file per different layer
     const b = f.build;
     if (b) {
       c.y -= 4;
       text(
         c,
-        `Sheet build: ${b.sheets_per_part} sheet${b.sheets_per_part === 1 ? "" : "s"} per set, ${b.glue_lines} glue line${b.glue_lines === 1 ? "" : "s"} per set${
-          b.stock_in.length ? `; stock ${b.stock_in.map(inch).join(", ")}` : "; no stock sizes set"
+        `Layer build: ${b.sheets_per_part} layer${b.sheets_per_part === 1 ? "" : "s"} per set, ${b.glue_lines} glue line${b.glue_lines === 1 ? "" : "s"} per set${
+          b.stock_in.length ? `; stock sheets ${b.stock_in.map(inch).join(", ")}` : "; no stock sheet sizes set"
         }.`,
         { size: 10, bold: true },
       );
       if (b.note) text(c, b.note, { size: 8.5, color: RED });
       table(
         c,
-        ["Layer / sheet", "From cavity face", "Thick", "Stock", "Cavities through", "File"],
+        ["Part / layer", "From cavity face", "Thick", "Stock sheet", "Cavities through", "Cut file"],
         [90, 110, 50, 115, 90, 77],
         b.sheets.map((s) => [
-          `Layer ${s.layer}, sheet ${s.n}`,
+          `Part ${s.layer}, layer ${s.n}`,
           `${inch(s.from_in)} to ${inch(s.from_in + s.thickness_in)}`,
           inch(s.thickness_in),
           `${s.stock_in ? inch(s.stock_in) : "-"}${s.skived ? ` (skive to ${inch(s.thickness_in)})` : ""}`,
           s.cavities ? String(s.cavities) : "solid",
-          `Sheet ${s.file}`,
+          `Cut ${s.file}`,
         ]),
       );
       table(
         c,
-        ["Sheet file (.dxf)", "Per set", "Total", "Used in"],
+        ["Cut file (.dxf)", "Per set", "Total", "Used in"],
         [230, 50, 60, 192],
         b.files.map((x) => [
-          `Sheet ${x.file}: ${x.cavities ? `${x.cavities} cavit${x.cavities === 1 ? "y" : "ies"}` : "solid"}\n${x.name}`,
+          `Cut ${x.file}: ${x.cavities ? `${x.cavities} cavit${x.cavities === 1 ? "y" : "ies"}` : "solid"}\n${x.name}`,
           String(x.per_part),
           (x.per_part * f.sets).toLocaleString("en-US"),
           x.used_in,
         ]),
       );
       for (const s of b.steps) text(c, `- ${s}`, { size: 9.5 });
-      text(c, "Cut from these sheet files (download them from the job ticket page); the layer files above show every cavity in the layer.", {
+      text(c, "Cut each layer from these files (download them from the job ticket page); the part files above show every cavity in the part.", {
         size: 8.5,
         color: MUTED,
       });
