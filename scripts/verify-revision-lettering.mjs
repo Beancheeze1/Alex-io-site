@@ -160,9 +160,15 @@ async function releaseAndCheck(label, expected) {
   return state.quote.revision;
 }
 
-async function reviseAndCheck(label) {
+// Step 39K: Revise opens the next staging letter right away; the first Apply
+// after it keeps that letter (it isn't pushed to seenRevisions, so the Apply
+// that follows doesn't count as a repeat).
+async function reviseAndCheck(label, expected) {
   const res = await lock(false);
   check(`${label}: unlock (Revise) succeeded`, res.json?.ok === true, JSON.stringify(res.json));
+  const state = await printState();
+  check(`${label}: shows the next staging letter "${expected}" right away`, state.quote.revision === expected, `got "${state.quote.revision}"`);
+  assertInvariant(label, state.quote.locked, state.quote.revision);
 }
 
 async function cleanup() {
@@ -192,7 +198,7 @@ try {
   await releaseAndCheck("release 1 (first ever, from BS)", "A");
 
   console.log("\n--- Revise, then Apply: staging MUST continue from BS -> CS, NOT reset to AS ---");
-  await reviseAndCheck("unlock 1 (Revise)");
+  await reviseAndCheck("unlock 1 (Revise)", "CS");
   await applyAndCheck("apply 3 (post-release-1): must continue BS -> CS, not reset to AS", "CS");
 
   console.log("\n--- One more Apply before releasing again: CS -> DS ---");
@@ -202,7 +208,7 @@ try {
   await releaseAndCheck("release 2 (from DS)", "B");
 
   console.log("\n--- Revise, then Apply: staging MUST continue from DS -> ES, NOT couple to released B (\"BS\") ---");
-  await reviseAndCheck("unlock 2 (Revise)");
+  await reviseAndCheck("unlock 2 (Revise)", "ES");
   await applyAndCheck("apply 5 (post-release-2): must continue DS -> ES, not reset/couple to BS", "ES");
 
   console.log("\n=== Full sequence produced (must have zero repeats) ===");

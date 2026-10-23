@@ -312,8 +312,8 @@ export default function AdminQuotesPage() {
   }
 
   async function handleReviseQuote(quoteNo: string, isLocked: boolean, boxesOnly = false) {
-    // If Released for Mfg, Revise should unlock + open editor. Every Apply now
-    // bumps its own staging revision unconditionally, so there's nothing to arm.
+    // If Released for Mfg, Revise should unlock + open editor. Step 39K: the
+    // unlock opens the next staging revision (e.g. released A -> BS).
     let unlockedBoxesOnly = false;
     if (isLocked) {
       const data = await setQuoteLock(quoteNo, false);

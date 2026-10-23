@@ -2120,8 +2120,8 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
     }
   }, [quoteNoValue, rebuildBusy]);
 
-  // Revise = unlock only. Every Apply now bumps its own staging revision
-  // unconditionally, so there's nothing left to arm here.
+  // Revise = unlock. Step 39K: the server opens the next staging revision
+  // (e.g. released A -> BS) when a released quote is unlocked.
   const handleReviseNow = React.useCallback(async () => {
     if (!quoteNoValue) return;
     if (revisionBusy) return;

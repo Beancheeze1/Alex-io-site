@@ -55,3 +55,33 @@ export function displayRevisionLabel(facts: RevisionFacts, locked: boolean): str
   const s = normalizeRevLabel(facts?.stage_rev || facts?.revision || "");
   return s || "AS";
 }
+
+/**
+ * Step 39K: the next staging label from the highest staging label reached:
+ * "" -> "AS", "AS" -> "BS", "BS" -> "CS"; a bare released letter "B" -> "BS".
+ * (Same rule as nextStageRev in app/api/quote/layout/apply/route.ts.)
+ */
+export function nextStageLabel(cur?: string | null): string {
+  const t = normalizeRevLabel(cur);
+  if (!t) return "AS";
+  const c = t.charAt(0).toUpperCase();
+  const code = c.charCodeAt(0);
+  if (code < 65 || code > 90) return "AS";
+  if (t.length >= 2 && t.charAt(1).toUpperCase() === "S") return code >= 90 ? "ZS" : String.fromCharCode(code + 1) + "S";
+  return c + "S";
+}
+
+/**
+ * Step 39K: Revise on a released quote opens the NEXT staging revision right
+ * away (e.g. AS -> released A -> Revise -> BS), so the quote never shows the
+ * old staging letter again. A boxes-only quote has no layout Apply to bump it,
+ * so before this it stayed on its first staging letter forever. The new
+ * letter is marked fresh: the first layout Apply after the Revise uses it
+ * instead of bumping again (later Applies bump as before).
+ */
+export function revisedFacts<T extends Record<string, unknown>>(facts: T | null | undefined): T & { stage_rev: string; revision: string; stage_fresh: true } {
+  const f = (facts || {}) as T;
+  const cur = (f as { stage_rev?: string | null; revision?: string | null }).stage_rev || null;
+  const next = nextStageLabel(cur || "AS");
+  return { ...f, stage_rev: next, revision: next, stage_fresh: true };
+}

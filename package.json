@@ -26,6 +26,7 @@
   "test:display": "npx --yes tsx scripts/test-display-assembly.ts",
   "test:buyer-dieline": "npx --yes tsx scripts/test-buyer-dieline.ts",
   "test:dieline-pdf": "npx --yes tsx scripts/test-dieline-pdf.ts",
+  "test:revision": "npx --yes tsx scripts/test-revision.ts",
   "test:grade": "npx --yes tsx scripts/test-grade.ts",
   "test:quote-email": "npx --yes tsx scripts/test-quote-email.ts",
   "docker:build": "docker build -t alex-io:latest .",

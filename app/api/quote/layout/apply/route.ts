@@ -1682,10 +1682,16 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
         // released letter) instead of "CS" (continuing forward from "BS") —
         // a real repeat/regression, not a restart-by-design.
         const curStage = factsForRev?.stage_rev ?? null;
-        const nextStage = nextStageRev(curStage);
-
-        factsForRev.stage_rev = nextStage;
-        factsForRev.revision = nextStage;
+        // Step 39K: Revise already opened a fresh staging letter; the first
+        // Apply after it uses that letter instead of bumping again.
+        if (factsForRev?.stage_fresh === true && curStage) {
+          factsForRev.revision = curStage;
+          delete factsForRev.stage_fresh;
+        } else {
+          const nextStage = nextStageRev(curStage);
+          factsForRev.stage_rev = nextStage;
+          factsForRev.revision = nextStage;
+        }
 
         await saveFacts(String(quoteNo), factsForRev);
       } catch {

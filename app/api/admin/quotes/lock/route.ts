@@ -16,6 +16,7 @@ import { approvalForQuote } from "@/app/lib/quote-approval";
 import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
 import { proofSummary } from "@/app/lib/proofs";
 import { proofReleaseOk } from "@/app/lib/proofs-core";
+import { revisedFacts } from "@/app/lib/revision-label"; // Step 39K
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -172,6 +173,10 @@ export async function POST(req: NextRequest) {
   // UNLOCK (admin only) � leaves packages intact, simply removes the lock gate + stored hash.
   // IMPORTANT: Unlock must NOT bump staging revisions. Revise is the only flow that arms a bump.
   if (!lock) {
+    // Step 39K: unlocking a RELEASED quote IS the Revise (both Revise buttons
+    // call this), and it opens the next staging revision right away (AS ->
+    // released A -> Revise -> BS). Unlocking a quote that isn't locked changes
+    // nothing.
     await q(
       `
       update quotes
@@ -184,9 +189,21 @@ export async function POST(req: NextRequest) {
       [quote.id, user.tenant_id],
     );
 
+    // Step 39K: Revise starts the next staging revision (non-fatal).
+    let revision: string | null = null;
+    if (quote.locked) {
+      try {
+        const next = revisedFacts(((await loadFacts(quote.quote_no)) || {}) as Record<string, unknown>);
+        await saveFacts(quote.quote_no, next);
+        revision = next.revision;
+      } catch {
+        // non-fatal: the quote is unlocked either way
+      }
+    }
+
     // Step 16: boxes-only quotes have no layout editor; the caller opens the quote page.
     const info = await boxesOnlyInfo(quote.id, quote.quote_no);
-    return json({ ok: true, locked: false, boxes_only: info.boxesOnly });
+    return json({ ok: true, locked: false, boxes_only: info.boxesOnly, revision });
   }
 
   // Step 25: release only once staff have seen the review flags. The caller
