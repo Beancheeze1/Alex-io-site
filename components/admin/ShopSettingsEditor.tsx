@@ -30,6 +30,11 @@ const FOAM_FIELDS = [
   { key: "press_parts_per_hit", label: "Parts per hit", step: "1" },
   { key: "lam_setup_usd", label: "Lamination setup ($ per order)", step: "0.01" },
   { key: "lam_per_glue_line_usd", label: "Lamination ($ per glue line, per part)", step: "0.01" },
+  // Step 39L: the sheets parts are laminated from
+  { key: "foam_stock_1_in", label: "Stock sheet thickness 1 (in, 0 = not used)", step: "0.125" },
+  { key: "foam_stock_2_in", label: "Stock sheet thickness 2 (in)", step: "0.125" },
+  { key: "foam_stock_3_in", label: "Stock sheet thickness 3 (in)", step: "0.125" },
+  { key: "foam_stock_4_in", label: "Stock sheet thickness 4 (in)", step: "0.125" },
 ] as const;
 type FoamKey = (typeof FOAM_FIELDS)[number]["key"];
 
@@ -624,6 +629,17 @@ export default function ShopSettingsEditor({
                   per hour × $/hour. Lamination = setup + glue lines × qty ×
                   $/glue line. Leave CNC and die at 0 to keep the flat
                   die-cutting charge above.
+                </p>
+                <p className="mt-2 text-[11px] text-[var(--text-faint)]" data-stock-help>
+                  Stock sheets: each foam piece is built from these thicknesses
+                  with the fewest sheets (one is skived when they come out
+                  thicker). There&apos;s a glue line between sheets, at the floor
+                  of every cavity that doesn&apos;t go all the way through, and
+                  between layers that are glued together (the top layer of a set
+                  is packed loose). Each different sheet gets its own die and
+                  each sheet is a press hit. Leave all four at 0 to build each
+                  piece from one sheet per cavity depth. Applies to quotes
+                  priced from now on; reprice an older quote to use it.
                 </p>
               </div>
 

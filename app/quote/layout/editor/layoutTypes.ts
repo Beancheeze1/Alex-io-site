@@ -98,6 +98,13 @@ export type LayoutLayer = {
   // - If omitted, the quote-level material (selectedMaterialId) is used.
   // - When set, this layer's quote_item row will use this material_id for pricing.
   materialId?: number;
+
+  // Step 39L: a separate piece (the set's top pad, a lid), not glued to the
+  // layers next to it, so there's no glue line between them. Set by the
+  // "Separate piece" checkbox in Layer details. When omitted: the top-most
+  // layer of a set, or one named like "Top Pad", is separate; the others are
+  // glued (layerIsLoose in app/lib/pricing/foam-geometry.ts).
+  loose?: boolean;
 };
 
 export type LayoutModel = {

@@ -7,7 +7,7 @@
 // Run: npm run test:foam   (= npx --yes tsx scripts/test-foam-price.ts)
 
 import { cavityVolumeCi, priceFoam, type FoamMaterial, type FoamSettings } from "../app/lib/pricing/foam-core";
-import { foamGeometry } from "../app/lib/pricing/foam-geometry";
+import { cleanStockList, foamGeometry, layerIsLoose, stockBuild, withSheets } from "../app/lib/pricing/foam-geometry";
 import { pickFoamProcess, priceFoamProcess, resolveFoamMethod } from "../app/lib/pricing/foam-process";
 import { cleanQtyList, foamBreakList } from "../app/lib/pricing/qty-list";
 import { reviewFoam } from "../app/lib/pricing/foam-review";
@@ -158,6 +158,53 @@ const sameLayers = foamGeometry(
 check("geom: identical layers share one die", sameLayers.dies.length, 1);
 check("geom: loose top pad is not glued", sameLayers.glue_lines, 1);
 
+// Step 39L: lamination counted sheet by sheet (withSheets), quotes locked with lam_rule 2.
+// Chuck's set: a 2" bottom with a 1" and a 1.5" deep cavity + a plain 1" top pad.
+const setLayout = {
+  block: { lengthIn: 10, widthIn: 10, thicknessIn: 3 },
+  stack: [
+    { label: "Bottom Insert", thicknessIn: 2, cavities: [{ shape: "rect", lengthIn: 2, widthIn: 2, depthIn: 1, x: 0.2, y: 0.2 }, { shape: "rect", lengthIn: 2, widthIn: 2, depthIn: 1.5, x: 0.6, y: 0.6 }] },
+    { label: "Top Pad", thicknessIn: 1, cavities: [] },
+  ],
+};
+const setGeom = foamGeometry(setLayout, { L: 10, W: 10, H: 3 });
+check("geom (before 39L rule): Bottom + Top Pad still 1 glue line on old locks", setGeom.glue_lines, 1);
+const set12 = withSheets(setGeom, [1, 2]);
+//   bottom: bands 0–1 (both cavities), 1–1.5 (deep cavity), 1.5–2 (solid) = 3 sheets → 2 glue lines; top pad 1 sheet, packed loose
+check("sheets: cavity floors make glue lines (2), top pad not glued", set12.glue_lines, 2);
+check("sheets: 4 sheets cut per part", set12.layers_cut, 4);
+check("sheets: 0.5\" bands are skived from 1\" stock", set12.sheets?.filter((s) => s.skived).length, 2);
+//   patterns: both cavities / deep cavity only / solid (the bottom's base and the top pad share it)
+check("sheets: 3 different sheets = 3 dies", set12.dies.length, 3);
+//   cut: outline 40 per band (4 bands) + 2 cavities in band 1 (16) + 1 in band 2 (8) = 184
+check("sheets: CNC cut, each band once", set12.cut_in_per_piece, 184);
+check("sheets: no stock sizes = one sheet per band", withSheets(setGeom, []).glue_lines, 2);
+const thick = foamGeometry({ block: { lengthIn: 10, widthIn: 10, thicknessIn: 4 }, stack: [{ thicknessIn: 4, cavities: [] }] }, { L: 10, W: 10, H: 4 });
+check("sheets: plain 4\" from 1\" / 2\" stock = 2 + 2, 1 glue line", withSheets(thick, [1, 2]).glue_lines, 1);
+check("sheets: plain 4\" with no stock sizes = no glue line", withSheets(thick, []).glue_lines, 0);
+const through = foamGeometry(
+  { block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 }, stack: [{ thicknessIn: 2, cavities: [{ lengthIn: 2, widthIn: 2, depthIn: 2, x: 0.3, y: 0.3 }] }] },
+  { L: 10, W: 10, H: 2 },
+);
+check("sheets: a cut-through cavity adds no glue line", withSheets(through, [2]).glue_lines, 0);
+const stackGlued = foamGeometry(
+  { block: { lengthIn: 10, widthIn: 10, thicknessIn: 2 }, stack: [{ label: "Layer 1", thicknessIn: 1, cavities: [] }, { label: "Layer 2", thicknessIn: 1, cavities: [], loose: false }] },
+  { L: 10, W: 10, H: 2 },
+);
+check("sheets: layers marked glued = 1 joint", withSheets(stackGlued, [1]).glue_lines, 1);
+const stackDefault = foamGeometry(
+  { block: { lengthIn: 10, widthIn: 10, thicknessIn: 3 }, stack: [{ thicknessIn: 1, cavities: [] }, { thicknessIn: 1, cavities: [] }, { thicknessIn: 1, cavities: [] }] },
+  { L: 10, W: 10, H: 3 },
+);
+check("sheets: 3 layers, top one packed loose = 1 joint", withSheets(stackDefault, [1]).glue_lines, 1);
+check("loose: top layer, Top Pad, Lid are separate; a lower Layer 2 isn't", layerIsLoose({ label: "Layer 3" }, true) && layerIsLoose({ label: "Top Pad" }) && layerIsLoose({ label: "Lid" }) && !layerIsLoose({ label: "Layer 2" }), true);
+check("loose: loose false keeps the top layer glued", layerIsLoose({ loose: false }, true), false);
+check("stock: 1.5 from 1 / 2 = one 2\" sheet", stockBuild(1.5, [1, 2]).join(","), "2");
+check("stock: 2.5 from 1 / 2 = 2 + 1", stockBuild(2.5, [1, 2]).join(","), "2,1");
+check("stock: 5 from 3 / 2 = 3 + 2", stockBuild(5, [2, 3]).join(","), "3,2");
+check("stock: 4 from 3 = 3 + 3 (skive one)", stockBuild(4, [3]).join(","), "3,3");
+check("stock: list cleaned (junk, duplicates, max 4)", cleanStockList([0, -1, "x", 2, 2, 1, 0.5, 3, 4]).join(","), "4,3,2,1");
+
 const shapes = foamGeometry(
   {
     block: { lengthIn: 12, widthIn: 10, thicknessIn: 2, cornerStyle: "chamfer", chamferIn: 1 },
@@ -237,6 +284,19 @@ const noRates = priceFoamProcess({ model: 2, geom: g, qty: 100, settings: pickFo
 check("no CNC/die rates: old flat fee", noRates.total, 100);
 const noRatesLow = priceFoamProcess({ model: 2, geom: g, qty: 10, settings: pickFoamProcess({}), markup: 1.45, legacy: { ...legacy, qty: 10 } });
 check("no rates, under the old trigger: nothing", noRatesLow.lines.length, 0);
+
+// Step 39L: a lock with lam_rule 2 counts sheets; the shop's stock sizes come from the settings
+const proc39 = pickFoamProcess({ ...proc, foam_stock_1_in: 1, foam_stock_2_in: 2, lam_rule: 2 });
+check("settings: lam_rule and stock read", `${proc39.lam_rule}|${proc39.foam_stock_1_in}|${proc39.foam_stock_2_in}`, "2|1|2");
+const die39 = priceFoamProcess({ model: 2, geom: setGeom, qty: 1000, settings: proc39, markup: 1.45, legacy });
+check("lam_rule 2: lamination says 2 glue lines", die39.lines.find((l) => l.key === "lamination")?.label, "Lamination (2 glue lines per part)");
+check("lam_rule 2: lamination note counts sheets", die39.lines.find((l) => l.key === "lamination")?.note, "4 sheets per part");
+check("lam_rule 2: press hits = qty × sheets", die39.detail.press_hits, 4000);
+check("lam_rule 2: 3 dies", die39.detail.dies, 3);
+//   lamination: 25 + 1000 × 2 × 0.10 = 225 × 1.45 = 326.25
+check("lam_rule 2: lamination charge", die39.lines.find((l) => l.key === "lamination")?.amount, 326.25);
+const old39 = priceFoamProcess({ model: 2, geom: setGeom, qty: 1000, settings: proc, markup: 1.45, legacy });
+check("old lock (no lam_rule): keeps 1 glue line", old39.detail.glue_lines, 1);
 
 // ---------------------------------------------------------------------------
 // Step 24: compare quantities

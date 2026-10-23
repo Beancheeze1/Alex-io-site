@@ -14,6 +14,11 @@
 //   - auto: "die" at or above the shop's foam_die_over_qty (when dies are set
 //     up), else "cnc"; staff can force either (facts.foam_run_method).
 // Lamination: setup + qty × glue lines × $/glue line (loose layers excluded).
+// Step 39L: a quote whose lock has lam_rule 2 (every quote priced from Step
+// 39L on) counts glue lines, sheets cut, dies and CNC cut sheet by sheet from
+// the shop's stock sheet thicknesses (foam_stock_1_in … foam_stock_4_in):
+// a glue line at every cavity floor plus the build-up, see withSheets() in
+// foam-geometry.ts. Older locks (lam_rule 0) keep the layer count.
 // All rates are the shop's COST; the shop markup (markup_factor_default) is
 // applied, the same way it is to foam material.
 //
@@ -21,7 +26,7 @@
 // (die_cut_upcharge_usd once qty ≥ die_cut_trigger_qty). Quotes first priced
 // before Step 23 (price model 1) also keep the old fee and no lamination.
 
-import type { FoamGeometry } from "@/app/lib/pricing/foam-geometry";
+import { cleanStockList, withSheets, type FoamGeometry } from "@/app/lib/pricing/foam-geometry";
 
 export const FOAM_PROCESS_KEYS = [
   "foam_die_over_qty",
@@ -36,9 +41,24 @@ export const FOAM_PROCESS_KEYS = [
   "press_parts_per_hit",
   "lam_setup_usd",
   "lam_per_glue_line_usd",
+  // Step 39L: stock sheet thicknesses the shop laminates from (0 = not used)
+  "foam_stock_1_in",
+  "foam_stock_2_in",
+  "foam_stock_3_in",
+  "foam_stock_4_in",
 ] as const;
 export type FoamProcessKey = (typeof FOAM_PROCESS_KEYS)[number];
-export type FoamProcessSettings = Record<FoamProcessKey, number>;
+/**
+ * lam_rule (Step 39L) isn't a shop setting: the quote's lock records it.
+ * 2 = sheet-by-sheet lamination (withSheets); 0 = a lock saved before 39L.
+ */
+export type FoamProcessSettings = Record<FoamProcessKey, number> & { lam_rule: number };
+export const LAM_RULE_SHEETS = 2;
+
+/** Step 39L: the shop's stock sheet thicknesses, thickest first. */
+export function foamStockList(s: FoamProcessSettings): number[] {
+  return cleanStockList([s.foam_stock_1_in, s.foam_stock_2_in, s.foam_stock_3_in, s.foam_stock_4_in]);
+}
 
 export type FoamRunMethod = "cnc" | "die";
 export type FoamRunChoice = "auto" | FoamRunMethod;
@@ -82,6 +102,7 @@ export function pickFoamProcess(raw: unknown): FoamProcessSettings {
   const out = {} as FoamProcessSettings;
   for (const k of FOAM_PROCESS_KEYS) out[k] = num(s[k]);
   if (!out.press_parts_per_hit) out.press_parts_per_hit = 1;
+  out.lam_rule = num(s.lam_rule);
   return out;
 }
 
@@ -125,7 +146,9 @@ export function priceFoamProcess(args: {
   // The old flat fee keeps its old rule: the quote's order qty (first line).
   legacy: { trigger_qty: number; upcharge_usd: number; qty: number };
 }): FoamProcessResult {
-  const { geom, settings: s } = args;
+  const s = args.settings;
+  // Step 39L: sheet-by-sheet lamination for quotes locked under the new rule.
+  const geom = args.model === 2 && s.lam_rule >= LAM_RULE_SHEETS ? withSheets(args.geom, foamStockList(s)) : args.geom;
   const qty = Math.max(0, Math.floor(Number(args.qty) || 0));
   const mk = Number.isFinite(args.markup) && args.markup > 0 ? args.markup : 1;
   const lines: ProcessLine[] = [];
@@ -213,7 +236,7 @@ export function priceFoamProcess(args: {
         key: "lamination",
         label: `Lamination (${geom.glue_lines} glue line${geom.glue_lines > 1 ? "s" : ""} per part)`,
         amount: r2(lam * mk),
-        note: null,
+        note: geom.sheets ? `${geom.sheets.length} sheet${geom.sheets.length === 1 ? "" : "s"} per part` : null,
       });
     }
   }

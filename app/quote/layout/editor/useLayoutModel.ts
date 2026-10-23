@@ -59,6 +59,7 @@ export type UseLayoutModelResult = {
   setEditorMode: (mode: "basic" | "advanced") => void;
   setLayerCropCorners: (layerId: string, cropCorners: boolean) => void;
   setLayerRoundCorners: (layerId: string, roundCorners: boolean) => void;
+  setLayerLoose: (layerId: string, loose: boolean) => void; // Step 39L
   setLayerRoundRadiusIn: (layerId: string, roundRadiusIn: number) => void;
   setLayerMaterialId: (layerId: string, materialId: number | null) => void;
 
@@ -258,6 +259,22 @@ const didInitActiveLayerRef = useRef(false);
           ...prev.layout,
           stack: prev.layout.stack.map((l) =>
             l.id === layerId ? { ...l, cropCorners: !!cropCorners } : l,
+          ),
+        },
+      }));
+    },
+    [],
+  );
+
+  // Step 39L: a separate piece (not glued to the stack, no glue line).
+  const setLayerLoose = useCallback(
+    (layerId: string, loose: boolean) => {
+      setState((prev) => ({
+        ...prev,
+        layout: {
+          ...prev.layout,
+          stack: prev.layout.stack.map((l) =>
+            l.id === layerId ? { ...l, loose: !!loose } : l,
           ),
         },
       }));
@@ -724,6 +741,7 @@ const didInitActiveLayerRef = useRef(false);
     renameLayer,
     deleteLayer,
     setLayerRoundCorners,
+    setLayerLoose,
     setLayerRoundRadiusIn,
     setLayerMaterialId,
     importLayerFromSeed,
@@ -930,6 +948,8 @@ function normalizeInitialLayout(initial: LayoutModel): LayoutState {
         cropCorners: !!(l as any).cropCorners,
         roundCorners: !!((l as any).roundCorners ?? (l as any).round_corners),
         roundRadiusIn,
+        // Step 39L: keep the "Separate piece" choice when staff made one (else the default applies)
+        ...(typeof (l as { loose?: unknown }).loose === "boolean" ? { loose: (l as { loose?: boolean }).loose } : {}),
         // Preserve per-layer material override (may be undefined for layers using quote-level material)
         ...((l as any).materialId != null ? { materialId: Number((l as any).materialId) } : {}),
       };

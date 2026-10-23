@@ -20,9 +20,13 @@
 // model 2, and their lock saves the foam cutting / lamination rates and the
 // markup too. Model-2 foam lines with cavities add the cavity volume to the
 // lock key, so a cavity change reprices the line.
+//
+// Step 39L: new locks also save foam_process.lam_rule = 2 (lamination counted
+// sheet by sheet from the shop's stock thicknesses, foam-process.ts) and the
+// stock thicknesses themselves.
 
 import { one, q } from "@/lib/db";
-import { pickFoamProcess, type FoamProcessSettings } from "@/app/lib/pricing/foam-process";
+import { LAM_RULE_SHEETS, pickFoamProcess, type FoamProcessSettings } from "@/app/lib/pricing/foam-process";
 
 export type FoamLockInput = {
   L: number;
@@ -175,6 +179,9 @@ export async function lockedChargeSettings(
   canSave: boolean,
 ): Promise<ChargeSettings> {
   const live = pickCharges(liveSettings, 2);
+  // Step 39L: quotes priced from now on count lamination sheet by sheet; a
+  // lock saved before 39L has no lam_rule and keeps the old count until a reprice.
+  live.foam_process.lam_rule = LAM_RULE_SHEETS;
   try {
     const row = await one<{ price_lock: unknown }>(
       `SELECT price_lock FROM public.quotes WHERE quote_no = $1 LIMIT 1`,

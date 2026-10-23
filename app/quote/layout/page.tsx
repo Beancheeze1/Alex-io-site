@@ -19,6 +19,7 @@ import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT, SNAP_IN as RESIZE_SNAP_
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { findTightCavityWalls, MIN_WALL_IN } from "./editor/spacingWarnings";
 import { findUnconfirmedDepthCavities } from "./editor/depthWarnings";
+import { layerIsLoose } from "@/app/lib/pricing/foam-geometry";
 
 type SearchParams = {
   [key: string]: string | string[] | undefined;
@@ -1285,6 +1286,13 @@ if (materialLabelSeedLocal) {
             if (layerCropAll.length > 0) {
               layersInfo.cropCorners = layerCropAll.map(toBoolLoose);
             }
+
+            // Step 39L: layer names from the Start Quote forms (layer_label=Bottom Insert&layer_label=Top Pad),
+            // same order as layer_thicknesses (they also name the layer's cut files).
+            const layerLabelAll = url.searchParams.getAll("layer_label").map((s) => s.trim().slice(0, 60));
+            if (layerLabelAll.length === layersInfo.thicknesses.length && layerLabelAll.every(Boolean)) {
+              layersInfo.labels = layerLabelAll;
+            }
             if (layerRoundAll.length > 0) {
               layersInfo.roundCorners = layerRoundAll.map(toBoolLoose);
             }
@@ -2159,6 +2167,7 @@ function LayoutEditorHostReady(props: {
     setActiveLayerId,
     setLayerCropCorners,
     setLayerRoundCorners,
+    setLayerLoose,
     setLayerRoundRadiusIn,
     setLayerMaterialId,
     updateCavityPosition,
@@ -5421,6 +5430,21 @@ const tenantCssVars = React.useMemo(() => {
                                   />
                                 </label>
                               </div>
+                              {/* Step 39L: a separate piece (top pad, lid) isn't glued to the layers next to it */}
+                              {layers.length > 1 ? (
+                                <label
+                                  className="flex items-center gap-1 text-xs text-[var(--text-muted)]"
+                                  title="On for a loose piece, like the set's top pad (the top layer starts this way). Off when this layer is glued to the next one."
+                                  data-layer-loose
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={layerIsLoose(layer, layerIndex === layers.length - 1)}
+                                    onChange={(e) => setLayerLoose(layer.id, e.currentTarget.checked)}
+                                  />
+                                  Separate piece (not glued)
+                                </label>
+                              ) : null}
                               {/* Per-layer material override — only shown when "Per layer" is selected in the Foam material dropdown */}
                               {perLayerMaterialMode && (
                                 <div className="flex items-center gap-1.5 mt-1">

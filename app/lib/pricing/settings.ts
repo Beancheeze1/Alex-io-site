@@ -46,6 +46,11 @@ export type PricingSettings = {
   press_parts_per_hit: number;
   lam_setup_usd: number;
   lam_per_glue_line_usd: number;
+  // Step 39L: stock sheet thicknesses laminated into parts (0 = not used)
+  foam_stock_1_in: number;
+  foam_stock_2_in: number;
+  foam_stock_3_in: number;
+  foam_stock_4_in: number;
 
   // Step 25: review flags (app/lib/pricing/foam-review.ts) — warnings only.
   foam_min_wall_in: number; // thinnest foam wall at an edge / between cavities
@@ -110,6 +115,10 @@ const DEFAULTS: PricingSettings = {
   press_parts_per_hit: 1,
   lam_setup_usd: 0,
   lam_per_glue_line_usd: 0,
+  foam_stock_1_in: 0,
+  foam_stock_2_in: 0,
+  foam_stock_3_in: 0,
+  foam_stock_4_in: 0,
 
   foam_min_wall_in: 0.25,
   foam_min_feature_in: 0.25,
