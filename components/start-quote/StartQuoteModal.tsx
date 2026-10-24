@@ -26,7 +26,14 @@ import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } from "@/lib/box-styles";
 import { matchGrade } from "@/lib/corrugated/grade-match";
 import BoxShapeHint from "@/components/start-quote/BoxShapeHint";
-import { analyzeDieline, BUYER_DIELINE_MAX_PARTS, splitDieline } from "@/lib/dieline-import"; // Step 39E
+import DielineChoices, {
+  dielineDisplayBlocked,
+  dielineWarnings,
+  readDielineFile,
+  type DielineAsPick,
+  type DielineRead,
+  type DielineUnitsPick,
+} from "@/components/start-quote/DielineChoices"; // Step 39E; Step 39P: shared reader, units, one part or display
 import BoxSizesEditor, {
   describeExtraSize,
   extraSizePayload,
@@ -479,14 +486,9 @@ export default function StartQuoteModal({
 
   // Step 39E: the buyer's own die line (DXF). Read here in the browser to show
   // what was found; the server reads it again and prices it when the quote is made.
-  type DielineRead = {
-    units_label: string;
-    warnings: string[];
-    length_in: number;
-    width_in: number;
-    rule_in: number;
-    pieces: { piece: number; length_in: number; width_in: number; rule_in: number }[];
-  };
+  // Step 39P: inches unless the buyer picks mm; "This file is One part / A display".
+  const [dlUnits, setDlUnits] = React.useState<DielineUnitsPick>("in");
+  const [dlAs, setDlAs] = React.useState<DielineAsPick>("single");
   const [dlFile, setDlFile] = React.useState<File | null>(null);
   const [dlRead, setDlRead] = React.useState<DielineRead | null>(null);
   const [dlError, setDlError] = React.useState<string | null>(null);
@@ -495,8 +497,10 @@ export default function StartQuoteModal({
   // The chat said the buyer has a die line: the form opens on Box Setup to upload it.
   const [dlWanted, setDlWanted] = React.useState(false);
   const dlMode = quoteType === "boxes_only" && !!dlFile && !!dlRead;
-  const dlDisplay = dlMode && (dlRead?.pieces.length ?? 0) > 1;
-  const dlPartsOk = !dlDisplay || Object.values(dlParts).every((p) => /^\d+$/.test(p.per) && Number(p.per) >= 1);
+  const dlDisplay = dlMode && dlAs === "display" && (dlRead?.pieces.length ?? 0) > 1;
+  const dlPartsOk =
+    !dielineDisplayBlocked(dlRead, dlAs) &&
+    (!dlDisplay || Object.values(dlParts).every((p) => /^\d+$/.test(p.per) && Number(p.per) >= 1));
   const dlSpecHref = (() => {
     const t = (searchParams.get("tenant") || searchParams.get("t") || "").trim().toLowerCase();
     return t ? `/t/${encodeURIComponent(t)}/specs` : null;
@@ -506,6 +510,7 @@ export default function StartQuoteModal({
     setDlRead(null);
     setDlParts({});
     setDlFile(null);
+    setDlUnits("in");
     if (!f) {
       setDlInputKey((k) => k + 1);
       return;
@@ -514,75 +519,35 @@ export default function StartQuoteModal({
       setDlError("Upload your die line as a .dxf file or a vector .pdf. For a DWG or STEP drawing, send it to the shop.");
       return;
     }
-    if (f.size > 5 * 1024 * 1024) {
-      setDlError("That file is over 5 MB.");
+    await loadDieline(f, "in", null);
+  };
+  // Step 39P: read (or re-read with a new units pick) the file; names and counts
+  // are kept when the same parts come back.
+  const loadDieline = async (f: File, units: DielineUnitsPick, prev: { read: DielineRead; as: DielineAsPick } | null) => {
+    const r = await readDielineFile(f, { units });
+    if (!r.ok) {
+      setDlError(`${r.message} You can send it to the shop instead and they'll quote it.`);
       return;
     }
-    try {
-      // Step 39F: a PDF is read on the server (nothing is saved until the quote is made).
-      if (/\.pdf$/i.test(f.name)) {
-        const fd = new FormData();
-        fd.set("file", f);
-        const res = await fetch("/api/quote/dieline-preview", { method: "POST", body: fd });
-        const j = await res.json().catch(() => null);
-        if (!res.ok || !j?.ok) {
-          setDlError(`${j?.message || "We couldn't read that PDF."} You can send it to the shop instead and they'll quote it.`);
-          return;
-        }
-        const pieces: DielineRead["pieces"] = Array.isArray(j.pieces) ? j.pieces : [];
-        if (pieces.length > 1) setDlParts(Object.fromEntries(pieces.map((p) => [p.piece, { label: "", per: "1" }])));
-        setDlRead({
-          units_label: String(j.units_label || ""),
-          warnings: Array.isArray(j.warnings) ? j.warnings : [],
-          length_in: Number(j.measure?.length_in) || 0,
-          width_in: Number(j.measure?.width_in) || 0,
-          rule_in: Number(j.measure?.rule_in) || 0,
-          pieces: pieces.length > 1 ? pieces : [],
-        });
-        setDlFile(f);
-        setExtraSizes([]);
-        setPrefillPackagingSku("");
-        setBoxChoice("custom");
-        return;
-      }
-      const text = await f.text();
-      const a = analyzeDieline(text, { split: true });
-      if (!a.ok) {
-        setDlError(`${a.message} You can send it to the shop instead and they'll quote it.`);
-        return;
-      }
-      let pieces: DielineRead["pieces"] = [];
-      if (a.measure.pieces > 1) {
-        const sp = splitDieline(text);
-        if (!sp.ok) {
-          setDlError(`${sp.message} You can send it to the shop instead and they'll quote it.`);
-          return;
-        }
-        if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
-          setDlError(
-            `That file has ${sp.pieces.length} separate parts. Online quotes take up to ${BUYER_DIELINE_MAX_PARTS}; send it to the shop and they'll quote it.`,
-          );
-          return;
-        }
-        pieces = sp.pieces.map((p) => ({ piece: p.piece, length_in: p.length_in, width_in: p.width_in, rule_in: p.rule_in }));
-        setDlParts(Object.fromEntries(pieces.map((p) => [p.piece, { label: "", per: "1" }])));
-      }
-      setDlRead({
-        units_label: a.units_label,
-        warnings: a.warnings,
-        length_in: a.measure.length_in,
-        width_in: a.measure.width_in,
-        rule_in: a.measure.rule_in,
-        pieces,
-      });
-      setDlFile(f);
-      // A die line quote is just this file: no stock box, no extra sizes.
-      setExtraSizes([]);
-      setPrefillPackagingSku("");
-      setBoxChoice("custom");
-    } catch {
-      setDlError("We couldn't read that file. You can send it to the shop instead and they'll quote it.");
-    }
+    setDlError(null);
+    const read = r.read;
+    const same = !!prev && prev.read.pieces.length === read.pieces.length;
+    setDlParts((old) =>
+      read.pieces.length > 1
+        ? Object.fromEntries(read.pieces.map((p) => [p.piece, (same ? old[p.piece] : null) ?? { label: "", per: "1" }]))
+        : {},
+    );
+    setDlAs(prev ? prev.as : read.pieces.length > 1 ? "display" : "single");
+    setDlUnits(units);
+    setDlRead(read);
+    setDlFile(f);
+    // A die line quote is just this file: no stock box, no extra sizes.
+    setExtraSizes([]);
+    setPrefillPackagingSku("");
+    setBoxChoice("custom");
+  };
+  const setDielineUnits = (u: DielineUnitsPick) => {
+    if (dlFile && dlRead) void loadDieline(dlFile, u, { read: dlRead, as: dlAs });
   };
 
   // ---------- Seed all state from prefillData once it resolves ----------
@@ -1533,6 +1498,8 @@ export default function StartQuoteModal({
                   per_display: Number(v.per) || 1,
                 }))
               : [],
+            dieline_units: dlUnits, // Step 39P
+            dieline_as: dlDisplay ? "display" : "single",
             print_spec: printSpecOut(),
             qty_breaks: size1Breaks,
             notes: notesOut(),
@@ -1861,7 +1828,8 @@ export default function StartQuoteModal({
                             </div>
                             <div className="mt-1 text-sm text-[var(--text-secondary)]">
                               Upload your die line (a DXF, or a vector PDF from your CAD program) for a box, a display or
-                              any die-cut part, and we&apos;ll measure it and price it. A file with several separate parts is quoted as a display: your quantity is the
+                              any die-cut part, and we&apos;ll measure it and price it. Files are read in inches unless you pick
+                              millimeters. For a display with several separate parts, pick &quot;A display&quot;: your quantity is the
                               number of displays.
                             </div>
                             {dlWanted && !dlFile ? (
@@ -1893,6 +1861,14 @@ export default function StartQuoteModal({
                             ) : null}
                             {dlMode && dlRead ? (
                               <div className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]" data-dieline-read>
+                                <DielineChoices
+                                  read={dlRead}
+                                  units={dlUnits}
+                                  as={dlAs}
+                                  onUnits={setDielineUnits}
+                                  onAs={setDlAs}
+                                  dataPrefix="dieline"
+                                />
                                 {dlDisplay ? (
                                   <>
                                     <div>
@@ -1956,7 +1932,7 @@ export default function StartQuoteModal({
                                       Assembly and packing is added as its own line.
                                     </div>
                                   </>
-                                ) : (
+                                ) : dielineDisplayBlocked(dlRead, dlAs) ? null : (
                                   <div>
                                     Read as one part:{" "}
                                     <span className="font-medium text-[var(--text-primary)]">
@@ -1965,9 +1941,9 @@ export default function StartQuoteModal({
                                     , {Math.round(dlRead.rule_in)} in of cutting and creasing rule.
                                   </div>
                                 )}
-                                {dlRead.warnings.length ? (
+                                {dielineWarnings(dlRead, dlAs).length ? (
                                   <ul className="list-disc pl-5 text-xs text-[var(--text-muted)]">
-                                    {dlRead.warnings.map((w) => (
+                                    {dielineWarnings(dlRead, dlAs).map((w) => (
                                       <li key={w}>{w}</li>
                                     ))}
                                   </ul>

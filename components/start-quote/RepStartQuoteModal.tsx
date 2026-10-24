@@ -41,10 +41,12 @@ import BoxSizesEditor, {
 } from "@/components/start-quote/BoxSizesEditor";
 import { BOX_STYLES, boxStyleInfo, boxStyleOrRsc, parseCells, type BoxStyle } from "@/lib/box-styles";
 import DielineUploadCard, {
+  dielineChoicesPayload,
+  dielineIsDisplay,
   dielinePartsOk,
   dielinePartsPayload,
   type DielineUpload,
-} from "@/components/start-quote/DielineUploadCard"; // Step 39H
+} from "@/components/start-quote/DielineUploadCard"; // Step 39H; Step 39P: units / one part or display / lines
 import { repLabel, type RepOption } from "@/app/lib/account-rep-core"; // Step 39O
 
 type QuoteType = "foam_insert" | "complete_pack" | "boxes_only";
@@ -416,7 +418,7 @@ export default function RepStartQuoteModal({
   // Step 39H: a boxes-only quote priced from the customer's die line file
   const [dieline, setDieline] = React.useState<DielineUpload>(null);
   const dlMode = quoteType === "boxes_only" && !!dieline;
-  const dlDisplay = dlMode && (dieline?.read.pieces.length ?? 0) > 1;
+  const dlDisplay = dlMode && dielineIsDisplay(dieline);
   const setPrintColorCount = (n: number) => {
     setPrintColors((c) => Array.from({ length: n }, (_, i) => c[i] ?? "spot"));
     setPrinted(n > 0);
@@ -741,7 +743,12 @@ export default function RepStartQuoteModal({
     }
 
     if (dlMode && !dielinePartsOk(dieline)) {
-      setSubmitError("Enter at least 1 of each part per display.");
+      // Step 39P: Display picked on a file with one outline
+      setSubmitError(
+        dieline && dieline.as === "display" && dieline.read.pieces.length < 2
+          ? "This file has one outline, so it can't be quoted as a display. Pick One part, or use a file with each part drawn separately."
+          : "Enter at least 1 of each part per display.",
+      );
       setActiveStep("specs");
       return;
     }
@@ -848,6 +855,7 @@ export default function RepStartQuoteModal({
               qty: toNumOrNull(qty),
               box: { grade_id: /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null },
               parts: dielinePartsPayload(dieline),
+              ...dielineChoicesPayload(dieline), // Step 39P
               print_spec: { colors: printColors, sides: printSides },
               run_method: runMethod === "auto" ? null : runMethod,
               qty_breaks: cleanBreaks.map((b) => b.qty),

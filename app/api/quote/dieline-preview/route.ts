@@ -3,15 +3,25 @@
 // Step 39F: the Start Quote form reads a DXF die line in the browser, but a
 // PDF needs the server's PDF reader. POST multipart `file` (a vector .pdf, or
 // a .dxf; up to 5 MB) -> what was read, nothing saved:
-//   { ok, units_label, warnings, measure: { length_in, width_in, rule_in, pieces },
-//     pieces: [{ piece, length_in, width_in, rule_in }] }   (pieces when > 1)
+//   { ok, units_label, units_set, warnings, measure: { length_in, width_in, rule_in, pieces },
+//     pieces: [{ piece, length_in, width_in, rule_in }],   (pieces when > 1)
+//     groups: [{ key, layer, color, dashed, length_in, role, auto_role, reason }] }
+// Step 39P: optional form fields `units` ("in" | "mm") and `roles` (JSON
+// { groupKey: role }, the staff form's line table).
 // Errors: { ok: false, error, message } (not_vector, too_many_parts, ...).
 // Public (buyers), 20 per minute per IP. The quote itself is made by
 // /api/quote/boxes-only, which reads the file again.
 
 import { NextRequest, NextResponse } from "next/server";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
-import { analyzeDieline, BUYER_DIELINE_MAX_PARTS, splitDieline, type DielineSource } from "@/lib/dieline-import";
+import {
+  analyzeDieline,
+  BUYER_DIELINE_MAX_PARTS,
+  cleanDielineRoles,
+  cleanDielineUnits,
+  splitDieline,
+  type DielineSource,
+} from "@/lib/dieline-import";
 import { looksLikePdf, pdfDielineLines } from "@/lib/dieline-pdf";
 
 export const runtime = "nodejs";
@@ -48,11 +58,14 @@ export async function POST(req: NextRequest) {
       src = pdf.lines;
     }
 
-    const a = analyzeDieline(src, { split: true });
+    // Step 39P: the form's units pick and line roles
+    const units = cleanDielineUnits(form?.get("units"));
+    const roles = cleanDielineRoles(form?.get("roles"));
+    const a = analyzeDieline(src, { split: true, units, roles });
     if (!a.ok) return json({ ok: false, error: a.error, message: a.message }, 422);
     let pieces: { piece: number; length_in: number; width_in: number; rule_in: number }[] = [];
     if (a.measure.pieces > 1) {
-      const sp = splitDieline(src);
+      const sp = splitDieline(src, { units, roles });
       if (!sp.ok) return json({ ok: false, error: sp.error, message: sp.message }, 422);
       if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
         return json(
@@ -69,9 +82,20 @@ export async function POST(req: NextRequest) {
     return json({
       ok: true,
       units_label: a.units_label,
+      units_set: a.units_set,
       warnings: a.warnings,
       measure: { length_in: a.measure.length_in, width_in: a.measure.width_in, rule_in: a.measure.rule_in, pieces: a.measure.pieces },
       pieces,
+      groups: a.groups.map((g) => ({
+        key: g.key,
+        layer: g.layer,
+        color: g.color,
+        dashed: g.dashed,
+        length_in: g.length_in,
+        role: g.role,
+        auto_role: g.auto_role,
+        reason: g.reason,
+      })),
     });
   } catch (e) {
     console.error("[quote/dieline-preview] failed:", e);

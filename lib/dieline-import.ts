@@ -12,14 +12,18 @@
 //          2. a dashed linetype = crease
 //          3. red (ACI color 1) = crease (ArtiosCAD-style files)
 //          4. anything else = cut
+//        Step 39P: when only the colors tell cut from crease (no layer names,
+//        no dashed lines) and red-as-crease leaves no closed outlines but
+//        red-as-cut does, red is read as the cut and the other colors as
+//        creases (files drawn "red = cut"). A warning says so.
 //        Staff can override any group's role (roles: { [groupKey]: role }).
 //     -> the blank: the rectangle around every cut / crease / perf line
 //        (length = across the drawing, width = up the drawing), in inches
 //     -> rule inches: cut, crease, perf and the total (the die estimate and
 //        the CAD table path both use the total)
-//   Units: the file's $INSUNITS; when the file doesn't set them and the
-//   blank would be over 150" across, it's read as millimeters (a warning
-//   says so). Staff can force "in" or "mm".
+//   Units: the file's $INSUNITS; when the file doesn't set them it's read as
+//   inches (Step 39P: no more guessing mm from the size). Pick "mm" for a
+//   file drawn in millimeters; a very big blank gets a warning to check.
 
 import { buildLoops, parseDxfTagged, pointInPoly, type Pt, type TaggedSeg } from "@/lib/dxf/parse";
 
@@ -55,6 +59,7 @@ export type DielineAnalysis =
       ok: true;
       units: "in" | "mm";
       units_label: string;
+      units_set: boolean; // Step 39P: the file says its own units (the in/mm pick doesn't apply)
       scale: number; // Step 39D: drawing units -> inches applied on top of the reader's conversion
       groups: DielineGroup[];
       measure: DielineMeasure;
@@ -84,6 +89,62 @@ export function autoRole(tag: { layer: string; dashed: boolean; color: number })
 }
 
 const segLen = (s: { x1: number; y1: number; x2: number; y2: number }) => Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+
+/** Step 39P: true when autoRole decides this group by its color alone (no layer name, not dashed). */
+function colorOnly(tag: { layer: string; dashed: boolean }): boolean {
+  const L = tag.layer.toUpperCase();
+  return !PERF_LAYER.test(L) && !CREASE_LAYER.test(L) && !CUT_LAYER.test(L) && !IGNORE_LAYER.test(L) && !tag.dashed;
+}
+
+/**
+ * Step 39P: how well a cut / crease split fits a die line: the separate outer
+ * outlines the cut lines close (1 sq in or bigger), and the share of the other
+ * lines that sit inside one of them. Lines are in inches.
+ */
+function cutFit(cut: Seg4[], rest: Seg4[]): { outers: number; inside: number } {
+  const { loops } = buildLoops(cut, 0.02);
+  const big = loops.filter((lp) => lp.length >= 3 && bboxArea(lp) >= 1);
+  const outers = big.filter((lp, i) => !big.some((other, j) => j !== i && inside(lp, other)));
+  let inLen = 0;
+  let total = 0;
+  for (const s of rest) {
+    const len = segLen(s);
+    total += len;
+    const mid = { x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2 };
+    if (outers.some((o) => pointInPoly(mid, o))) inLen += len;
+  }
+  return { outers: outers.length, inside: total > 0 ? inLen / total : 1 };
+}
+type Seg4 = { x1: number; y1: number; x2: number; y2: number };
+
+/**
+ * Step 39P: read red as the cut (and the other color-only lines as creases)
+ * when that's what the shapes say: red-as-crease closes no outline (or leaves
+ * most creases outside every outline) and red-as-cut closes at least one with
+ * the creases inside. Only for files where the colors alone decide.
+ */
+function redIsCut(groups: { tag: TaggedSeg["tag"]; segs: TaggedSeg[] }[], scale: number): boolean {
+  const colorGroups = groups.filter((g) => colorOnly(g.tag));
+  if (!colorGroups.some((g) => g.tag.color === 1)) return false;
+  const sc = (s: TaggedSeg): Seg4 => ({ x1: s.x1 * scale, y1: s.y1 * scale, x2: s.x2 * scale, y2: s.y2 * scale });
+  const split = (redCut: boolean) => {
+    const cut: Seg4[] = [];
+    const rest: Seg4[] = [];
+    for (const g of groups) {
+      const a = autoRole(g.tag).role;
+      if (a === "ignore") continue;
+      let role = a;
+      if (redCut && colorOnly(g.tag)) role = g.tag.color === 1 ? "cut" : "crease";
+      for (const s of g.segs) (role === "cut" ? cut : rest).push(sc(s));
+    }
+    return cutFit(cut, rest);
+  };
+  const asIs = split(false);
+  const flipped = split(true);
+  if (flipped.outers === 0) return false;
+  if (asIs.outers === 0) return true;
+  return asIs.inside < 0.5 && flipped.inside >= 0.9;
+}
 
 export function groupKey(t: { layer: string; ltype: string; color: number }): string {
   return `${t.layer}|${t.ltype}|${t.color}`;
@@ -190,8 +251,7 @@ export function analyzeDieline(
   const roles = opts.roles || {};
   const warnings: string[] = [];
 
-  // Units: the file's, staff's, or a guess for files that don't say.
-  const structural0 = Array.from(byKey.entries()).filter(([, g]) => autoRole(g.tag).role !== "ignore");
+  // Units: the file's, or inches unless mm is picked (Step 39P).
   const extent = (list: TaggedSeg[]) => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const s of list) {
@@ -200,10 +260,9 @@ export function analyzeDieline(
     }
     return { w: x1 - x0, h: y1 - y0 };
   };
-  const rawExt = extent(structural0.flatMap(([, g]) => g.segs).concat(structural0.length ? [] : segs));
   // Units: a file that sets $INSUNITS is already in inches (the reader converts).
-  // Only a file that doesn't say can be read as mm: chosen by staff, or guessed
-  // when it would be over 150" across as inches.
+  // A file that doesn't say is read as inches unless mm is picked (Step 39P:
+  // no guessing from the size; a big blank gets a "check the units" note).
   let units: "in" | "mm" = "in";
   let unitsLabel = parsed.unitsLabel;
   let scale = 1;
@@ -215,11 +274,8 @@ export function analyzeDieline(
     unitsLabel = "millimeters (chosen)";
   } else if (opts.units === "in") {
     unitsLabel = "inches (chosen)";
-  } else if (Math.max(rawExt.w, rawExt.h) > 150) {
-    units = "mm";
-    scale = 1 / 25.4;
-    unitsLabel = "millimeters (guessed: the file doesn't say, and it's over 150 across as inches)";
-    warnings.push("The file doesn't say its units, so it was read as millimeters. Switch to inches if that's wrong.");
+  } else {
+    unitsLabel = "inches (the file doesn't say)";
   }
   // Step 39F: the drawing's scale (staff), and PDF notes
   const drawScale = cleanDielineScale(opts.scale);
@@ -236,9 +292,21 @@ export function analyzeDieline(
     }
   }
 
+  // Step 39P: files drawn "red = cut" (the shapes decide, see redIsCut)
+  const flipRed = redIsCut(Array.from(byKey.values()), scale);
+  const autoOf = (tag: TaggedSeg["tag"]): { role: DielineRole; reason: string } => {
+    if (flipRed && colorOnly(tag)) {
+      return tag.color === 1
+        ? { role: "cut", reason: "red outline" }
+        : { role: "crease", reason: "line inside the red outlines" };
+    }
+    return autoRole(tag);
+  };
+  if (flipRed) warnings.push("The red lines make the closed outlines, so red was read as the cut and the other colors as creases.");
+
   const groups: DielineGroup[] = Array.from(byKey.entries())
     .map(([key, g]) => {
-      const auto = autoRole(g.tag);
+      const auto = autoOf(g.tag);
       const override = roles[key];
       return {
         key,
@@ -275,6 +343,11 @@ export function analyzeDieline(
   }
   if (dielineSizeSuspect(length_in, width_in)) {
     warnings.push(`The blank is ${length_in.toFixed(1)} × ${width_in.toFixed(1)} in. Check the units.`);
+  } else if (!parsed.unitsSet && opts.units !== "in" && opts.units !== "mm" && pieces <= 1 && Math.max(length_in, width_in) > 150) {
+    // Step 39P: read as inches (no guessing); a one-part blank this big may be in mm
+    warnings.push(
+      `The file doesn't say its units, so it was read as inches (${length_in.toFixed(1)} × ${width_in.toFixed(1)} in). If it was drawn in millimeters, pick mm.`,
+    );
   }
   if (cut_in === 0) warnings.push("No cut lines found. Check which lines are cut.");
   if (crease_in === 0) warnings.push("No crease lines found. If the box folds, mark the crease lines.");
@@ -295,6 +368,7 @@ export function analyzeDieline(
     ok: true,
     units,
     units_label: unitsLabel,
+    units_set: parsed.unitsSet,
     scale,
     groups,
     measure: {
@@ -454,6 +528,34 @@ export function splitDieline(
 /** Step 39E: the most a buyer's quote can hold from one file (more = send it to the shop). */
 export const BUYER_DIELINE_MAX_PARTS = 12;
 
+/** Step 39P: what the form says the file is: one part, a display, or decide by the outlines. */
+export type DielineAs = "auto" | "single" | "display";
+export function cleanDielineAs(raw: unknown): DielineAs {
+  return raw === "single" || raw === "display" ? raw : "auto";
+}
+export function cleanDielineUnits(raw: unknown): DielineUnits {
+  return raw === "in" || raw === "mm" ? raw : "auto";
+}
+/** Step 39P: line roles sent by a form: { groupKey: role }, unknown roles dropped. */
+export function cleanDielineRoles(raw: unknown): Record<string, DielineRole> {
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return {};
+    }
+  }
+  const out: Record<string, DielineRole> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, r] of Object.entries(v as Record<string, unknown>).slice(0, 100)) {
+    if (k.length <= 200 && isRole(r)) out[k] = r;
+  }
+  return out;
+}
+export const DIELINE_NOT_DISPLAY =
+  "We found only one outline in this file, so it can't be split into display parts. Draw each part as its own closed cut outline, pick \"One part\", or send the file to the shop.";
+
 /**
  * Step 39E: a buyer's own die line -> the parts to quote. Lines are read
  * automatically (layer names, dashed, red), and every part is marked
@@ -465,25 +567,46 @@ export function buyerDielineParts(
   text: DielineSource,
   filename: string,
   asked: { piece?: unknown; label?: unknown; per_display?: unknown }[] = [],
+  // Step 39P: the in/mm pick, the form's "One part / A display" choice
+  // (auto = by the outlines found) and staff's line roles (staff only).
+  opts: { units?: DielineUnits; as?: DielineAs; roles?: Record<string, unknown> | null } = {},
 ):
   | { ok: true; parts: DielineBlank[]; display: boolean; warnings: string[]; units: "in" | "mm" }
   | { ok: false; error: string; message: string } {
-  const a = analyzeDieline(text, { split: true });
+  // the form's Inches (the default) = the file's units, else inches; mm only when picked
+  const units: DielineUnits = opts.units === "mm" ? "mm" : "auto";
+  const roles = opts.roles || null;
+  const a = analyzeDieline(text, { split: opts.as !== "single", units, roles });
   if (!a.ok) return a;
-  const base = { filename: String(filename || "dieline.dxf").slice(0, 200), units: a.units, check: true as const };
-  if (a.measure.pieces <= 1) {
+  const keptRoles: Record<string, DielineRole> = {};
+  for (const g of a.groups) if (g.role !== g.auto_role) keptRoles[g.key] = g.role;
+  const base = {
+    filename: String(filename || "dieline.dxf").slice(0, 200),
+    units: a.units,
+    check: true as const,
+    ...(Object.keys(keptRoles).length ? { roles: keptRoles } : {}),
+  };
+  if (opts.as === "display" && a.measure.pieces <= 1) {
+    return { ok: false, error: "not_a_display", message: DIELINE_NOT_DISPLAY };
+  }
+  if (a.measure.pieces <= 1 || opts.as === "single") {
     const m = a.measure;
+    // Step 39P: "One part" on a file with several outlines: one blank holding all of them
+    const warnings =
+      m.pieces > 1
+        ? a.warnings.filter((w) => !/separate pieces/.test(w)).concat(`The ${m.pieces} outlines are priced as one blank holding all of them.`)
+        : a.warnings;
     return {
       ok: true,
       display: false,
       units: a.units,
-      warnings: a.warnings,
+      warnings,
       parts: [
         { length_in: m.length_in, width_in: m.width_in, cut_in: m.cut_in, crease_in: m.crease_in, perf_in: m.perf_in, rule_in: m.rule_in, ...base, per_display: 1, piece: null, label: null },
       ],
     };
   }
-  const sp = splitDieline(text);
+  const sp = splitDieline(text, { units, roles });
   if (!sp.ok) return sp;
   if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
     return {

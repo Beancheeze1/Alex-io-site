@@ -42,6 +42,10 @@
 //                      [{ piece, label, per_display }]), qty = qty displays x
 //                      per display, plus an "Assembly and packing" line from
 //                      the shop's rates
+// Step 39P: payload.dieline_units ("in" | "mm"; a file that doesn't say its
+// units is read as inches unless mm is picked), payload.dieline_as ("single" |
+// "display"; Display on a one-outline file is refused with the reason) and,
+// staff only, payload.dieline_roles ({ groupKey: role }, kept on each part).
 // Every part is flagged for staff to check the lines (review queue) until
 // they confirm them on the admin quote page. A file that can't be read is
 // refused with a message; the form offers the shop's spec request page.
@@ -69,7 +73,14 @@ import {
   resolveStockSelection,
   type StockBoxRow,
 } from "@/app/lib/packaging-selection";
-import { buyerDielineParts, type DielineBlank, type DielineSource } from "@/lib/dieline-import"; // Step 39E
+import {
+  buyerDielineParts,
+  cleanDielineAs,
+  cleanDielineRoles,
+  cleanDielineUnits,
+  type DielineBlank,
+  type DielineSource,
+} from "@/lib/dieline-import"; // Step 39E; Step 39P: the form's units / one part or display / line roles
 import { looksLikePdf, pdfDielineLines } from "@/lib/dieline-pdf"; // Step 39F
 import { ASSEMBLY_STYLE } from "@/lib/display-assembly"; // Step 39E
 
@@ -174,7 +185,13 @@ export async function POST(req: NextRequest) {
         }
         src = pdf.lines;
       }
-      const read = buyerDielineParts(src, dielineFile.name, Array.isArray(b.parts) ? b.parts.slice(0, 50) : []);
+      // Step 39P: the form's choices: units (inches unless mm), one part or a display,
+      // and (staff only) the line roles from the form's line table.
+      const read = buyerDielineParts(src, dielineFile.name, Array.isArray(b.parts) ? b.parts.slice(0, 50) : [], {
+        units: cleanDielineUnits(b.dieline_units),
+        as: cleanDielineAs(b.dieline_as),
+        roles: isStaff ? cleanDielineRoles(b.dieline_roles) : null,
+      });
       if (!read.ok) {
         return bad("dieline_unreadable", `${read.message} You can send the file to the shop instead and they'll quote it.`, 422);
       }

@@ -4,7 +4,18 @@
 // and pricing it as a die-cut box from the file (style "dieline").
 // Run: npm run test:dieline-import   (= npx --yes tsx scripts/test-dieline-import.ts)
 
-import { analyzeDieline, autoRole, dielineSizeSuspect, parseDielineBlank, splitDieline } from "../lib/dieline-import";
+import { readFileSync } from "fs";
+import {
+  analyzeDieline,
+  autoRole,
+  buyerDielineParts,
+  cleanDielineAs,
+  cleanDielineRoles,
+  cleanDielineUnits,
+  dielineSizeSuspect,
+  parseDielineBlank,
+  splitDieline,
+} from "../lib/dieline-import";
 import { dielineDxf, slottedDieline } from "../lib/box-dieline";
 import { DEFAULT_FLUTES, dielineStyleBlank } from "../lib/corrugated-blank";
 import { priceRscBox, type BoxSettings } from "../lib/corrugated-price";
@@ -116,11 +127,13 @@ if (a3.ok) {
   check("all ignored -> no_rule", !a5.ok && a5.error === "no_rule", a5);
 }
 
-// 5. units: a unitless file 508 x 254 is read as mm (20 x 10 in); staff can force inches
+// 5. units: a unitless file is read as inches (Step 39P: no mm guess); pick mm to read it as mm
 const t5 = dxf(rect(0, 0, 508, 254));
 const a6 = analyzeDieline(t5);
-check("unitless 508 x 254 guessed as mm = 20 x 10 in", a6.ok && near(a6.measure.length_in, 20, 0.01) && near(a6.measure.width_in, 10, 0.01) && a6.units === "mm", a6.ok ? a6.measure : a6);
-check("mm guess warns", a6.ok && a6.warnings.some((w) => w.includes("millimeters")), a6.ok ? a6.warnings : a6);
+check("unitless 508 x 254 read as inches (no mm guess)", a6.ok && a6.measure.length_in === 508 && a6.units === "in" && !a6.units_set && /doesn't say/.test(a6.units_label), a6.ok ? a6 : a6);
+check("unitless huge blank warns to check the units", a6.ok && a6.warnings.some((w) => w.includes("Check the units")), a6.ok ? a6.warnings : a6);
+const a6mm = analyzeDieline(t5, { units: "mm" });
+check("picked mm: 508 x 254 = 20 x 10 in", a6mm.ok && near(a6mm.measure.length_in, 20, 0.01) && near(a6mm.measure.width_in, 10, 0.01) && a6mm.units === "mm", a6mm.ok ? a6mm.measure : a6mm);
 const a7 = analyzeDieline(t5, { units: "in" });
 check("forced inches keeps 508 x 254 and warns it's big", a7.ok && a7.measure.length_in === 508 && a7.warnings.some((w) => w.includes("Check the units")), a7.ok ? a7 : a7);
 const a8 = analyzeDieline(dxf(rect(0, 0, 508, 254), { insunits: 4 }));
@@ -216,6 +229,71 @@ check("dieline style reads as a part", boxStyleInfo("dieline").label === "Die-cu
   check("split off: tells you to tick Split", off.ok && off.warnings.some((w) => /tick "Split"/.test(w)), off.ok && off.warnings);
   check("split on: no tick-Split hint", on.ok && !on.warnings.some((w) => /tick "Split"/.test(w)) && on.warnings.some((w) => /each is priced as its own part/.test(w)), on.ok && on.warnings);
   check("size suspect over 400 in", dielineSizeSuspect(508, 254) && !dielineSizeSuspect(128, 40) && !dielineSizeSuspect(400, 10));
+}
+
+// Step 39P: inches by default, red = cut files, the form's One part / Display choice
+{
+  const big = analyzeDieline(dxf(rect(0, 0, 200, 100)));
+  check("39P: unitless 200 x 100 one part = inches with a pick-mm hint", big.ok && big.units === "in" && big.measure.length_in === 200 && big.warnings.some((w) => /pick mm/.test(w)), big.ok && big.warnings);
+  const wide = analyzeDieline(dxf([...rect(0, 0, 40, 40), ...rect(160, 0, 40, 40)]), { split: true });
+  check("39P: a wide multi-part layout gets no pick-mm hint", wide.ok && !wide.warnings.some((w) => /pick mm/.test(w)), wide.ok && wide.warnings);
+  const set = analyzeDieline(dxf(rect(0, 0, 508, 254), { insunits: 4 }));
+  check("39P: a file that says mm reports units_set", set.ok && set.units_set && set.units === "mm", set.ok && set);
+
+  // red outlines with yellow creases inside (drawn "red = cut")
+  const redCut = dxf([
+    ...rect(0, 0, 20, 10, { color: 1 }),
+    { x1: 5, y1: 0, x2: 5, y2: 10, color: 2 },
+    { x1: 15, y1: 0, x2: 15, y2: 10, color: 2 },
+    ...rect(30, 0, 8, 8, { color: 1 }),
+    { x1: 30, y1: 4, x2: 38, y2: 4, color: 8 },
+  ]);
+  const rc = analyzeDieline(redCut, { split: true });
+  const role = (r: typeof rc, color: number) => (r.ok ? r.groups.find((g) => g.color === color)?.role : null);
+  check("39P: red outlines read as cut", rc.ok && role(rc, 1) === "cut" && role(rc, 2) === "crease" && role(rc, 8) === "crease", rc.ok && rc.groups);
+  check("39P: red = cut found 2 parts and says why", rc.ok && rc.measure.pieces === 2 && rc.warnings.some((w) => /red was read as the cut/.test(w)), rc.ok && rc);
+  check("39P: red = cut: auto_role is the flipped role (Edit lines keeps no override)", rc.ok && rc.groups.every((g) => g.role === g.auto_role));
+  // ArtiosCAD style stays: black outline, red creases inside
+  const artios = analyzeDieline(dxf([...rect(0, 0, 20, 10, { color: 7 }), { x1: 5, y1: 0, x2: 5, y2: 10, color: 1 }]));
+  check("39P: black cut + red crease unchanged", artios.ok && role(artios, 7) === "cut" && role(artios, 1) === "crease" && !artios.warnings.some((w) => /red was read/.test(w)), artios.ok && artios.groups);
+  // an all-red outline is the cut
+  const allRed = analyzeDieline(dxf(rect(0, 0, 12, 12, { color: 1 })));
+  check("39P: an all-red outline is the cut", allRed.ok && role(allRed, 1) === "cut" && allRed.measure.cut_in === 48, allRed.ok && allRed.groups);
+  // a named layer still wins over the shape rule
+  const named = analyzeDieline(dxf([...rect(0, 0, 20, 10, { color: 1, layer: "CREASE" }), { x1: 5, y1: 0, x2: 5, y2: 10, color: 2, layer: "CUT" }]));
+  check("39P: layer names still win", named.ok && named.groups.find((g) => g.layer === "CREASE")?.role === "crease", named.ok && named.groups);
+
+  // Chuck's display file: red cut, yellow + gray creases, no units, 7 parts about 181" across
+  const disp = readFileSync(new URL("./fixtures/display-red-cut.dxf", import.meta.url), "utf8");
+  const d = analyzeDieline(disp, { split: true });
+  check("39P fixture: inches, not mm", d.ok && d.units === "in", d.ok && d.units_label);
+  check("39P fixture: red = cut, 7 parts", d.ok && role(d, 1) === "cut" && d.measure.pieces === 7, d.ok && d.measure);
+  const dp = buyerDielineParts(disp, "display test.dxf", [{ piece: 1, label: "Header", per_display: 1 }, { piece: 3, per_display: 2 }]);
+  check("39P fixture: quoted as a display of 7 parts", dp.ok && dp.display && dp.parts.length === 7, dp);
+  if (dp.ok) {
+    check("39P fixture: part 1 24.375 x 53.75, named Header", dp.parts[0].length_in === 24.375 && dp.parts[0].width_in === 53.75 && dp.parts[0].label === "Header", dp.parts[0]);
+    check("39P fixture: parts 3 and 4 are the same 29.458 x 38.05", dp.parts[2].length_in === 29.458 && dp.parts[3].length_in === 29.458 && dp.parts[2].width_in === 38.05, [dp.parts[2], dp.parts[3]]);
+    check("39P fixture: part 3 x2 per display, part 2 named Part 2", dp.parts[2].per_display === 2 && dp.parts[1].label === "Part 2");
+    check("39P fixture: no roles stored (all automatic)", dp.parts.every((p) => !p.roles));
+  }
+
+  // the form's choice
+  const one = dxf(rect(0, 0, 20, 10), { insunits: 1 });
+  const notDisp = buyerDielineParts(one, "a.dxf", [], { as: "display" });
+  check("39P: Display picked on a one-outline file -> not_a_display", !notDisp.ok && notDisp.error === "not_a_display", notDisp);
+  const asOne = buyerDielineParts(disp, "a.dxf", [], { as: "single" });
+  check("39P: One part on a 7-part file = one blank, says so", asOne.ok && !asOne.display && asOne.parts.length === 1 && asOne.parts[0].length_in > 180 && asOne.warnings.some((w) => /7 outlines are priced as one blank/.test(w)), asOne);
+  const mmPick = buyerDielineParts(dxf(rect(0, 0, 508, 254)), "a.dxf", [], { units: "mm" });
+  check("39P: buyer mm pick reads 508 x 254 as 20 x 10", mmPick.ok && near(mmPick.parts[0].length_in, 20, 0.01) && mmPick.units === "mm", mmPick);
+  const rolesPick = buyerDielineParts(dxf([...rect(0, 0, 20, 10), { x1: 5, y1: 0, x2: 5, y2: 10, color: 3 }], { insunits: 1 }), "a.dxf", [], {
+    roles: { "0|CONTINUOUS|3": "crease" },
+  });
+  check("39P: staff roles are applied and kept on the part", rolesPick.ok && rolesPick.parts[0].crease_in === 10 && rolesPick.parts[0].roles?.["0|CONTINUOUS|3"] === "crease", rolesPick);
+  check("39P: clean helpers", cleanDielineAs("display") === "display" && cleanDielineAs("x") === "auto" && cleanDielineUnits("mm") === "mm" && cleanDielineUnits(null) === "auto");
+  check(
+    "39P: cleanDielineRoles keeps known roles only",
+    JSON.stringify(cleanDielineRoles('{"a|b|1":"cut","c|d|2":"glue"}')) === '{"a|b|1":"cut"}' && JSON.stringify(cleanDielineRoles("not json")) === "{}",
+  );
 }
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
