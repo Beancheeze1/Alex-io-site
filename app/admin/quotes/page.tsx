@@ -390,7 +390,8 @@ export default function AdminQuotesPage() {
 
   return (
     <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
-      <div className="mx-auto max-w-5xl px-4 py-8 lg:py-10">
+      {/* Step 39S: wider page so each quote row fits on one line */}
+      <div className="mx-auto max-w-7xl px-4 py-8 lg:py-10">
         {/* Header */}
         <header className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -623,12 +624,12 @@ export default function AdminQuotesPage() {
                   <th className="px-3 py-2 font-medium">Quote #</th>
                   <th className="px-3 py-2 font-medium">Customer</th>
                   <th className="px-3 py-2 font-medium">Email / Phone</th>
-                 <th className="px-3 py-2 font-medium text-right">
-  Updated
-</th>
-<th className="px-3 py-2 font-medium text-right">
-  Review
-</th>
+                  <th className="px-3 py-2 font-medium text-right">Updated</th>
+                  {/* Step 39S: revision, salesperson and status get their own columns so rows line up */}
+                  <th className="px-3 py-2 font-medium">Rev</th>
+                  <th className="px-3 py-2 font-medium">Salesperson</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium text-right">Actions</th>
 
                 </tr>
               </thead>
@@ -636,7 +637,7 @@ export default function AdminQuotesPage() {
                 {loading && !error && (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={8}
                       className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                     >
                       Loading quotes…
@@ -647,7 +648,7 @@ export default function AdminQuotesPage() {
                 {!loading && error && (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={8}
                       className="px-3 py-4 text-center text-xs text-[var(--attention)]"
                     >
                       Unable to load quote list.
@@ -661,7 +662,7 @@ export default function AdminQuotesPage() {
                   filteredQuotes.length === 0 && (
                     <tr>
                       <td
-                        colSpan={4}
+                        colSpan={8}
                         className="px-3 py-4 text-center text-xs text-[var(--text-muted)]"
                       >
                         No quotes match the current filters.
@@ -742,38 +743,46 @@ export default function AdminQuotesPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right text-[11px] text-[var(--text-muted)]">
-  {updated}
-</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-[11px] text-[var(--text-muted)]">
+                          {updated}
+                        </td>
+
+                        {/* Step 39S: one column each, so the rows line up */}
+                        <td className="px-3 py-2">
+                          {q.revision ? (
+                            <span className="inline-flex items-center whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
+                              {q.revision}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          {q.sales_rep_name ? (
+                            <span className="inline-flex items-center whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
+                              {q.sales_rep_name}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--text-faint)]">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {q.locked ? (
+                            <span className="inline-flex items-center whitespace-nowrap rounded-full border border-[var(--status-success-text)]/40 bg-[var(--status-success-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-success-text)]">
+                              Released for Mfg
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center whitespace-nowrap rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
+                              Editable
+                            </span>
+                          )}
+                        </td>
 
                         <td className="px-3 py-2 text-right">
-                          <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                            {q.revision && (
-                              <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
-                                {q.revision}
-                              </span>
-                            )}
-
-                            {q.sales_rep_name && (
-                              <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
-                                {q.sales_rep_name}
-                              </span>
-                            )}
-                            {q.locked ? (
-                              <span className="inline-flex items-center rounded-full border border-[var(--status-success-text)]/40 bg-[var(--status-success-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-success-text)]">
-                                Released for Mfg
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
-                                Editable
-                              </span>
-                            )}
-
+                          <div className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
                             <button
                               type="button"
                               disabled={!!rowBusy[q.quote_no] || !!q.locked}
                               onClick={() => setQuoteLock(q.quote_no, true)}
-                              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:border-[var(--action-primary)] disabled:opacity-60"
+                              className="inline-flex min-w-[64px] items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:border-[var(--action-primary)] disabled:opacity-60"
                               title={q.locked ? "Locked (use Revise to start a new revision)" : "Lock for production"}
                             >
                               {rowBusy[q.quote_no] ? "" : q.locked ? "Locked" : "RFM"}
@@ -781,7 +790,8 @@ export default function AdminQuotesPage() {
                             <button
                               onClick={() => handleReviseQuote(q.quote_no, !!q.locked, !!q.boxes_only)}
                               style={{
-                                marginLeft: 8,
+                                minWidth: 110, // Step 39S: Edit / Revise / Unlock & revise line up
+                                textAlign: "center",
                                 padding: "4px 8px",
                                 fontSize: 12,
                                 fontWeight: 500,
@@ -813,7 +823,7 @@ export default function AdminQuotesPage() {
                             <button
                               type="button"
                               onClick={() => toggleNotes(q.quote_no)}
-                              className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                              className="inline-flex min-w-[80px] items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-card)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
                               aria-expanded={!!expandedNotes[q.quote_no]}
                               title="View internal notes without opening the full quote"
                             >
@@ -825,7 +835,7 @@ export default function AdminQuotesPage() {
                       </tr>
                       {expandedNotes[q.quote_no] && (
                         <tr className="border-t border-[var(--border)] bg-[var(--surface-subtle)]">
-                          <td colSpan={5} className="px-3 py-3">
+                          <td colSpan={8} className="px-3 py-3">
                             <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]">
                               Internal notes
                             </div>
