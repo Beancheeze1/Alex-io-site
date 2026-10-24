@@ -330,16 +330,21 @@ export function mergeCavityOutlines(regions: CavityRegion[], opts: { throughAt?:
       });
       const sorted = Array.from(new Set(ts.map((t) => Math.round(t * 1e9) / 1e9))).sort((a, b) => a - b);
       let run: { t0: number; t1: number; layer: OutlineLayer } | null = null;
+      const runs: { t0: number; t1: number; layer: OutlineLayer }[] = [];
       const flush = () => {
-        if (!run) return;
+        if (run) runs.push(run);
+        run = null;
+      };
+      // Step 39U2: emit one visible piece (a shared edge is drawn once)
+      const emit = (r: { t0: number; t1: number; layer: OutlineLayer }) => {
         const piece: OutlinePiece =
           p.t === "line"
             ? (() => {
-                const a = pointAt(p, run.t0);
-                const b = pointAt(p, run.t1);
-                return { t: "line" as const, layer: run.layer, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+                const a = pointAt(p, r.t0);
+                const b = pointAt(p, r.t1);
+                return { t: "line" as const, layer: r.layer, x1: a.x, y1: a.y, x2: b.x, y2: b.y };
               })()
-            : { t: "arc", layer: run.layer, cx: p.cx, cy: p.cy, r: p.r, a0: p.a0 + (p.a1 - p.a0) * run.t0, a1: p.a0 + (p.a1 - p.a0) * run.t1 };
+            : { t: "arc", layer: r.layer, cx: p.cx, cy: p.cy, r: p.r, a0: p.a0 + (p.a1 - p.a0) * r.t0, a1: p.a0 + (p.a1 - p.a0) * r.t1 };
         const key =
           piece.t === "line"
             ? [[k(piece.x1), k(piece.y1)], [k(piece.x2), k(piece.y2)]].sort().join("|")
@@ -348,7 +353,6 @@ export function mergeCavityOutlines(regions: CavityRegion[], opts: { throughAt?:
           seen.add(key);
           out.push(piece);
         }
-        run = null;
       };
       for (let i = 0; i < sorted.length - 1; i++) {
         const t0 = sorted[i];
@@ -385,6 +389,16 @@ export function mergeCavityOutlines(regions: CavityRegion[], opts: { throughAt?:
         }
       }
       flush();
+      // Step 39U2: a circle's visible part that crosses its 0° start is one arc, not two
+      if (p.t === "arc" && p.a1 - p.a0 >= TAU - 1e-9 && runs.length >= 2) {
+        const first = runs[0];
+        const last = runs[runs.length - 1];
+        if (first.t0 <= 1e-9 && last.t1 >= 1 - 1e-9 && first.layer === last.layer) {
+          runs.splice(runs.length - 1, 1);
+          runs[0] = { t0: last.t0 - 1, t1: first.t1, layer: first.layer };
+        }
+      }
+      for (const r of runs) emit(r);
     }
   });
   return out;

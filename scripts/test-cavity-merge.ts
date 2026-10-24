@@ -131,5 +131,12 @@ check("through: the top sheet's cut file doesn't draw the slot / hole (already o
 const loneThrough = buildDxfForLayer({ block: { lengthIn: 10, widthIn: 10 }, stack: [{ thicknessIn: 2, cavities: [{ x: 0.1, y: 0.1, lengthIn: 2, widthIn: 2, depthIn: 2 }, { x: 0.5, y: 0.5, lengthIn: 1, widthIn: 1, depthIn: 1 }] }] }, 0) || "";
 check("through: a lone through cut is on THROUGH too; a lone pocket stays on 0", [loneThrough.split("\n").filter((l, i, a) => l === "LINE" && a[i - 1] === "0" && a[i + 2] === "THROUGH").length, loneThrough.split("\n").filter((l, i, a) => l === "LINE" && a[i - 1] === "0" && a[i + 2] === "0").length], [4, 8]);
 
+// Step 39U2: a finger hole a hair off the pocket edge (live Q-R-261024-44106) is still one arc, not two
+const seam = mergeCavityOutlines([
+  { kind: "rect", x0: 2.4387, y0: 2.4387, x1: 7.4387, y1: 7.4387, depth: 1 },
+  { kind: "circle", cx: 4.9397, cy: 7.4415, r: 0.5, depth: 1 },
+]).filter((p) => p.t === "arc");
+check("seam: one arc across 0 degrees, a bit over half the circle", [seam.length, seam.length === 1 && seam[0].t === "arc" ? r2(((seam[0].a1 - seam[0].a0) * 180) / Math.PI) : null], [1, 180.64]);
+
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);
