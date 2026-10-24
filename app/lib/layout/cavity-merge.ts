@@ -145,6 +145,26 @@ export function joinLayoutCavities<T>(layout: T): T {
   return next as T;
 }
 
+/**
+ * Step 39V: the STEP service's spacing warnings ("cavity[0] and cavity[3] are
+ * 0.0000in apart, thinner than the minimum 0.125in guard") minus the pairs
+ * that are joined into one pocket (JOIN_GAP_IN or closer, or overlapping).
+ * Anything else is kept as is.
+ */
+export function filterJoinedStepWarnings(warnings: string[]): string[] {
+  const out: string[] = [];
+  for (const w of warnings) {
+    // the service may send several sentences in one string
+    const parts = String(w).split(/(?<=guard)\s*/).filter((x) => x.trim());
+    const kept = parts.filter((part) => {
+      const m = /are\s+(-?\d+(?:\.\d+)?)\s*in\s+apart/i.exec(part);
+      return !(m && Number(m[1]) <= JOIN_GAP_IN + 1e-9);
+    });
+    if (kept.length) out.push(kept.join(" ").trim());
+  }
+  return out;
+}
+
 /* ---------------- drawing level: merged outline ---------------- */
 
 function inside(r: CavityRegion, p: Pt): boolean {

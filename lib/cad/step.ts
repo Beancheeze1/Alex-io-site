@@ -52,7 +52,7 @@
 //   surface it directly to the person downloading the file.
 
 import { safeLogEvent } from "@/app/lib/adminLog";
-import { joinLayoutCavities } from "@/app/lib/layout/cavity-merge"; // Step 39U
+import { filterJoinedStepWarnings, joinLayoutCavities } from "@/app/lib/layout/cavity-merge"; // Step 39U / 39V
 
 export type CavityDef = {
   lengthIn: number;
@@ -524,9 +524,10 @@ export async function buildStepFromLayout(
         | { ok?: boolean; step?: unknown; warnings?: unknown }
         | null;
       if (json && json.ok && isNonEmptyString(json.step)) {
-        const warnings = Array.isArray(json.warnings)
-          ? json.warnings.filter((w): w is string => isNonEmptyString(w))
-          : [];
+        // Step 39V: pairs we joined into one pocket on purpose aren't thin walls
+        const warnings = filterJoinedStepWarnings(
+          Array.isArray(json.warnings) ? json.warnings.filter((w): w is string => isNonEmptyString(w)) : [],
+        );
         if (warnings.length > 0) {
           await safeLogEvent({
             level: "warn",

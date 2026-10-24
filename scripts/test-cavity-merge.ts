@@ -4,8 +4,8 @@
 // (app/lib/layout/cavity-merge.ts, app/lib/layout/layer-dxf.ts).
 // Run: npm run test:cavity-merge   (= npx --yes tsx scripts/test-cavity-merge.ts)
 
-import { joinLayoutCavities, joinTouchingCavities, mergeCavityOutlines, type CavityRegion, type OutlinePiece } from "../app/lib/layout/cavity-merge";
-import { buildDxfForLayer } from "../app/lib/layout/layer-dxf";
+import { filterJoinedStepWarnings, joinLayoutCavities, joinTouchingCavities, mergeCavityOutlines, type CavityRegion, type OutlinePiece } from "../app/lib/layout/cavity-merge";
+import { buildDxfForLayer, mergedCavitySvg } from "../app/lib/layout/layer-dxf";
 import { sheetLayout } from "../app/lib/job-ticket-core";
 
 let failed = 0;
@@ -137,6 +137,40 @@ const seam = mergeCavityOutlines([
   { kind: "circle", cx: 4.9397, cy: 7.4415, r: 0.5, depth: 1 },
 ]).filter((p) => p.t === "arc");
 check("seam: one arc across 0 degrees, a bit over half the circle", [seam.length, seam.length === 1 && seam[0].t === "arc" ? r2(((seam[0].a1 - seam[0].a0) * 180) / Math.PI) : null], [1, 180.64]);
+
+// Step 39V: the STEP service's thin-wall warnings for joined pairs are dropped; real thin walls stay
+const live = [
+  "Bottom Insert cavity[0] and cavity[1] are -0.4997in apart, thinner than the minimum 0.125in guard Bottom Insert cavity[0] and cavity[2] are -0.4977in apart, thinner than the minimum 0.125in guard Bottom Insert cavity[0] and cavity[3] are 0.0000in apart, thinner than the minimum 0.125in guard Bottom Insert cavity[0] and cavity[4] are 0.0000in apart, thinner than the minimum 0.125in guard",
+];
+check("STEP warnings: Chuck's 4 joined pairs = no warning", filterJoinedStepWarnings(live), []);
+check(
+  "STEP warnings: a real 0.06in wall is kept",
+  filterJoinedStepWarnings(["Bottom Insert cavity[0] and cavity[3] are 0.0000in apart, thinner than the minimum 0.125in guard Part cavity[1] and cavity[2] are 0.0600in apart, thinner than the minimum 0.125in guard"]),
+  ["Part cavity[1] and cavity[2] are 0.0600in apart, thinner than the minimum 0.125in guard"],
+);
+check("STEP warnings: other messages pass through", filterJoinedStepWarnings(["Something else"]), ["Something else"]);
+
+// Step 39V: the part preview draws what the DXF draws
+const live44106 = {
+  block: { lengthIn: 9.875, widthIn: 9.875, thicknessIn: 3 },
+  stack: [
+    {
+      thicknessIn: 3,
+      cavities: [
+        { x: 2.438 / 9.875, y: 2.438 / 9.875, lengthIn: 5, widthIn: 5, depthIn: 1 },
+        { x: 4.438 / 9.875, y: 1.938 / 9.875, lengthIn: 1, widthIn: 1, depthIn: 1, shape: "circle", diameterIn: 1 },
+        { x: 4.438 / 9.875, y: 6.938 / 9.875, lengthIn: 1, widthIn: 1, depthIn: 1, shape: "circle", diameterIn: 1 },
+        { x: 1.438 / 9.875, y: 2.937 / 9.875, lengthIn: 1.125, widthIn: 4, depthIn: 0.5 },
+        { x: 7.312 / 9.875, y: 2.937 / 9.875, lengthIn: 1.125, widthIn: 4, depthIn: 0.5 },
+      ],
+    },
+  ],
+};
+const svg = mergedCavitySvg(live44106, 0, { cut: "#ef4444", strokeWidth: 0.03 }) || "";
+const tags = (t: string, piece?: string) => (svg.match(new RegExp(`<${t} [^>]*${piece ? `data-piece="${piece}"` : ""}`, "g")) || []).length;
+check("preview: no rects or full circles, 2 finger-hole arcs", [tags("rect"), tags("circle"), tags("path", "cut")], [0, 0, 2]);
+check("preview: 2 dashed blue floor-step lines, outline lines in the cavity color", [tags("line", "depth"), svg.includes('stroke="#2563eb"') && svg.includes("stroke-dasharray"), tags("line", "cut")], [2, true, 14]);
+check("preview: lone cavities = null (drawn as before)", mergedCavitySvg({ block: { lengthIn: 10, widthIn: 10 }, stack: [{ thicknessIn: 2, cavities: [{ x: 0.1, y: 0.1, lengthIn: 2, widthIn: 2, depthIn: 1 }] }] }, 0, { cut: "red", strokeWidth: 0.03 }), null);
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

@@ -20,7 +20,7 @@
 
 import * as React from "react";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
-import { buildDxfForLayer as buildLayerDxf } from "@/app/lib/layout/layer-dxf"; // Step 39U
+import { buildDxfForLayer as buildLayerDxf, mergedCavitySvg } from "@/app/lib/layout/layer-dxf"; // Step 39U / 39V
 import AddNoteBox from "@/components/admin/AddNoteBox"; // Step 39V
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
@@ -903,7 +903,9 @@ const blockOutline =
 
 
 
-  const shapes = cavs.map((c) => {
+  // Step 39V: touching / overlapping pockets preview as the DXF draws them (merged)
+  const merged = mergedCavitySvg(layout, layerIndex, { cut: cavStroke, strokeWidth: cavStrokeWidth });
+  const shapes = (merged != null ? [] : cavs).map((c) => {
     const x = L * c.x;
     const y = W * c.y;
     const w = c.lengthIn;
@@ -950,7 +952,7 @@ const blockOutline =
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${L} ${W}" width="100%" height="100%">`,
     blockOutline,
-    shapes.join(""),
+    merged ?? shapes.join(""),
     `</svg>`,
   ].join("");
 }

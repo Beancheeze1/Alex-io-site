@@ -182,6 +182,61 @@ export function mergedCavityEntities(
   return outlinePieceEntities(mergeCavityOutlines(regions, { throughAt }), fmt, layers);
 }
 
+/**
+ * Step 39V: the layer's cavities as the DXF draws them (touching ones joined,
+ * pockets merged), as SVG for the part previews (y down, 0..L x 0..W).
+ * Outline in `cut` color, floor steps dashed blue, through cuts magenta.
+ * Null when nothing touches / overlaps / goes through (draw them one by one).
+ */
+export function mergedCavitySvg(
+  layout0: unknown,
+  layerIndex: number,
+  style: { cut: string; strokeWidth: number },
+): string | null {
+  const lay0 = layout0 as { block?: Record<string, unknown> } | null;
+  if (!lay0 || !lay0.block) return null;
+  const layout = joinLayoutCavities(lay0) as { block: Record<string, unknown> };
+  const L = Number(layout.block.lengthIn ?? layout.block.length_in);
+  const Wraw = Number(layout.block.widthIn ?? layout.block.width_in);
+  if (!Number.isFinite(L) || L <= 0) return null;
+  const W = Number.isFinite(Wraw) && Wraw > 0 ? Wraw : L;
+  const layers = getLayersFromLayout(layout);
+  const layer = (layers[layerIndex] ?? null) as LayoutLayer | null;
+  const tRaw = Number(layer?.thicknessIn ?? layer?.thickness_in ?? layer?.thickness);
+  const thick = Number.isFinite(tRaw) && tRaw > 0 ? tRaw : 1;
+  const regions = getCavitiesForLayer(layout, layerIndex)
+    .map((c) => cavityRegion(c, L, W, c.depthIn != null && c.depthIn > 0 ? c.depthIn : thick))
+    .filter((r): r is CavityRegion => !!r);
+  const anyThrough = regions.some((r) => r.depth >= thick - 1e-6);
+  if (!anyThrough && (regions.length < 2 || !regionsInteract(regions))) return null;
+  const pieces = mergeCavityOutlines(regions, { throughAt: thick });
+  const n = (v: number) => (Math.round(v * 10000) / 10000).toString();
+  const sw = style.strokeWidth;
+  const look = (layer: OutlinePiece["layer"]) =>
+    layer === "depth"
+      ? `fill="none" stroke="#2563eb" stroke-width="${sw}" stroke-dasharray="${n(sw * 4)} ${n(sw * 3)}"`
+      : layer === "through"
+        ? `fill="none" stroke="#c026d3" stroke-width="${sw}"`
+        : `fill="none" stroke="${style.cut}" stroke-width="${sw}"`;
+  return pieces
+    .map((p) => {
+      if (p.t === "line") {
+        return `<line x1="${n(p.x1)}" y1="${n(W - p.y1)}" x2="${n(p.x2)}" y2="${n(W - p.y2)}" ${look(p.layer)} data-piece="${p.layer}" />`;
+      }
+      const span = p.a1 - p.a0;
+      if (span >= Math.PI * 2 - 1e-9) {
+        return `<circle cx="${n(p.cx)}" cy="${n(W - p.cy)}" r="${n(p.r)}" ${look(p.layer)} data-piece="${p.layer}" />`;
+      }
+      const sx = p.cx + p.r * Math.cos(p.a0);
+      const sy = p.cy + p.r * Math.sin(p.a0);
+      const ex = p.cx + p.r * Math.cos(p.a1);
+      const ey = p.cy + p.r * Math.sin(p.a1);
+      // counter-clockwise with y up = sweep 0 once y is flipped for the screen
+      return `<path d="M ${n(sx)} ${n(W - sy)} A ${n(p.r)} ${n(p.r)} 0 ${span > Math.PI ? 1 : 0} 0 ${n(ex)} ${n(W - ey)}" ${look(p.layer)} data-piece="${p.layer}" />`;
+    })
+    .join("");
+}
+
 export function getLayersFromLayout(layout: any): LayoutLayer[] {
   if (!layout || typeof layout !== "object") return [];
   if (Array.isArray(layout.stack) && layout.stack.length > 0) return layout.stack as LayoutLayer[];

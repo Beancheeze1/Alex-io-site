@@ -28,6 +28,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { usePageTracker } from "@/hooks/usePageTracker";
 import { buildLayerFilename, triggerBlobDownload } from "@/app/lib/cad-download";
+import { mergedCavitySvg } from "@/app/lib/layout/layer-dxf"; // Step 39V
 import { partCustomName, partLabelShown, partName } from "@/app/lib/foam-terms";
 import { isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, uploadArtwork } from "@/lib/artwork";
@@ -614,7 +615,9 @@ function buildSvgPreviewForLayer(layout: any, layerIndex: number): string | null
     : `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeWidth}" />`;
 
 
-  const shapes = cavs
+  // Step 39V: touching / overlapping pockets preview as the DXF draws them (merged)
+  const merged = mergedCavitySvg(layout, layerIndex, { cut: cavStroke, strokeWidth: cavStrokeWidth });
+  const shapes = merged ?? cavs
     .map((c) => {
       const left = L * c.x;
       const top = W * c.y;
