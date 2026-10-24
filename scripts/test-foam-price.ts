@@ -346,7 +346,7 @@ check(
   "tiny_cavity",
 );
 check(
-  "review: overlapping cavities",
+  "review: overlapping cavities are one pocket, no flag (Step 39U)",
   codes(
     reviewFoam({
       ...base,
@@ -359,7 +359,23 @@ check(
       },
     }),
   ),
-  "cavity_overlap",
+  "",
+);
+check(
+  "review: cavities 0.02\" apart are joined, no thin-wall flag (Step 39U)",
+  codes(
+    reviewFoam({
+      ...base,
+      layout: {
+        block: { lengthIn: 12, widthIn: 10, thicknessIn: 2 },
+        stack: [{ thicknessIn: 2, cavities: [
+          { lengthIn: 3, widthIn: 3, depthIn: 1, x: 0.1, y: 0.2 },
+          { lengthIn: 3, widthIn: 3, depthIn: 0.5, x: (1.2 + 3 + 0.02) / 12, y: 0.2 },
+        ] }],
+      },
+    }),
+  ),
+  "",
 );
 check(
   "review: cavities 0.1\" apart = thin wall",

@@ -13,6 +13,8 @@
 import { createHash } from "crypto";
 import { buildOuterOutlinePolyline } from "./outline";
 import { partLabelShown } from "@/app/lib/foam-terms";
+import { joinLayoutCavities } from "./cavity-merge"; // Step 39U
+import { getCavitiesForLayer, mergedCavityEntities } from "./layer-dxf"; // Step 39U
 
 export type LayoutExportBundle = {
   svg: string;
@@ -804,7 +806,9 @@ function buildDxf(layout: LayoutLike): string {
   const stack = getStack(layout);
 
   if (stack && stack.length > 0) {
-    return buildDxfStacked(layout, stack);
+    // Step 39U: touching cavities joined, then each layer's pockets merged (below)
+    const joined = joinLayoutCavities(layout);
+    return buildDxfStacked(joined, getStack(joined) ?? stack);
   }
 
   const { block, cavities = [] } = layout as any;
@@ -1053,7 +1057,20 @@ function buildDxfStacked(layout: LayoutLike, stack: LayerLike[]): string {
 
     const cavs = Array.isArray(layer.cavities) ? (layer.cavities as CavityLike[]) : [];
 
-    for (const cav of cavs) {
+    // Step 39U: touching / overlapping cavities draw as one pocket (floor steps on DEPTH_Ln,
+    // cuts all the way through the part on THROUGH_Ln)
+    const merged = mergedCavityEntities(
+      getCavitiesForLayer({ block: { lengthIn: blkLen, widthIn: blkWid }, stack: [layer] }, 0),
+      blkLen,
+      blkWid,
+      nnum(layer.thicknessIn, 0) > 0 ? nnum(layer.thicknessIn, 0) : 1,
+      (n) => String(n),
+      { cut: `CAVITY_L${layerNo}`, depth: `DEPTH_L${layerNo}`, through: `THROUGH_L${layerNo}` },
+      yOff,
+    );
+    if (merged) for (const ent of merged) push(ent);
+
+    for (const cav of merged ? [] : cavs) {
       const len = nnum(cav.lengthIn);
       const wid = nnum(cav.widthIn);
       const shape = resolveCavityShape(cav);

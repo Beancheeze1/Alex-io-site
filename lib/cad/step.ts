@@ -52,6 +52,7 @@
 //   surface it directly to the person downloading the file.
 
 import { safeLogEvent } from "@/app/lib/adminLog";
+import { joinLayoutCavities } from "@/app/lib/layout/cavity-merge"; // Step 39U
 
 export type CavityDef = {
   lengthIn: number;
@@ -465,7 +466,9 @@ export async function buildStepFromLayout(
   const baseUrl = getStepServiceUrl();
   if (!baseUrl) return null;
 
-  const normalized = normalizeLayoutForStep(layout);
+  // Step 39U: cavities placed touching (or within 0.03") are made to overlap
+  // slightly first, so the cut leaves no paper-thin wall between them.
+  const normalized = normalizeLayoutForStep(joinLayoutCavities(layout));
   if (!normalized) {
     console.error("[STEP] Layout missing required block/size fields; cannot build STEP.", {
       quoteNo,

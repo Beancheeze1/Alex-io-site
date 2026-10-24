@@ -8,7 +8,19 @@
 // module does not change that, it's a separate server-side path used by the
 // customer-facing page).
 
+//
+// Step 39U: cavities that touch or overlap are drawn as one pocket
+// (app/lib/layout/cavity-merge.ts): touching rectangles are joined first
+// (joinLayoutCavities), then the cavity lines are merged. The outer outline
+// stays on layer "0"; where a deeper pocket continues inside a shallower one,
+// the floor step is drawn on layer "DEPTH" (blue), and the edge of any cut
+// that goes all the way through the part on layer "THROUGH" (magenta). Lines
+// inside a pocket where the depth doesn't change are left out. A sheet's cut
+// file (sheetCut, Step 39M) is only the outline. Cavities that don't touch
+// anything and don't go through are drawn exactly as before.
+
 import { buildOuterOutlinePolyline } from "./outline";
+import { joinLayoutCavities, mergeCavityOutlines, regionsInteract, type CavityRegion, type OutlinePiece } from "./cavity-merge";
 
 export type LayoutLayer = {
   id?: string;
@@ -85,6 +97,89 @@ function normalizeShape(raw: any): "rect" | "circle" | "roundedRect" | "poly" | 
     return "roundedRect";
   if (s === "rect" || s === "rectangle" || s === "square") return "rect";
   return null;
+}
+
+/** Step 39U: a cavity as a drawing region (inches, y up), placed the same way the DXF draws it. */
+export function cavityRegion(cav: FlatCavity, L: number, W: number, depth: number): CavityRegion | null {
+  const cL = cav.lengthIn;
+  const cW = cav.widthIn;
+  const left = Math.max(0, Math.min(L - cL, L * cav.x));
+  const bottom = Math.max(0, Math.min(W - cW, W - W * cav.y - cW));
+  if (cav.shape === "circle") {
+    const dia = cav.diameterIn && cav.diameterIn > 0 ? cav.diameterIn : Math.min(cL, cW);
+    return { kind: "circle", cx: left + cL / 2, cy: bottom + cW / 2, r: dia / 2, depth };
+  }
+  if (cav.shape === "poly" && Array.isArray(cav.points) && cav.points.length >= 3) {
+    const pts = cav.points.map((p) => ({
+      x: Math.max(0, Math.min(1, Number(p?.x))) * L,
+      y: (1 - Math.max(0, Math.min(1, Number(p?.y)))) * W,
+    }));
+    return { kind: "poly", pts, depth };
+  }
+  if ((cav.shape === "roundedRect" || cav.cornerRadiusIn) && cav.cornerRadiusIn) {
+    return { kind: "rrect", x0: left, y0: bottom, x1: left + cL, y1: bottom + cW, r: cav.cornerRadiusIn, depth };
+  }
+  if (!(cL > 0 && cW > 0)) return null;
+  return { kind: "rect", x0: left, y0: bottom, x1: left + cL, y1: bottom + cW, depth };
+}
+
+export type OutlineLayerNames = { cut: string; depth: string; through: string };
+
+/** Step 39U: DXF entities for merged pieces (layer "0", "DEPTH" in blue, "THROUGH" in magenta). */
+export function outlinePieceEntities(
+  pieces: OutlinePiece[],
+  fmt: (n: number) => string,
+  layers: OutlineLayerNames = { cut: "0", depth: "DEPTH", through: "THROUGH" },
+): string[] {
+  const deg = (a: number) => {
+    const d = (a * 180) / Math.PI;
+    return ((d % 360) + 360) % 360;
+  };
+  return pieces.map((p) => {
+    const layer = p.layer === "depth" ? layers.depth : p.layer === "through" ? layers.through : layers.cut;
+    const color = p.layer === "depth" ? ["62", "5"] : p.layer === "through" ? ["62", "6"] : [];
+    if (p.t === "line") {
+      return ["0", "LINE", "8", layer, ...color, "10", fmt(p.x1), "20", fmt(p.y1), "30", "0.0", "11", fmt(p.x2), "21", fmt(p.y2), "31", "0.0"].join("\n");
+    }
+    if (p.a1 - p.a0 >= Math.PI * 2 - 1e-9) {
+      return ["0", "CIRCLE", "8", layer, ...color, "10", fmt(p.cx), "20", fmt(p.cy), "30", "0.0", "40", fmt(p.r)].join("\n");
+    }
+    let end = deg(p.a1);
+    const start = deg(p.a0);
+    if (Math.abs(end - start) < 1e-9) end = start + 360;
+    return ["0", "ARC", "8", layer, ...color, "10", fmt(p.cx), "20", fmt(p.cy), "30", "0.0", "40", fmt(p.r), "50", start.toFixed(4), "51", end.toFixed(4)].join("\n");
+  });
+}
+
+/**
+ * Step 39U: when any of a layer's cavities touch or overlap (or, for a part
+ * file, any goes all the way through), the merged entities for all of them;
+ * null otherwise (draw them one by one as before). A cavity with no depth
+ * counts as the full layer. sheetCut = a sheet's cut file: outline only.
+ */
+export function mergedCavityEntities(
+  cavs: FlatCavity[],
+  L: number,
+  W: number,
+  layerThicknessIn: number,
+  fmt: (n: number) => string,
+  layers?: OutlineLayerNames,
+  yOff = 0, // the full-package drawing stacks layers up the page
+  sheetCut = false,
+): string[] | null {
+  const regions = cavs
+    .map((c) => cavityRegion(c, L, W, c.depthIn != null && c.depthIn > 0 ? c.depthIn : layerThicknessIn))
+    .filter((r): r is CavityRegion => !!r)
+    .map((r): CavityRegion => {
+      if (!yOff) return r;
+      if (r.kind === "circle") return { ...r, cy: r.cy + yOff };
+      if (r.kind === "poly") return { ...r, pts: r.pts.map((p) => ({ x: p.x, y: p.y + yOff })) };
+      return { ...r, y0: r.y0 + yOff, y1: r.y1 + yOff };
+    });
+  const throughAt = sheetCut ? null : layerThicknessIn;
+  const anyThrough = throughAt != null && regions.some((r) => r.depth >= throughAt - 1e-6);
+  if (!anyThrough && (regions.length < 2 || !regionsInteract(regions))) return null;
+  return outlinePieceEntities(mergeCavityOutlines(regions, { throughAt }), fmt, layers);
 }
 
 export function getLayersFromLayout(layout: any): LayoutLayer[] {
@@ -166,8 +261,9 @@ export function getCavitiesForLayer(layout: any, layerIndex: number): FlatCavity
  * per that layer's own corner flags) + that layer's own cavities only.
  * Mirrors the admin page's client-side buildDxfForLayer output.
  */
-export function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: TargetDimsIn): string | null {
-  if (!layout || !layout.block) return null;
+export function buildDxfForLayer(layout0: any, layerIndex: number, targetDimsIn?: TargetDimsIn): string | null {
+  if (!layout0 || !layout0.block) return null;
+  const layout = joinLayoutCavities(layout0); // Step 39U
 
   const block = layout.block || {};
   const rawL = Number(block.lengthIn ?? block.length_in);
@@ -266,7 +362,21 @@ export function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?:
 
   const cavs = getCavitiesForLayer(layout, layerIndex);
 
-  for (const cav of cavs) {
+  // Step 39U: touching / overlapping cavities are merged into one pocket outline
+  const layerThick = Number(layer?.thicknessIn ?? layer?.thickness_in ?? layer?.thickness);
+  const merged = mergedCavityEntities(
+    cavs,
+    L,
+    W,
+    Number.isFinite(layerThick) && layerThick > 0 ? layerThick : 1,
+    fmt,
+    undefined,
+    0,
+    layer?.sheetCut === true, // a sheet's cut file: outline only
+  );
+  if (merged) entities.push(...merged);
+
+  for (const cav of merged ? [] : cavs) {
     const cL = cav.lengthIn;
     const cW = cav.widthIn;
 

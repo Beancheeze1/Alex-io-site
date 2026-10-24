@@ -5,7 +5,8 @@
 //
 //   cavity_outside   a cavity runs past the edge of the part
 //   cavity_too_deep  a cavity is deeper than its layer
-//   cavity_overlap   two cavities in the same layer overlap
+//   cavity_overlap   (Step 39U: no longer raised: touching / overlapping
+//                    cavities are one pocket, see app/lib/layout/cavity-merge.ts)
 //   thin_wall        foam between a cavity and the edge, or between two
 //                    cavities, is thinner than the shop's minimum wall
 //   tiny_cavity      a cavity narrower than the shop's minimum feature
@@ -18,6 +19,8 @@
 // Cavity positions follow the editor / CAD exports: x, y are 0–1 fractions
 // of the block length / width for the cavity's top-left corner; poly cavities
 // use their points' bounding box. Circles use their bounding square.
+
+import { JOIN_GAP_IN } from "@/app/lib/layout/cavity-merge"; // Step 39U
 
 export type ReviewSettings = {
   foam_min_wall_in?: number | null;
@@ -158,9 +161,11 @@ export function reviewFoam(args: {
     for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) {
         const g = gap(boxes[i], boxes[j]);
-        if (g < -EPS) {
-          flags.push({ code: "cavity_overlap", message: `${boxes[i].name} and ${boxes[j].name} overlap.` });
-        } else if (minWall > 0 && g < minWall - 1e-6) {
+        // Step 39U: touching or overlapping cavities are one pocket (a step-up,
+        // finger holes): drawn and cut as one, so no flag. Only a real thin
+        // wall between them is flagged.
+        if (g <= JOIN_GAP_IN) continue;
+        if (minWall > 0 && g < minWall - 1e-6) {
           flags.push({
             code: "thin_wall",
             message: `${boxes[i].name} and ${boxes[j].name} are only ${inch(Math.max(g, 0))} apart (shop minimum ${inch(minWall)}).`,

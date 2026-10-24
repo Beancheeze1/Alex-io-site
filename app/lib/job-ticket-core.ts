@@ -200,7 +200,15 @@ export function sheetLayout(layout: unknown, file: Pick<TicketSheetFile, "layer_
     ...lay,
     stack: stack.map((ly, i) =>
       i === file.layer_index
-        ? { ...ly, cavities: (Array.isArray(ly.cavities) ? (ly.cavities as unknown[]) : []).filter((_, k) => keep.has(k)) }
+        ? {
+            ...ly,
+            sheetCut: true, // Step 39U: the DXF is this sheet's cut file (outline only)
+            // Step 39U: every cavity in a sheet's file goes right through that sheet, so they
+            // get one depth: touching / overlapping ones draw as one merged outline
+            cavities: (Array.isArray(ly.cavities) ? (ly.cavities as unknown[]) : [])
+              .filter((_, k) => keep.has(k))
+              .map((c) => (c && typeof c === "object" ? { ...(c as Record<string, unknown>), depthIn: 1 } : c)),
+          }
         : ly,
     ),
   };

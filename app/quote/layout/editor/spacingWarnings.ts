@@ -16,6 +16,10 @@
 // SAFE module -- no React imports, pure functions only.
 
 import type { Cavity } from "./layoutTypes";
+// Step 39U: cavities this close (or touching / overlapping) are joined into one
+// pocket in the STEP and DXF files (app/lib/layout/cavity-merge.ts), so they
+// aren't a thin wall.
+import { JOIN_GAP_IN } from "@/app/lib/layout/cavity-merge";
 
 export const MIN_WALL_IN = 0.125;
 
@@ -234,6 +238,7 @@ export function nearestGapForCavity(
     if (footprintFullyInside(fp, otherFp) || footprintFullyInside(otherFp, fp)) continue;
 
     const gap = minGapIn(fp, otherFp);
+    if (gap <= JOIN_GAP_IN) continue; // Step 39U: joined into one pocket
     if (gap < best.gapIn) {
       best = { gapIn: gap, label: other.label, isBlockEdge: false };
     }
@@ -271,6 +276,7 @@ export function findTightCavityWalls(
       if (footprintFullyInside(fpA, fpB) || footprintFullyInside(fpB, fpA)) continue;
 
       const gapIn = minGapIn(fpA, fpB);
+      if (gapIn <= JOIN_GAP_IN) continue; // Step 39U: touching / overlapping = one pocket
       if (gapIn < MIN_WALL_IN) {
         warnings.push({
           cavityIdA: cavities[i].id,

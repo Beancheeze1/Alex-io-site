@@ -20,6 +20,8 @@
 
 import * as React from "react";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
+import { buildDxfForLayer as buildLayerDxf } from "@/app/lib/layout/layer-dxf"; // Step 39U
+import AddNoteBox from "@/components/admin/AddNoteBox"; // Step 39V
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
@@ -693,243 +695,12 @@ function getLayerPocketDepthSummary(layout: any, layerIndex: number): { text: st
 }
 
 /**
- * Build a DXF for a single layer:
- *  - Foam block as rectangle from (0,0) to (L,W)
- *  - Cavities in that layer as rects or circles (when shape === "circle")
- *
- * IMPORTANT:
- * - Some layouts store block dimensions in a different internal unit.
- * - If targetDimsIn is provided (from the quote primary item), we apply a uniform
- *   scale so the DXF measures correctly in inches while preserving geometry.
+ * Build a DXF for a single layer. Step 39U: the same builder the server uses
+ * (app/lib/layout/layer-dxf.ts), so touching / overlapping cavities are
+ * merged into one pocket here too (floor steps on the DEPTH layer).
  */
 function buildDxfForLayer(layout: any, layerIndex: number, targetDimsIn?: TargetDimsIn): string | null {
-  if (!layout || !layout.block) return null;
-
-  const block = layout.block || {};
-  const rawL = Number(block.lengthIn ?? block.length_in);
-  const rawW = Number(block.widthIn ?? block.width_in);
-
-  if (!Number.isFinite(rawL) || rawL <= 0) return null;
-  const fallbackW = Number.isFinite(rawW) && rawW > 0 ? rawW : rawL;
-
-  let scale = 1;
-  if (targetDimsIn && Number.isFinite(targetDimsIn.L) && targetDimsIn.L > 0 && Number.isFinite(rawL) && rawL > 0) {
-    scale = targetDimsIn.L / rawL;
-    if (!Number.isFinite(scale) || scale <= 0) scale = 1;
-  }
-
-  const L = rawL * scale;
-  const W = fallbackW * scale;
-
-  function fmt(n: number) {
-    return Number.isFinite(n) ? n.toFixed(4) : "0.0000";
-  }
-
-  function lineEntityLocal(x1: number, y1: number, x2: number, y2: number): string {
-    return ["0", "LINE", "8", "0", "10", fmt(x1), "20", fmt(y1), "30", "0.0", "11", fmt(x2), "21", fmt(y2), "31", "0.0"].join(
-      "\n",
-    );
-  }
-
-  function emitPolyline(points: { x: number; y: number }[]) {
-    if (points.length < 2) return;
-    entities.push(["0", "LWPOLYLINE", "8", "0", "90", String(points.length), "70", "1"].join("\n"));
-    for (const pt of points) {
-      entities.push(["10", fmt(pt.x), "20", fmt(pt.y)].join("\n"));
-    }
-  }
-
-  const entities: string[] = [];
-
- // Block outline: per-layer crop flag wins when a stack exists.
-// Legacy single-layer falls back to block.cornerStyle / croppedCorners.
-const stackArr: any[] | null = Array.isArray((layout as any)?.stack)
-  ? ((layout as any).stack as any[])
-  : Array.isArray((layout as any)?.layers)
-    ? ((layout as any).layers as any[])
-    : null;
-
-const hasLayers = Array.isArray(stackArr) && stackArr.length > 0;
-const layer = hasLayers ? stackArr![layerIndex] : null;
-
-const layerCrop = !!(
-  layer?.cropCorners ??
-  layer?.croppedCorners ??
-  layer?.cropped_corners ??
-  layer?.cornerStyle === "chamfer"
-);
-const layerRound = !!(
-  layer?.roundCorners ??
-  layer?.round_corners
-);
-const roundRadiusRaw =
-  layer?.roundRadiusIn ?? layer?.round_radius_in ?? layer?.round_radius ?? null;
-const roundRadiusIn =
-  Number.isFinite(Number(roundRadiusRaw)) && Number(roundRadiusRaw) > 0
-    ? Number(roundRadiusRaw)
-    : 0.25;
-
-const cornerStyleLegacy = String((layout as any)?.block?.cornerStyle ?? (layout as any)?.block?.corner_style ?? "").toLowerCase();
-const croppedLegacy = !!((layout as any)?.block?.croppedCorners ?? (layout as any)?.block?.cropped_corners);
-
-const wantsRound = hasLayers ? layerRound : false;
-const wantsChamfer = !wantsRound && (hasLayers ? layerCrop : cornerStyleLegacy === "chamfer" || croppedLegacy);
-
-const chamferInRaw = (layout as any)?.block?.chamferIn ?? (layout as any)?.block?.chamfer_in;
-const chamferInNum = chamferInRaw == null ? NaN : Number(chamferInRaw);
-const chamferIn = Number.isFinite(chamferInNum) && chamferInNum > 0 ? chamferInNum : 1;
-
-// chamfer is in inches, so scale it to match our scaled L/W
-const chamferScaled =
-  wantsChamfer
-    ? Math.max(0, Math.min(chamferIn * scale, L / 2 - 1e-6, W / 2 - 1e-6))
-    : 0;
-
-
-  const roundScaled = wantsRound ? Math.max(0, Math.min(roundRadiusIn * scale, L / 2 - 1e-6, W / 2 - 1e-6)) : 0;
-
-  if (roundScaled > 0.0001) {
-    const pts = buildOuterOutlinePolyline({
-      lengthIn: L,
-      widthIn: W,
-      roundCorners: true,
-      roundRadiusIn: roundScaled,
-      segments: 12,
-    });
-    emitPolyline(pts);
-  } else if (chamferScaled > 0.0001) {
-    const c = chamferScaled;
-
-        // Two-corner chamfer: TOP-LEFT + BOTTOM-RIGHT only.
-    // Coordinate system here: (0,0)=bottom-left, (L,W)=top-right.
-    //
-    // Top-left chamfer cuts corner near (0,W)
-    // Bottom-right chamfer cuts corner near (L,0)
-
-    // Bottom edge: start at bottom-left (square), end before bottom-right chamfer
-    entities.push(lineEntityLocal(0, 0, L - c, 0));
-
-    // Bottom-right chamfer edge
-    entities.push(lineEntityLocal(L - c, 0, L, c));
-
-    // Right edge (square at top-right)
-    entities.push(lineEntityLocal(L, c, L, W));
-
-    // Top edge: go to just right of top-left chamfer
-    entities.push(lineEntityLocal(L, W, c, W));
-
-    // Top-left chamfer edge
-    entities.push(lineEntityLocal(c, W, 0, W - c));
-
-    // Left edge down to bottom-left (square)
-    entities.push(lineEntityLocal(0, W - c, 0, 0));
-
-  } else {
-    // default square block
-    entities.push(lineEntityLocal(0, 0, L, 0));
-    entities.push(lineEntityLocal(L, 0, L, W));
-    entities.push(lineEntityLocal(L, W, 0, W));
-    entities.push(lineEntityLocal(0, W, 0, 0));
-  }
-
-
-  const cavs = getCavitiesForLayer(layout, layerIndex);
-
-  for (const cav of cavs) {
-    const cL = cav.lengthIn;
-    const cW = cav.widthIn;
-
-    const x0 = L * cav.x;
-    const ySvgTop = W * cav.y;
-    const y0 = W - ySvgTop - cW;
-
-    const left = Math.max(0, Math.min(L - cL, x0));
-    const bottom = Math.max(0, Math.min(W - cW, y0));
-
-    if (cav.shape === "circle") {
-      const dia = cav.diameterIn && cav.diameterIn > 0 ? cav.diameterIn : Math.min(cL, cW);
-      const r = dia / 2;
-      const cx = left + cL / 2;
-      const cy = bottom + cW / 2;
-
-      entities.push(["0", "CIRCLE", "8", "0", "10", fmt(cx), "20", fmt(cy), "30", "0.0", "40", fmt(r)].join("\n"));
-      continue;
-    }
-
-    // NEW (Path A): polygon cavity  closed LWPOLYLINE (preserve shape)
-    if (cav.shape === "poly" && Array.isArray((cav as any).points) && (cav as any).points.length >= 3) {
-      const rawPts = (cav as any).points as any[];
-
-      const pts: [number, number][] = rawPts.map((p) => {
-        const px = Math.max(0, Math.min(1, Number(p?.x)));
-        const py = Math.max(0, Math.min(1, Number(p?.y)));
-        const x = px * L;
-        const y = (1 - py) * W; // y-flip: cav.points are top-left origin
-        return [x, y];
-      });
-
-      entities.push(
-        [
-          "0","LWPOLYLINE",
-          "8","0",
-          "90", String(pts.length),
-          "70","1",
-          ...pts.flatMap(([x, y]) => ["10", fmt(x), "20", fmt(y)]),
-        ].join("\n")
-      );
-
-      continue;
-    }
-
-    if ((cav.shape === "roundedRect" || cav.cornerRadiusIn) && cav.cornerRadiusIn) {
-      emitRoundedRectDXF(entities, left, bottom, cL, cW, cav.cornerRadiusIn);
-      continue;
-    }
-
-    entities.push(lineEntityLocal(left, bottom, left + cL, bottom));
-    entities.push(lineEntityLocal(left + cL, bottom, left + cL, bottom + cW));
-    entities.push(lineEntityLocal(left + cL, bottom + cW, left, bottom + cW));
-    entities.push(lineEntityLocal(left, bottom + cW, left, bottom));
-  }
-
-  if (!entities.length) return null;
-
-  const header = [
-    "0",
-    "SECTION",
-    "2",
-    "HEADER",
-    "9",
-    "$ACADVER",
-    "1",
-    "AC1009",
-    "9",
-    "$INSUNITS",
-    "70",
-    "1",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "TABLES",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "BLOCKS",
-    "0",
-    "ENDSEC",
-    "0",
-    "SECTION",
-    "2",
-    "ENTITIES",
-  ].join("\n");
-
-  const footer = ["0", "ENDSEC", "0", "EOF"].join("\n");
-
-  return [header, entities.join("\n"), footer].join("\n");
+  return buildLayerDxf(layout, layerIndex, targetDimsIn);
 }
 
 function buildDxfForFullPackage(layout: any, targetDimsIn?: TargetDimsIn): string | null {
@@ -2572,21 +2343,31 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       <div style={{ whiteSpace: "pre-wrap" }}>{customerNotes}</div>
                     </div>
                   ) : null}
-                  {(internalNotes || internalNotesLoading || internalNotesError) && (
-                    <div>
-                      <div style={labelStyle}>Internal notes</div>
-                      <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 2 }}>
-                        Not visible to customer
-                      </div>
-                      {internalNotesLoading ? (
-                        <div style={{ color: "var(--text-muted)" }}>Loading…</div>
-                      ) : internalNotesError ? (
-                        <div style={{ color: "var(--text-muted)" }}>{internalNotesError}</div>
-                      ) : (
-                        <div style={{ whiteSpace: "pre-wrap" }}>{internalNotes}</div>
-                      )}
+                  {/* Step 39V: always shown, with "Add note" */}
+                  <div data-admin-internal-notes>
+                    <div style={labelStyle}>Internal notes</div>
+                    <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 2 }}>
+                      Not visible to customer
                     </div>
-                  )}
+                    {internalNotesLoading ? (
+                      <div style={{ color: "var(--text-muted)" }}>Loading…</div>
+                    ) : internalNotesError ? (
+                      <div style={{ color: "var(--text-muted)" }}>{internalNotesError}</div>
+                    ) : internalNotes ? (
+                      <div style={{ whiteSpace: "pre-wrap" }}>{internalNotes}</div>
+                    ) : (
+                      <div style={{ color: "var(--text-faint)" }}>None yet.</div>
+                    )}
+                    {quoteState?.quote_no && !internalNotesLoading ? (
+                      <AddNoteBox
+                        quoteNo={quoteState.quote_no}
+                        onSaved={(notes) => {
+                          setInternalNotes(notes);
+                          setInternalNotesError(null);
+                        }}
+                      />
+                    ) : null}
+                  </div>
                   {primaryItem && (
                     <>
                       <div>

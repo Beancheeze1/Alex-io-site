@@ -36,6 +36,7 @@ import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { offersFoam } from "@/lib/quote-types";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
 import { FLOW_INFO, FLOW_STAGES, flowCounts, reviseLabel, type FlowStage } from "@/app/lib/quote-flow-core"; // Step 39R
+import AddNoteBox from "@/components/admin/AddNoteBox"; // Step 39V
 
 type QuoteRow = {
   id: number;
@@ -853,6 +854,13 @@ export default function AdminQuotesPage() {
                             ) : (
                               <div className="text-xs text-[var(--text-faint)]">No internal notes for this quote.</div>
                             )}
+                            {/* Step 39V: quick note from the list */}
+                            {!notesLoading[q.quote_no] ? (
+                              <AddNoteBox
+                                quoteNo={q.quote_no}
+                                onSaved={(notes) => setNotesByQuote((prev) => ({ ...prev, [q.quote_no]: notes }))}
+                              />
+                            ) : null}
                           </td>
                         </tr>
                       )}
