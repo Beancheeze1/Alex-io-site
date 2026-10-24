@@ -319,11 +319,14 @@ export async function POST(req: NextRequest) {
     const gradeId = row.board_grade_id == null ? null : Number(row.board_grade_id);
 
     if (mode === "preview") {
+      // Step 39Y: a part of a display is priced without the minimum order (it applies to the whole display)
+      const onDisplay = (await displayContext(quote.id)).isDisplay;
       const priced = await resolveCustomSelection(m.length_in, m.width_in, 0, "dieline", qty, Number(quote.tenant_id), {
         gradeId,
         print,
         method: await quoteRunMethod(quote.quote_no),
         dieline: blank,
+        noMinimum: onDisplay,
       });
       return json({
         ok: true,
@@ -384,6 +387,7 @@ export async function POST(req: NextRequest) {
           print: addPrint,
           method: runMethod,
           dieline: part,
+          noMinimum: disp.isDisplay, // Step 39Y
         });
         const ins = customSelectionInsert({
           quoteId: quote.id,

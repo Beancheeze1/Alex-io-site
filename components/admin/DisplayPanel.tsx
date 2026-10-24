@@ -22,6 +22,8 @@
 // part, so the table fits the card (and scrolls inside it if it ever can't);
 // a board grade with no cost per MSF is greyed out (unless
 // the part already has it); a part with no price shows why under its row.
+// Step 39Y: the assembly section says when it includes a top-up to the
+// shop's minimum order (which now applies once to the whole display).
 
 "use client";
 
@@ -51,7 +53,13 @@ type Assembly = {
   id: number;
   unit: number | null;
   total: number | null;
-  detail: { minutes_per_display?: number; breakdown?: { label: string; per_display: number }[]; overridden?: boolean } | null;
+  detail: {
+    minutes_per_display?: number;
+    breakdown?: { label: string; per_display: number }[];
+    overridden?: boolean;
+    min_topup_usd?: number; // Step 39Y
+    min_order_usd?: number;
+  } | null;
   override: { minutes_per_display?: number | null; usd_per_display?: number | null };
   needs_review: boolean;
   note: string | null;
@@ -732,6 +740,13 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                 {asm.detail?.breakdown?.length ? (
                   <div style={small}>
                     {asm.detail.breakdown.map((x) => `${x.label} ${usd(x.per_display)}`).join(" + ")} per display, before markup
+                  </div>
+                ) : null}
+                {/* Step 39Y: the minimum order, once for the whole display */}
+                {asm.detail?.min_topup_usd ? (
+                  <div style={small} data-display-min-topup>
+                    Includes {usd(asm.detail.min_topup_usd)} to reach your {usd(asm.detail.min_order_usd ?? null)} minimum order (applied once to the
+                    whole display: parts, dies and assembly).
                   </div>
                 ) : null}
                 {asm.note ? <div style={{ ...small, color: "var(--attention)" }}>{asm.note}</div> : null}

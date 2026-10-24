@@ -10,7 +10,11 @@ import {
   parseAssemblyOverride,
   perDisplayOf,
   priceAssembly,
+  displayMinimumTopUp,
+  withMinimumTopUp,
 } from "../lib/display-assembly";
+import { priceRscBox } from "../lib/corrugated-price";
+import { DEFAULT_FLUTES } from "../lib/corrugated-blank";
 import { parseDielineBlank, partPrintOf } from "../lib/dieline-import";
 import { computePrintCharges } from "../app/lib/pricing/print-charges";
 
@@ -98,6 +102,54 @@ const perPart = computePrintCharges({ facts: { print_spec: { colors: [], sides: 
 check("print charges: parts printed differently, quote unprinted -> printed, per-part summary, plates kept", perPart.isPrinted && perPart.platesTotal === 202.5 && /per part/.test(perPart.printSummary ?? ""), perPart);
 const same = computePrintCharges({ facts: { print_spec: { colors: ["spot"], sides: 1 } }, settings: settings0, foamSubtotal: 0, packagingSubtotal: 100, platesTotal: 202.5 });
 check("print charges: one printing for the quote unchanged", same.isPrinted && !/per part/.test(same.printSummary ?? ""), same);
+
+// Step 39Y: the minimum order applies once to the whole display
+{
+  check("39Y: top-up = min - (parts + assembly)", displayMinimumTopUp(100, 20, 150) === 30);
+  check("39Y: no top-up when the display reaches the minimum", displayMinimumTopUp(140, 10, 150) === 0 && displayMinimumTopUp(600, 50, 150) === 0);
+  check("39Y: no minimum set = no top-up", displayMinimumTopUp(10, 0, 0) === 0 && displayMinimumTopUp(10, 0, null) === 0);
+  check("39Y: a part without a price = no top-up", displayMinimumTopUp(null, 0, 150) === 0);
+  const a = priceAssembly({ rates: assemblyRatesFrom({ kit_per_display_usd: 1, markup_pct: 0 }), displays: 10, partsPerDisplay: 3 });
+  const t = withMinimumTopUp(a, 35.5, 150);
+  check("39Y: top-up added to the assembly line", t.total_usd === 45.5 && t.unit_usd === 4.55 && t.min_topup_usd === 35.5 && t.min_order_usd === 150, t);
+  check("39Y: no top-up leaves the line as is", withMinimumTopUp(a, 0, 150) === a);
+  check(
+    "39Y: description says it",
+    assemblyDescription(t) === "Assembly and packing: 10 displays, 3 parts each (includes $35.50 to reach the $150.00 minimum order)" &&
+      assemblyDescription(a) === "Assembly and packing: 10 displays, 3 parts each",
+    assemblyDescription(t),
+  );
+  // Chuck's display (Oct 24): four CAD-cut parts at 50 pieces were each raised to $150.
+  const settings = {
+    waste_pct: 10, order_setup_usd: 75, converting_per_m: 120, plate_spot_usd: 150, plate_flood_usd: 300, print_setup_per_color_usd: 40,
+    print_run_spot_per_m: 25, print_run_flood_per_m: 45, markup_pct: 35, min_order_usd: 150, digital_under_qty: 51, cad_setup_usd: 25,
+    cad_cut_per_hr_usd: 50, cad_speed_in_per_min: 1500, digital_setup_usd: 50, digital_per_sqft_usd: 0.01, sheet_trim_in: 0, sheet_round_to_in: 0,
+    sheet_max_length_in: 0, sheet_max_width_in: 0, sheet_max_up: 6, sheet_min_msf: 0, diecut_per_m: 180, die_base_usd: 250, die_per_in_usd: 1.5,
+    pad_per_m: 40, partition_per_m: 250, joint_type: "glued", flap_pct: 50, round_to_in: 0.0625, edge_trim_in: 0, board_method: "blank",
+  };
+  const flute = DEFAULT_FLUTES.find((f) => f.flute === "C")!;
+  const part7 = { length_in: 8.272, width_in: 20.25, cut_in: 60, crease_in: 20, perf_in: 0, rule_in: 80 };
+  const price = (min: number) =>
+    priceRscBox({
+      dims: { L: part7.length_in, W: part7.width_in, D: 0 },
+      quantities: [50],
+      print: { colors: [], sides: 1 },
+      grade: { name: "32 ECT C", cost_per_msf: 90 },
+      flute,
+      settings: { ...settings, min_order_usd: min } as never,
+      method: "digital",
+      style: "dieline",
+      cells: null,
+      dieline: part7,
+    } as never);
+  const withMin = price(150);
+  const without = price(0);
+  check(
+    "39Y: a small part alone is raised to the minimum; priced as a display part it isn't",
+    withMin.ok && without.ok && withMin.quantities[0].box_total_usd === 150 && without.quantities[0].box_total_usd < 150 && !without.quantities[0].min_applied,
+    withMin.ok && without.ok && [withMin.quantities[0].box_total_usd, without.quantities[0].box_total_usd],
+  );
+}
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
 process.exit(failed ? 1 : 0);

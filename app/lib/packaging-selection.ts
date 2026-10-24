@@ -38,6 +38,8 @@ import {
   parseAssemblyOverride,
   perDisplayOf,
   priceAssembly,
+  displayMinimumTopUp, // Step 39Y
+  withMinimumTopUp,
 } from "@/lib/display-assembly"; // Step 39D
 import { q, one } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
@@ -306,6 +308,7 @@ export async function resolveCustomSelection(
     method?: RunMethod | null;
     cells?: PartitionCells | null; // Step 27: partition sets
     dieline?: DielineBlank | null; // Step 39C: style "dieline", measured from the file
+    noMinimum?: boolean; // Step 39Y: a display part (the minimum applies once to the whole display)
   } = {},
 ): Promise<CustomResolvedSelection> {
   const L = customLengthIn;
@@ -354,6 +357,7 @@ export async function resolveCustomSelection(
     style,
     cells,
     dieline: style === "dieline" ? opts.dieline ?? null : null, // Step 39C
+    no_minimum: opts.noMinimum === true, // Step 39Y
   };
   let engine: CustomRscQuote | null = null;
   let engineError: string | null = null;
@@ -574,14 +578,23 @@ export async function resolveAssemblySelection(
   displays: number,
   partsPerDisplay: number,
   overrideRaw: unknown,
+  // Step 39Y: the display's parts total (lines + their plates and dies; null =
+  // a part has no price, undefined = not known): the shop's minimum order is
+  // applied once to parts + assembly, and any shortfall is added here.
+  opts: { partsTotalUsd?: number | null } = {},
 ): Promise<CustomResolvedSelection> {
   const cfg = tenantId ? await loadCorrugated(tenantId).catch(() => null) : null;
-  const a = priceAssembly({
+  const a0 = priceAssembly({
     rates: assemblyRatesFrom((cfg?.settings ?? {}) as Record<string, unknown>),
     displays,
     partsPerDisplay,
     override: parseAssemblyOverride(overrideRaw),
   });
+  const minOrder = cfg?.settings.min_order_usd ?? 0;
+  const a =
+    opts.partsTotalUsd === undefined
+      ? a0
+      : withMinimumTopUp(a0, displayMinimumTopUp(opts.partsTotalUsd, a0.total_usd, minOrder), minOrder);
   return {
     description: assemblyDescription(a),
     unit_price_usd: a.unit_usd,
@@ -619,6 +632,15 @@ export async function setQuoteBoxQty(quoteId: number, qty: number): Promise<void
       WHERE qbs.quote_id = $1`,
     [quoteId, n],
   );
+}
+
+/** Step 39Y: a display's running parts total (line + plates + die); null once a part has no price. */
+function addPartTotal(
+  total: number | null,
+  r: { extended_price_usd: number | null; plates_usd?: number | null; tooling_usd?: number | null },
+): number | null {
+  if (total == null || r.extended_price_usd == null) return null;
+  return r2(total + Number(r.extended_price_usd) + (Number(r.plates_usd) || 0) + (Number(r.tooling_usd) || 0));
 }
 
 /**
@@ -675,6 +697,10 @@ export async function repriceQuoteBoxes(
   const method = rows.length > 0 ? await runMethodForQuoteId(quoteId) : null;
   // Step 39D: display quotes have an assembly line priced from the parts.
   const disp = rows.some((r) => r.custom_style === ASSEMBLY_STYLE) ? await displayContext(quoteId) : null;
+  // Step 39Y: on a display the parts are priced without the minimum order and
+  // the assembly line (priced last) carries any shortfall for the whole display.
+  rows.sort((a, b) => Number(a.custom_style === ASSEMBLY_STYLE) - Number(b.custom_style === ASSEMBLY_STYLE));
+  let partsTotal: number | null = 0;
 
   for (const row of rows) {
     const qty = Math.max(1, Math.round(Number(row.qty) || 1));
@@ -684,7 +710,10 @@ export async function repriceQuoteBoxes(
       ownPrint ?? (printArg === "per_box" ? rowPrintSpec(row.print_colors, row.print_sides) : printArg);
 
     if (row.custom_style === ASSEMBLY_STYLE) {
-      const resolved = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline);
+      // Step 39Y: only when every part was repriced here (not a one-row reprice)
+      const resolved = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline, {
+        partsTotalUsd: opts.onlyRowId ? undefined : partsTotal,
+      });
       const upd = customSelectionUpdate(row.id, resolved);
       await q(upd.text, upd.values);
       continue;
@@ -704,8 +733,10 @@ export async function repriceQuoteBoxes(
           method,
           cells: rowCells(row.custom_cells_across, row.custom_cells_down),
           dieline: parseDielineBlank(row.dieline), // Step 39C
+          noMinimum: !!disp && row.custom_style === "dieline", // Step 39Y
         },
       );
+      if (disp && row.custom_style === "dieline") partsTotal = addPartTotal(partsTotal, resolved);
       const upd = customSelectionUpdate(row.id, resolved);
       await q(upd.text, upd.values);
       continue;
@@ -830,6 +861,8 @@ export async function priceQuoteBoxesAtQtys(
   // Step 39D: on a display quote the quantity is the number of displays:
   // each part is priced at displays x its per-display count, plus assembly.
   const disp = rows.length > 0 ? await displayContext(quoteId) : null;
+  // Step 39Y: assembly last, so it can carry the display's minimum-order shortfall
+  rows.sort((a, b) => Number(a.custom_style === ASSEMBLY_STYLE) - Number(b.custom_style === ASSEMBLY_STYLE));
 
   const out: BoxBreakPrice[] = [];
   for (const rawQty of qtys) {
@@ -839,6 +872,7 @@ export async function priceQuoteBoxesAtQtys(
     let tooling = 0;
     let unit: number | null = null;
     let priced = 0;
+    let partsTotal: number | null = 0; // Step 39Y
 
     for (const row of rows) {
       // Step 39G: a display part's own printing
@@ -851,7 +885,9 @@ export async function priceQuoteBoxesAtQtys(
       let tl: number | null = null;
 
       if (row.custom_style === ASSEMBLY_STYLE) {
-        const r = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline);
+        const r = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline, {
+          partsTotalUsd: opts.onlyRowId ? undefined : partsTotal, // Step 39Y
+        });
         ext = r.extended_price_usd;
         u = r.unit_price_usd;
       } else if (row.kind === "custom") {
@@ -869,8 +905,10 @@ export async function priceQuoteBoxesAtQtys(
             method,
             cells: rowCells(row.custom_cells_across, row.custom_cells_down),
             dieline: parseDielineBlank(row.dieline), // Step 39C
+            noMinimum: !!disp?.isDisplay && row.custom_style === "dieline", // Step 39Y
           },
         );
+        if (disp?.isDisplay && row.custom_style === "dieline") partsTotal = addPartTotal(partsTotal, r);
         ext = r.extended_price_usd;
         u = r.unit_price_usd;
         pl = r.plates_usd;

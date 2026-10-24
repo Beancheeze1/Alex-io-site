@@ -255,6 +255,8 @@ export type CustomRscRequest = {
   cells?: PartitionCells | null; // Step 27: partitions
   /** Step 39C: style "dieline": the blank and rule measured from the file. */
   dieline?: { length_in: number; width_in: number; rule_in: number } | null;
+  /** Step 39Y: a display part: the minimum order is applied once to the whole display, not here. */
+  no_minimum?: boolean;
 };
 
 export type CustomRscQuote = BoxPriceResult & {
@@ -288,7 +290,7 @@ export async function priceCustomRsc(tenantId: number, req: CustomRscRequest): P
     print: { colors: req.colors, sides: req.sides },
     grade: { name: grade.name, cost_per_msf: grade.cost_per_msf },
     flute,
-    settings: cfg.settings,
+    settings: req.no_minimum ? { ...cfg.settings, min_order_usd: 0 } : cfg.settings, // Step 39Y
     method: req.method ?? null,
     style: req.style ?? "rsc",
     cells: req.cells ?? null,

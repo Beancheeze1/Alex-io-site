@@ -15,6 +15,10 @@
 // markup is applied, like every other corrugated cost.
 // The charge sits on the quote as its own line (quote_box_selections,
 // custom_style "assembly", qty = displays), so every total includes it.
+// Step 39Y: the shop's minimum order applies once to the whole display
+// (parts + their plates and dies + assembly), not to each part: parts are
+// priced without it, and any shortfall is added to this line
+// (min_topup_usd, said in its description).
 
 export type AssemblyRates = {
   asm_per_display_usd: number;
@@ -38,6 +42,8 @@ export type AssemblyResult = {
   overridden: boolean;
   set_up: boolean; // the shop has at least one assembly / packing rate, or an override
   breakdown: { label: string; per_display: number }[];
+  min_topup_usd?: number; // Step 39Y: added to reach the shop's minimum order (whole display)
+  min_order_usd?: number; // Step 39Y: the minimum it was raised to
 };
 
 export const ASSEMBLY_STYLE = "assembly";
@@ -123,8 +129,38 @@ export function priceAssembly(args: {
   };
 }
 
-export function assemblyDescription(a: Pick<AssemblyResult, "displays" | "parts_per_display">): string {
-  return `Assembly and packing: ${a.displays.toLocaleString("en-US")} display${a.displays === 1 ? "" : "s"}, ${a.parts_per_display} part${a.parts_per_display === 1 ? "" : "s"} each`;
+export function assemblyDescription(a: Pick<AssemblyResult, "displays" | "parts_per_display" | "min_topup_usd" | "min_order_usd">): string {
+  const base = `Assembly and packing: ${a.displays.toLocaleString("en-US")} display${a.displays === 1 ? "" : "s"}, ${a.parts_per_display} part${a.parts_per_display === 1 ? "" : "s"} each`;
+  return a.min_topup_usd && a.min_topup_usd > 0 && a.min_order_usd
+    ? `${base} (includes ${money(a.min_topup_usd)} to reach the ${money(a.min_order_usd)} minimum order)`
+    : base;
+}
+
+const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Step 39Y: the shortfall to the shop's minimum order for a whole display:
+ * min - (parts incl. plates and dies + assembly), or 0. No minimum set, or a
+ * part without a price (partsUsd null) = 0.
+ */
+export function displayMinimumTopUp(partsUsd: number | null, assemblyUsd: number, minOrderUsd: unknown): number {
+  const min = n0(minOrderUsd);
+  if (!min || partsUsd == null || !Number.isFinite(partsUsd)) return 0;
+  const total = r2(partsUsd + (Number(assemblyUsd) || 0));
+  return total < min ? r2(min - total) : 0;
+}
+
+/** Step 39Y: the assembly result with the minimum-order shortfall added (unit = total / displays). */
+export function withMinimumTopUp(a: AssemblyResult, topUp: number, minOrderUsd: unknown): AssemblyResult {
+  if (!(topUp > 0)) return a;
+  const total = r2(a.total_usd + topUp);
+  return {
+    ...a,
+    total_usd: total,
+    unit_usd: a.displays > 0 ? r4(total / a.displays) : a.unit_usd,
+    min_topup_usd: r2(topUp),
+    min_order_usd: n0(minOrderUsd),
+  };
 }
 
 /** Parts per display for a die line part line (stored on its dieline jsonb), default 1. */

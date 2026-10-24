@@ -52,6 +52,8 @@
 // part's own quantity). The run is kept on the part's dieline blob.
 // Step 39X2: a grade with no cost per MSF (or another shop's / inactive) is
 // ignored: the part uses the quote's grade, else the shop default.
+// Step 39Y: on a display the shop's minimum order applies once to the whole
+// display (parts are priced without it; the assembly line carries any shortfall).
 // Every part is flagged for staff to check the lines (review queue) until
 // they confirm them on the admin quote page. A file that can't be read is
 // refused with a message; the form offers the shop's spec request page.
@@ -381,6 +383,7 @@ export async function POST(req: NextRequest) {
           ).catch(() => [])
         ).map((r) => Number(r.id)),
       );
+      let partsTotal: number | null = 0; // Step 39Y
       for (const part0 of dieline.parts) {
         const part: DielineBlank = { ...part0, attachment_id: att ? Number(att.id) : null };
         const lineQty = dieline.display ? qty * (part.per_display ?? 1) : qty;
@@ -392,7 +395,12 @@ export async function POST(req: NextRequest) {
           print,
           method: runMethod,
           dieline: part,
+          noMinimum: dieline.display, // Step 39Y
         });
+        partsTotal =
+          partsTotal == null || resolved.extended_price_usd == null
+            ? null
+            : partsTotal + Number(resolved.extended_price_usd) + (Number(resolved.plates_usd) || 0) + (Number(resolved.tooling_usd) || 0);
         const ins = customSelectionInsert({
           quoteId: quote.id,
           quoteNo: quote.quote_no,
@@ -408,7 +416,7 @@ export async function POST(req: NextRequest) {
       }
       if (dieline.display) {
         const perDisplay = dieline.parts.reduce((n, p) => n + (p.per_display ?? 1), 0);
-        const resolved = await resolveAssemblySelection(tenantId, qty, perDisplay, {});
+        const resolved = await resolveAssemblySelection(tenantId, qty, perDisplay, {}, { partsTotalUsd: partsTotal }); // Step 39Y
         const ins = customSelectionInsert({
           quoteId: quote.id,
           quoteNo: quote.quote_no,
