@@ -620,6 +620,40 @@ export function dielinePartDxf(part: { lines: DielineLine[]; length_in: number; 
   return out.join("\n") + "\n";
 }
 
+/**
+ * Step 39W: a small drawing of a part for the forms' parts table: its own
+ * lines (inches, y up) as an SVG that scales to its box. Cut solid, crease
+ * dashed blue, perf dotted. Numbers only (no text), so it's safe to inline.
+ */
+export function dielineLinesSvg(lines: DielineLine[]): string {
+  if (!lines.length) return "";
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const l of lines) {
+    x0 = Math.min(x0, l.x1, l.x2); x1 = Math.max(x1, l.x1, l.x2);
+    y0 = Math.min(y0, l.y1, l.y2); y1 = Math.max(y1, l.y1, l.y2);
+  }
+  const w = Math.max(x1 - x0, 1e-3);
+  const h = Math.max(y1 - y0, 1e-3);
+  const pad = Math.max(w, h) * 0.04;
+  const n = (v: number) => String(Math.round(v * 1000) / 1000);
+  const path = (role: DielineLine["role"]) =>
+    lines
+      .filter((l) => l.role === role)
+      .map((l) => `M${n(l.x1 - x0)} ${n(y1 - l.y1)}L${n(l.x2 - x0)} ${n(y1 - l.y2)}`)
+      .join("");
+  const cut = path("cut");
+  const crease = path("crease");
+  const perf = path("perf");
+  const common = 'fill="none" vector-effect="non-scaling-stroke" stroke-linecap="round"';
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(-pad)} ${n(-pad)} ${n(w + 2 * pad)} ${n(h + 2 * pad)}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">`,
+    cut ? `<path d="${cut}" ${common} stroke="#111827" stroke-width="1.2"/>` : "",
+    crease ? `<path d="${crease}" ${common} stroke="#2563eb" stroke-width="1" stroke-dasharray="4 3"/>` : "",
+    perf ? `<path d="${perf}" ${common} stroke="#9333ea" stroke-width="1" stroke-dasharray="1 3"/>` : "",
+    "</svg>",
+  ].join("");
+}
+
 /** Step 39Q: "Q-A-261024-87248__A__Line-3__Header.dxf" (the part's cut file). */
 export function dielinePartFilename(quoteNo: string, revision: string | null, line: number, label: string | null): string {
   const clean = (s: string) => s.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");

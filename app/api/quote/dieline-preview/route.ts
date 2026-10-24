@@ -4,7 +4,7 @@
 // PDF needs the server's PDF reader. POST multipart `file` (a vector .pdf, or
 // a .dxf; up to 5 MB) -> what was read, nothing saved:
 //   { ok, units_label, units_set, warnings, measure: { length_in, width_in, rule_in, pieces },
-//     pieces: [{ piece, length_in, width_in, rule_in }],   (pieces when > 1)
+//     pieces: [{ piece, length_in, width_in, rule_in, svg }],   (pieces when > 1; Step 39W: svg = small drawing)
 //     groups: [{ key, layer, color, dashed, length_in, role, auto_role, reason }] }
 // Step 39P: optional form fields `units` ("in" | "mm") and `roles` (JSON
 // { groupKey: role }, the staff form's line table).
@@ -19,6 +19,7 @@ import {
   BUYER_DIELINE_MAX_PARTS,
   cleanDielineRoles,
   cleanDielineUnits,
+  dielineLinesSvg,
   splitDieline,
   type DielineSource,
 } from "@/lib/dieline-import";
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
     if (!a.ok) return json({ ok: false, error: a.error, message: a.message }, 422);
     let pieces: { piece: number; length_in: number; width_in: number; rule_in: number }[] = [];
     if (a.measure.pieces > 1) {
-      const sp = splitDieline(src, { units, roles });
+      const sp = splitDieline(src, { units, roles, lines: true });
       if (!sp.ok) return json({ ok: false, error: sp.error, message: sp.message }, 422);
       if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
         return json(
@@ -77,7 +78,8 @@ export async function POST(req: NextRequest) {
           422,
         );
       }
-      pieces = sp.pieces.map((p) => ({ piece: p.piece, length_in: p.length_in, width_in: p.width_in, rule_in: p.rule_in }));
+      // Step 39W: svg = the part's small drawing for the parts table
+      pieces = sp.pieces.map((p) => ({ piece: p.piece, length_in: p.length_in, width_in: p.width_in, rule_in: p.rule_in, svg: dielineLinesSvg(p.lines ?? []) }));
     }
     return json({
       ok: true,

@@ -15,6 +15,7 @@
 import * as React from "react";
 import { DIELINE_ROLES, type DielineRole } from "@/lib/dieline-import";
 import DielineChoices, {
+  DielinePartThumb,
   aciName,
   aciSwatch,
   dielineDisplayBlocked,
@@ -174,6 +175,7 @@ export default function DielineUploadCard({
                 <thead>
                   <tr className="text-left text-[var(--text-muted)]">
                     <th className="py-1 pr-2 font-medium">Part</th>
+                    <th className="py-1 pr-2 font-medium">Name</th>
                     <th className="py-1 pr-2 font-medium">Blank</th>
                     <th className="py-1 font-medium">Per display</th>
                   </tr>
@@ -181,6 +183,10 @@ export default function DielineUploadCard({
                 <tbody>
                   {value.read.pieces.map((p) => (
                     <tr key={p.piece} className="border-t border-[var(--border)]">
+                      {/* Step 39W: what the part looks like */}
+                      <td className="py-1 pr-2">
+                        <DielinePartThumb piece={p} name={value.parts[p.piece]?.label.trim() || `Part ${p.piece}`} />
+                      </td>
                       <td className="py-1 pr-2">
                         <input
                           aria-label={`Part ${p.piece} name`}

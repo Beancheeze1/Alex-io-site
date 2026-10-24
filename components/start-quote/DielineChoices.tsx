@@ -17,6 +17,7 @@ import {
   analyzeDieline,
   BUYER_DIELINE_MAX_PARTS,
   DIELINE_NOT_DISPLAY,
+  dielineLinesSvg,
   splitDieline,
   type DielineRole,
 } from "@/lib/dieline-import";
@@ -38,7 +39,8 @@ export type DielineRead = {
   length_in: number;
   width_in: number;
   rule_in: number;
-  pieces: { piece: number; length_in: number; width_in: number; rule_in: number }[];
+  // Step 39W: svg = a small drawing of the part (its own lines)
+  pieces: { piece: number; length_in: number; width_in: number; rule_in: number; svg?: string }[];
   groups: DielineLineGroup[];
 };
 export type DielineUnitsPick = "in" | "mm";
@@ -83,7 +85,7 @@ export async function readDielineFile(
     if (!a.ok) return { ok: false, message: a.message };
     let pieces: DielineRead["pieces"] = [];
     if (a.measure.pieces > 1) {
-      const sp = splitDieline(text, { units, roles });
+      const sp = splitDieline(text, { units, roles, lines: true });
       if (!sp.ok) return { ok: false, message: sp.message };
       if (sp.pieces.length > BUYER_DIELINE_MAX_PARTS) {
         return {
@@ -91,7 +93,13 @@ export async function readDielineFile(
           message: `That file has ${sp.pieces.length} separate parts. Online quotes take up to ${BUYER_DIELINE_MAX_PARTS}; send it to the shop and they'll quote it.`,
         };
       }
-      pieces = sp.pieces.map((p) => ({ piece: p.piece, length_in: p.length_in, width_in: p.width_in, rule_in: p.rule_in }));
+      pieces = sp.pieces.map((p) => ({
+        piece: p.piece,
+        length_in: p.length_in,
+        width_in: p.width_in,
+        rule_in: p.rule_in,
+        svg: dielineLinesSvg(p.lines ?? []), // Step 39W
+      }));
     }
     return {
       ok: true,
@@ -118,6 +126,77 @@ export async function readDielineFile(
   } catch {
     return { ok: false, message: "We couldn't read that file." };
   }
+}
+
+/**
+ * Step 39W: the part's small drawing at the start of its row in the parts
+ * table; click it to see it larger (Escape or a click closes it).
+ */
+export function DielinePartThumb({
+  piece,
+  name,
+  size,
+}: {
+  piece: { piece: number; length_in: number; width_in: number; svg?: string };
+  name: string;
+  size?: number;
+}) {
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  const box = size ?? 56;
+  if (!piece.svg) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-md border border-[var(--border)] text-[10px] text-[var(--text-faint)]"
+        style={{ width: box, height: box }}
+      >
+        {piece.piece}
+      </div>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title={`See ${name} larger`}
+        aria-label={`See ${name} larger`}
+        className="block rounded-md border border-[var(--border)] bg-white p-1 transition hover:border-[var(--action-primary)]"
+        style={{ width: box, height: box }}
+        data-dieline-thumb={piece.piece}
+        dangerouslySetInnerHTML={{ __html: piece.svg }}
+      />
+      {open ? (
+        <div
+          role="dialog"
+          aria-label={`${name} drawing`}
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setOpen(false)}
+          data-dieline-thumb-big
+        >
+          <div className="w-full max-w-lg rounded-xl bg-[var(--surface-card)] p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-medium text-[var(--text-primary)]">
+                {name} <span className="font-normal text-[var(--text-muted)]">· {piece.length_in} × {piece.width_in} in blank</span>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} className="text-xs text-[var(--text-secondary)] underline">
+                Close
+              </button>
+            </div>
+            <div className="h-80 w-full rounded-md border border-[var(--border)] bg-white p-2" dangerouslySetInnerHTML={{ __html: piece.svg }} />
+            <div className="mt-2 text-[11px] text-[var(--text-muted)]">Solid: cut · Dashed blue: crease · Dotted: perf</div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 /** A display was picked but the file has one outline: nothing to split. */

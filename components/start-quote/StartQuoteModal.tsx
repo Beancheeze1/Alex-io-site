@@ -27,6 +27,7 @@ import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } fr
 import { matchGrade } from "@/lib/corrugated/grade-match";
 import BoxShapeHint from "@/components/start-quote/BoxShapeHint";
 import DielineChoices, {
+  DielinePartThumb,
   dielineDisplayBlocked,
   dielineWarnings,
   readDielineFile,
@@ -1880,6 +1881,7 @@ export default function StartQuoteModal({
                                       <thead>
                                         <tr className="text-left text-[var(--text-muted)]">
                                           <th className="py-1 pr-2 font-medium">Part</th>
+                                          <th className="py-1 pr-2 font-medium">Name</th>
                                           <th className="py-1 pr-2 font-medium">Blank</th>
                                           <th className="py-1 font-medium">Per display</th>
                                         </tr>
@@ -1887,6 +1889,10 @@ export default function StartQuoteModal({
                                       <tbody>
                                         {dlRead.pieces.map((p) => (
                                           <tr key={p.piece} className="border-t border-[var(--border)]">
+                                            {/* Step 39W: what the part looks like */}
+                                            <td className="py-1 pr-2">
+                                              <DielinePartThumb piece={p} name={dlParts[p.piece]?.label.trim() || `Part ${p.piece}`} />
+                                            </td>
                                             <td className="py-1 pr-2">
                                               <input
                                                 aria-label={`Part ${p.piece} name`}

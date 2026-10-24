@@ -14,6 +14,7 @@ import {
   cleanDielineUnits,
   dielinePartDxf,
   dielinePartFilename,
+  dielineLinesSvg,
   dielinePartLines,
   dielineSizeSuspect,
   parseDielineBlank,
@@ -318,6 +319,24 @@ check("dieline style reads as a part", boxStyleInfo("dieline").label === "Die-cu
   check("39Q: the part's stored roles are used (yellow ignored = fewer lines)", noYellow.ok && p1.ok && noYellow.lines.length < p1.lines.length && noYellow.lines.every((l) => l.role !== "perf"), noYellow.ok && noYellow.lines.length);
   check("39Q: missing piece -> piece_missing", (() => { const r = dielinePartLines(disp, { units: "in", piece: 9 }); return !r.ok && r.error === "piece_missing"; })());
   check("39Q: file name", dielinePartFilename("Q-A-261024-87248", "A", 3, "Header / top") === "Q-A-261024-87248__A__Line-3__Header-top.dxf" && dielinePartFilename("Q-1", null, 2, null) === "Q-1__Line-2__Part.dxf");
+}
+
+// Step 39W: each part's small drawing for the forms' parts table
+{
+  const disp = readFileSync(new URL("./fixtures/display-red-cut.dxf", import.meta.url), "utf8");
+  const sp = splitDieline(disp, { units: "in", lines: true });
+  check("39W: split with lines gives each part its own lines", sp.ok && sp.pieces.every((p) => (p.lines?.length ?? 0) > 0), sp.ok && sp.pieces.map((p) => p.lines?.length));
+  if (sp.ok) {
+    const svg = dielineLinesSvg(sp.pieces[0].lines ?? []);
+    const vb = /viewBox="([^"]+)"/.exec(svg)?.[1].split(" ").map(Number) ?? [];
+    const pad = 0.04 * 53.75;
+    check("39W: part 1 drawing is its own 24.375 x 53.75 blank (+4% margin)", near(vb[2] - 2 * pad, 24.375, 0.01) && near(vb[3] - 2 * pad, 53.75, 0.01), vb);
+    check("39W: cut solid, crease dashed blue, scales to its box", svg.includes('stroke="#111827"') && svg.includes('stroke="#2563eb"') && svg.includes("stroke-dasharray") && svg.includes('preserveAspectRatio="xMidYMid meet"'));
+    check("39W: part 6 (cut only) has no crease path", !dielineLinesSvg(sp.pieces[5].lines ?? []).includes("#2563eb"));
+    check("39W: only numbers and our own markup (no text from the file)", !/<text|script|DESIGN/i.test(svg));
+    check("39W: lines of part 2 are not in part 1's drawing (own lines only)", (sp.pieces[0].lines?.length ?? 0) < 200 && (sp.pieces[0].lines?.length ?? 0) + (sp.pieces[1].lines?.length ?? 0) <= 441, [sp.pieces[0].lines?.length, sp.pieces[1].lines?.length]);
+  }
+  check("39W: no lines = empty", dielineLinesSvg([]) === "");
 }
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");
