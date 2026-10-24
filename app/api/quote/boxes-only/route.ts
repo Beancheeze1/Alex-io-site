@@ -50,6 +50,8 @@
 // box.grade_id) and, staff only, how it's made (parts[].run "plates" = die cut
 // + press, "digital" = CAD cut + digital; none = run_method, else auto by the
 // part's own quantity). The run is kept on the part's dieline blob.
+// Step 39X2: a grade with no cost per MSF (or another shop's / inactive) is
+// ignored: the part uses the quote's grade, else the shop default.
 // Every part is flagged for staff to check the lines (review queue) until
 // they confirm them on the admin quote page. A file that can't be read is
 // refused with a message; the form offers the shop's spec request page.
@@ -370,11 +372,21 @@ export async function POST(req: NextRequest) {
           dielineFile.bytes,
         ],
       );
+      // Step 39X2: the shop's grades that can be priced (have a cost per MSF)
+      const pricedGrades = new Set(
+        (
+          await q<{ id: number | string }>(
+            `SELECT id FROM public.corrugated_board_grades WHERE tenant_id = $1 AND active = true AND cost_per_msf > 0`,
+            [tenantId],
+          ).catch(() => [])
+        ).map((r) => Number(r.id)),
+      );
       for (const part0 of dieline.parts) {
         const part: DielineBlank = { ...part0, attachment_id: att ? Number(att.id) : null };
         const lineQty = dieline.display ? qty * (part.per_display ?? 1) : qty;
         // Step 39X: the part's own board, else the quote's (another shop's / an inactive grade falls back to the default)
-        const partGrade = dieline.display ? partGradeAsked(dieline.asked, part.piece ?? null) : null;
+        const asked = dieline.display ? partGradeAsked(dieline.asked, part.piece ?? null) : null;
+        const partGrade = asked != null && pricedGrades.has(asked) ? asked : null;
         const resolved = await resolveCustomSelection(part.length_in, part.width_in, 0, "dieline", lineQty, tenantId, {
           gradeId: partGrade ?? dieline.gradeId,
           print,

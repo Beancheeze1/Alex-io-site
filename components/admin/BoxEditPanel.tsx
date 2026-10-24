@@ -30,7 +30,7 @@ type Row = {
   sides: 1 | 2;
 };
 
-type Grade = { id: number; name: string; is_default: boolean };
+type Grade = { id: number; name: string; is_default: boolean; priced?: boolean }; // Step 39X2: priced = has a cost per MSF
 
 type Draft = {
   L: string;
@@ -302,9 +302,10 @@ export default function BoxEditPanel({ quoteNo }: { quoteNo: string }) {
                     >
                       <option value="">Shop default</option>
                       {grades.map((g) => (
-                        <option key={g.id} value={String(g.id)}>
+                        <option key={g.id} value={String(g.id)} disabled={g.priced === false && draft.gradeId !== String(g.id)}>
                           {g.name}
                           {g.is_default ? " (default)" : ""}
+                          {g.priced === false ? " (no price set)" : ""}
                         </option>
                       ))}
                     </select>

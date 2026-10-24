@@ -4,6 +4,8 @@
 // The shop's ACTIVE board grades for the Start Quote / rep form picker:
 //   { ok, grades: [{ id, name, flute, ect_label, is_default }] }
 // Never returns costs. Empty list when the shop has none (picker hides).
+// Step 39X2: only grades with a cost per MSF (a grade without one can't be
+// priced, so buyers and the staff form never see it).
 //
 // Which shop: a real tenant subdomain wins; on the core host a valid
 // ?tenant= slug; else the logged-in user's tenant (rep form); else "default".
@@ -59,7 +61,7 @@ export async function GET(req: NextRequest) {
     const rows = await q<{ id: string | number; name: string; flute: string; ect_label: string | null; is_default: boolean }>(
       `SELECT id, name, flute, ect_label, is_default
          FROM public.corrugated_board_grades
-        WHERE tenant_id = $1 AND active = true
+        WHERE tenant_id = $1 AND active = true AND cost_per_msf > 0
         ORDER BY sort_order, id`,
       [tenantId],
     );

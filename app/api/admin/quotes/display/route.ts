@@ -141,6 +141,7 @@ export async function GET(req: NextRequest) {
             print: partPrintOf(l.dieline), // Step 39G: own printing, null = the quote's
             run: partRunOf(l.dieline), // Step 39X: own run, null = the quote's / auto
             run_used: parseRunMethod((l.pricing_detail as { run_method?: unknown } | null)?.run_method),
+            note: l.pricing_note, // Step 39X2: shown on the Display card when the part has no price
             qty: Number(l.qty) || 0,
             unit: num(l.unit_price_usd),
             extended: num(l.extended_price_usd),

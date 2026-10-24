@@ -10,6 +10,8 @@
 //   POST { quote_no, box_id, L, W, D, style, grade_id?, qty, colors, sides,
 //          cells_across?, cells_down? }   // Step 27: any style; partitions need cells
 //        -> updates that box and reprices it
+//   Step 39X2: GET grades carry `priced` (has a cost per MSF); POST refuses
+//   switching a box to a grade with no cost (keeping the one it has is fine).
 // - Staff (admin / cs / sales) of the quote's shop, or the platform owner.
 // - Released (locked) quotes are refused: Revise first.
 // - A stock box saved with a different size or style becomes a custom box.
@@ -133,8 +135,8 @@ export async function GET(req: NextRequest) {
 
     const perBox = facts.print_mode === "per_box";
     const quoteSpec = parsePrintSpec(facts.print_spec) ?? { colors: [], sides: 1 };
-    const grades = await q<{ id: number | string; name: string; is_default: boolean }>(
-      `SELECT id, name, is_default
+    const grades = await q<{ id: number | string; name: string; is_default: boolean; priced: boolean }>(
+      `SELECT id, name, is_default, COALESCE(cost_per_msf > 0, false) AS priced
          FROM public.corrugated_board_grades
         WHERE tenant_id = $1 AND active = true
         ORDER BY sort_order, id`,
@@ -147,7 +149,7 @@ export async function GET(req: NextRequest) {
       locked: !!quote.locked,
       per_box: perBox,
       is_display: rows.some((x) => x.custom_style === "assembly"), // Step 39D2
-      grades: grades.map((g) => ({ id: Number(g.id), name: String(g.name), is_default: g.is_default === true })),
+      grades: grades.map((g) => ({ id: Number(g.id), name: String(g.name), is_default: g.is_default === true, priced: g.priced === true })),
       rows: rows.map((row) => {
         const custom = row.kind === "custom";
         const print: PrintSpec = perBox
@@ -239,11 +241,19 @@ export async function POST(req: NextRequest) {
     const g = Number(b.grade_id);
     const gradeId = Number.isInteger(g) && g > 0 ? g : null;
     if (gradeId !== null) {
-      const ok = await one<{ id: number }>(
-        `SELECT id FROM public.corrugated_board_grades WHERE id = $1 AND tenant_id = $2 AND active = true`,
+      const ok = await one<{ id: number; priced: boolean }>(
+        `SELECT id, COALESCE(cost_per_msf > 0, false) AS priced FROM public.corrugated_board_grades WHERE id = $1 AND tenant_id = $2 AND active = true`,
         [gradeId, quote.tenant_id],
       );
       if (!ok) return json({ ok: false, error: "grade_not_found", message: "That board grade isn't active." }, 400);
+      // Step 39X2: a grade with no cost per MSF can't be priced
+      const current = row.board_grade_id == null ? null : Number(row.board_grade_id);
+      if (!ok.priced && current !== gradeId) {
+        return json(
+          { ok: false, error: "grade_no_cost", message: "That board grade has no cost per MSF yet. Set it in Pricing → Corrugated boxes first." },
+          400,
+        );
+      }
     }
     const print: PrintSpec = parsePrintSpec({
       colors: Array.isArray(b.colors) ? b.colors.slice(0, MAX_COLORS) : [],

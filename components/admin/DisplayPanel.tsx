@@ -18,6 +18,10 @@
 // Step 39X: Made by: each part die cut + press, CAD cut + digital, or the
 // quote's run method / auto by the part's own quantity (shown when the shop
 // has short runs set up). Saving reprices the quote.
+// Step 39X2: each part's Board, Printing and Made by sit on a line under the
+// part, so the table fits the card (and scrolls inside it if it ever can't);
+// a board grade with no cost per MSF is greyed out (unless
+// the part already has it); a part with no price shows why under its row.
 
 "use client";
 
@@ -40,6 +44,7 @@ type Part = {
   print?: Print | null; // Step 39G: own printing, null = the quote's
   run?: "plates" | "digital" | null; // Step 39X: own run, null = the quote's / auto
   run_used?: "plates" | "digital" | null; // Step 39X: what it's priced with now
+  note?: string | null; // Step 39X2: the line's pricing note
 };
 type Print = { colors: ("spot" | "flood")[]; sides: 1 | 2 };
 type Assembly = {
@@ -179,7 +184,7 @@ function PrintEditor({
 }
 
 type BoxRow = { id: number; L: number | null; W: number | null; style: string; grade_id: number | null; qty: number; colors: ("spot" | "flood")[]; sides: 1 | 2 };
-type Grade = { id: number; name: string; is_default: boolean };
+type Grade = { id: number; name: string; is_default: boolean; priced?: boolean }; // Step 39X2
 
 export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const [info, setInfo] = React.useState<Info | null>(null);
@@ -398,7 +403,9 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   };
   const workHere = info.is_display; // Step 39E2: the other cards are hidden on a display
   const madeBy = workHere && !!info.short_runs_on; // Step 39X
-  const cols = 6 + (workHere && grades.length ? 1 : 0) + (workHere ? 1 : 0) + (madeBy ? 1 : 0) + (!info.locked ? 1 : 0);
+  // Step 39X2: board, printing and made by sit on a line under each part, so the table fits the card
+  const cols = 6 + (!info.locked ? 1 : 0);
+  const opt: React.CSSProperties = { display: "inline-flex", gap: 6, alignItems: "center", color: "var(--text-muted)" };
 
   const locked = info.locked;
   const asm = info.assembly;
@@ -448,14 +455,12 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
             />
           </label>
 
-          <table style={{ marginTop: 10, width: "100%", fontSize: 12, borderCollapse: "collapse" }} data-display-parts>
+          <div style={{ overflowX: "auto", marginTop: 10 }} data-display-parts-wrap>
+          <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }} data-display-parts>
             <thead>
               <tr style={{ textAlign: "left", color: "var(--text-muted)" }}>
                 <th style={{ padding: "4px 6px" }}>Part</th>
-                <th style={{ padding: "4px 6px" }}>Blank</th>
-                {workHere && grades.length ? <th style={{ padding: "4px 6px" }}>Board grade</th> : null}
-                {workHere ? <th style={{ padding: "4px 6px" }}>Printing</th> : null}
-                {madeBy ? <th style={{ padding: "4px 6px" }}>Made by</th> : null}
+                <th style={{ padding: "4px 6px" }}>Blank (in)</th>
                 <th style={{ padding: "4px 6px" }}>Per display</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Qty</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Each</th>
@@ -469,7 +474,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                 <tr style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ padding: "4px 6px" }}>
                     <input
-                      style={{ ...input, width: 130 }}
+                      style={{ ...input, width: 110 }}
                       value={parts[p.id]?.label ?? ""}
                       placeholder={p.filename || "Part"}
                       disabled={locked}
@@ -477,83 +482,10 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                       aria-label="Part name"
                     />
                   </td>
-                  <td style={{ padding: "4px 6px", color: "var(--text-secondary)" }}>
-                    {p.blank ? `${p.blank.length_in.toFixed(2)} × ${p.blank.width_in.toFixed(2)} in` : "—"}
+                  <td style={{ padding: "4px 6px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                    {p.blank ? `${p.blank.length_in.toFixed(2)} × ${p.blank.width_in.toFixed(2)}` : "—"}
                     {toCheck.includes(p.id) ? <div style={{ ...small, color: "var(--attention)" }}>to check</div> : null}
                   </td>
-                  {workHere && grades.length ? (
-                    <td style={{ padding: "4px 6px" }}>
-                      {(() => {
-                        const row = boxOf(p.id);
-                        return (
-                          <select
-                            style={{ ...input, maxWidth: 120 }}
-                            value={row?.grade_id != null ? String(row.grade_id) : ""}
-                            disabled={locked || busy || !row}
-                            onChange={(e) => {
-                              if (row) void saveBox(row, { grade_id: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null });
-                            }}
-                            aria-label="Board grade"
-                            data-display-grade={p.id}
-                          >
-                            <option value="">Shop default</option>
-                            {grades.map((g) => (
-                              <option key={g.id} value={String(g.id)}>
-                                {g.name}
-                              </option>
-                            ))}
-                          </select>
-                        );
-                      })()}
-                    </td>
-                  ) : null}
-                  {/* Step 39G: the part's printing: the quote's, or its own */}
-                  {workHere ? (
-                    <td style={{ padding: "4px 6px", fontSize: 12 }} data-display-part-print={p.id}>
-                      {p.print ? (
-                        <span style={{ color: "var(--text-primary)" }}>{printText(p.print)}</span>
-                      ) : (
-                        <span style={{ color: "var(--text-muted)" }}>Quote&apos;s ({printText(quotePrint)})</span>
-                      )}
-                      {!locked ? (
-                        <>
-                          {" "}
-                          <button
-                            type="button"
-                            style={{ ...btn, padding: "1px 6px" }}
-                            disabled={busy}
-                            onClick={() => {
-                              setOpenLines(null);
-                              setPartPrintEdit(partPrintEdit === p.id ? null : p.id);
-                            }}
-                            data-display-part-print-edit={p.id}
-                          >
-                            Change
-                          </button>
-                        </>
-                      ) : null}
-                    </td>
-                  ) : null}
-                  {/* Step 39X: how the part is made */}
-                  {madeBy ? (
-                    <td style={{ padding: "4px 6px" }}>
-                      <select
-                        style={{ ...input, maxWidth: 170 }}
-                        value={p.run ?? ""}
-                        disabled={locked || busy}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          void savePartRun(p.id, v === "plates" || v === "digital" ? v : null);
-                        }}
-                        aria-label="Made by"
-                        data-display-part-run={p.id}
-                      >
-                        <option value="">{partRunDefaultLabel(info.quote_run, p.run ? null : p.run_used)}</option>
-                        <option value="plates">{partRunLabel("plates")}</option>
-                        <option value="digital">{partRunLabel("digital")}</option>
-                      </select>
-                    </td>
-                  ) : null}
                   <td style={{ padding: "4px 6px" }}>
                     <input
                       style={{ ...input, width: 56 }}
@@ -566,7 +498,9 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                     />
                   </td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>{p.qty.toLocaleString("en-US")}</td>
-                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{usd(p.unit)}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                    {p.unit == null ? <span style={{ color: "var(--attention)", whiteSpace: "nowrap" }}>No price</span> : usd(p.unit)}
+                  </td>
                   <td style={{ padding: "4px 6px", textAlign: "right" }}>
                     {usd(p.extended)}
                     {p.tooling ? <div style={small}>+ {usd(p.tooling)} die</div> : null}
@@ -606,6 +540,100 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                     </td>
                   ) : null}
                 </tr>
+                {/* Step 39X2: the part's board, printing and how it's made, on its own line under the part */}
+                {workHere ? (
+                  <tr data-display-part-opts={p.id}>
+                    <td colSpan={cols} style={{ padding: "0 6px 8px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", alignItems: "center", fontSize: 12 }}>
+                      {workHere && grades.length ? (
+                        <span style={opt}>
+                          Board
+                          {(() => {
+                            const row = boxOf(p.id);
+                            return (
+                              <select
+                                style={{ ...input, maxWidth: 200 }}
+                                value={row?.grade_id != null ? String(row.grade_id) : ""}
+                                disabled={locked || busy || !row}
+                                onChange={(e) => {
+                                  if (row) void saveBox(row, { grade_id: /^\d+$/.test(e.target.value) ? Number(e.target.value) : null });
+                                }}
+                                aria-label="Board grade"
+                                data-display-grade={p.id}
+                              >
+                                <option value="">Shop default</option>
+                                {grades.map((g) => (
+                                  <option key={g.id} value={String(g.id)} disabled={g.priced === false && row?.grade_id !== g.id}>
+                                    {g.name}
+                                    {g.priced === false ? " (no price set)" : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            );
+                          })()}
+                        </span>
+                      ) : null}
+                      {/* Step 39G: the part's printing: the quote's, or its own */}
+                      {workHere ? (
+                        <span style={opt} data-display-part-print={p.id}>
+                          Printing
+                          {p.print ? (
+                            <span style={{ color: "var(--text-primary)" }}>{printText(p.print)}</span>
+                          ) : (
+                            <span style={{ color: "var(--text-muted)" }}>Quote&apos;s ({printText(quotePrint)})</span>
+                          )}
+                          {!locked ? (
+                            <>
+                              {" "}
+                              <button
+                                type="button"
+                                style={{ ...btn, padding: "1px 6px" }}
+                                disabled={busy}
+                                onClick={() => {
+                                  setOpenLines(null);
+                                  setPartPrintEdit(partPrintEdit === p.id ? null : p.id);
+                                }}
+                                data-display-part-print-edit={p.id}
+                              >
+                                Change
+                              </button>
+                            </>
+                          ) : null}
+                        </span>
+                      ) : null}
+                      {/* Step 39X: how the part is made */}
+                      {madeBy ? (
+                        <span style={opt}>
+                          Made by
+                          <select
+                            style={{ ...input, maxWidth: 200 }}
+                            value={p.run ?? ""}
+                            disabled={locked || busy}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              void savePartRun(p.id, v === "plates" || v === "digital" ? v : null);
+                            }}
+                            aria-label="Made by"
+                            data-display-part-run={p.id}
+                          >
+                            <option value="">{partRunDefaultLabel(info.quote_run, p.run ? null : p.run_used)}</option>
+                            <option value="plates">{partRunLabel("plates")}</option>
+                            <option value="digital">{partRunLabel("digital")}</option>
+                          </select>
+                        </span>
+                      ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+                {/* Step 39X2: why a part has no price */}
+                {p.unit == null && p.note ? (
+                  <tr>
+                    <td colSpan={cols} style={{ padding: "0 6px 6px", fontSize: 12, color: "var(--attention)" }} data-display-part-note={p.id}>
+                      {p.note}
+                    </td>
+                  </tr>
+                ) : null}
                 {/* Step 39E2: the part's die lines, read and saved right here */}
                 {partPrintEdit === p.id && !locked ? (
                   <tr>
@@ -634,6 +662,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
               ))}
             </tbody>
           </table>
+          </div>
           {/* Step 39X */}
           {madeBy ? (
             <div style={{ ...small, marginTop: 4 }} data-display-run-hint>
