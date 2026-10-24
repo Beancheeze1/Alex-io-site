@@ -10,8 +10,7 @@
 //  - "Jump to quote" navigates to /admin/quotes/[quote_no] (detail view).
 //  - Summary counts + table are driven by real data from /api/quotes.
 //  - Adds client-side filters + search for status and basic text matching.
-//  - Adds a "Materials used recently" widget powered by /api/quote/print
-//    for a small sample of the latest quotes.
+//  - Step 39R: the "Materials used recently" widget was removed (Chuck).
 //  - "Your sales link" (below) is the logged-in user's own data from
 //    /api/my-quotes -- this used to live on a separate /my-quotes page,
 //    folded in here so reps have one page instead of two nearly-identical
@@ -20,6 +19,12 @@
 //    /admin/commissions and /admin/expenses respectively, which now
 //    render a trimmed, rep-only view of those pages for a sales-role user
 //    (see components/rep/MyCommissionPanel.tsx and MyExpensesPanel.tsx).
+//  - Step 39R: a color dot left of each quote number shows where the quote is
+//    in the flow (app/lib/quote-flow-core.ts; `flow` from GET /api/quotes),
+//    with "Proof out" / "Needs review" tags. The stage chips (dot, name,
+//    count) are the filters, with a "What the colors mean" legend. The row
+//    button reads "Unlock & revise" (released), "Revise" (foam) or "Edit"
+//    (box-only).
 
 "use client";
 
@@ -30,6 +35,7 @@ import RepStartQuoteModal from "@/components/start-quote/RepStartQuoteModal";
 import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { offersFoam } from "@/lib/quote-types";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
+import { FLOW_INFO, FLOW_STAGES, flowCounts, reviseLabel, type FlowStage } from "@/app/lib/quote-flow-core"; // Step 39R
 
 type QuoteRow = {
   id: number;
@@ -46,6 +52,7 @@ type QuoteRow = {
   locked?: boolean | null;
   locked_at?: string | null;
   boxes_only?: boolean; // Step 17
+  flow?: { stage: FlowStage; proof: "waiting" | "changes" | null; needs_review: boolean } | null; // Step 39R
 };
 
 type QuotesResponse = {
@@ -54,12 +61,8 @@ type QuotesResponse = {
   error?: string;
 };
 
-type FilterKey = "all" | "sent" | "rfm" | `sales:${string}`;
-
-type MaterialUsage = {
-  name: string;
-  count: number;
-};
+// Step 39R: "All", one chip per flow stage, or a salesperson
+type FilterKey = "all" | `stage:${FlowStage}` | `sales:${string}`;
 
 export default function AdminQuotesPage() {
   const router = useRouter();
@@ -162,13 +165,6 @@ export default function AdminQuotesPage() {
   const [filterKey, setFilterKey] = React.useState<FilterKey>("all");
   const [searchTerm, setSearchTerm] = React.useState("");
 
-  // NEW: recent materials widget state
-  const [materialStats, setMaterialStats] =
-    React.useState<MaterialUsage[] | null>(null);
-  const [materialStatsLoading, setMaterialStatsLoading] =
-    React.useState<boolean>(false);
-  const [materialStatsError, setMaterialStatsError] =
-    React.useState<string | null>(null);
 
       async function createNewQuoteAndOpenEditor() {
     if (creating) return;
@@ -361,11 +357,8 @@ export default function AdminQuotesPage() {
 
     return quotes.filter((q) => {
       // Filter pills
-      if (filterKey === "sent") {
-        const s = normalizeStatus(q.status);
-        if (s !== "sent") return false;
-      } else if (filterKey === "rfm") {
-        if (!q.locked) return false;
+      if (filterKey.startsWith("stage:")) {
+        if (q.flow?.stage !== filterKey.slice("stage:".length)) return false;
       } else if (filterKey.startsWith("sales:")) {
         const want = filterKey.slice("sales:".length).trim();
         const have = (q.sales_rep_name || "").trim();
@@ -391,109 +384,9 @@ export default function AdminQuotesPage() {
   }, [quotes, filterKey, searchTerm]);
 
   const showingCount = filteredQuotes.length;
+  // Step 39R: how many quotes in each stage (for the chips)
+  const stageCounts = React.useMemo(() => flowCounts((quotes ?? []).map((q) => q.flow?.stage)), [quotes]);
 
-  // NEW: "Materials used recently" widget logic
-  React.useEffect(() => {
-    if (!quotes || quotes.length === 0) {
-      setMaterialStats(null);
-      setMaterialStatsLoading(false);
-      setMaterialStatsError(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function analyzeMaterials() {
-      setMaterialStatsLoading(true);
-      setMaterialStatsError(null);
-      setMaterialStats(null);
-
-      try {
-        // Take a small sample of the latest quotes to avoid hammering the API
-        const sample = (quotes ?? []).slice(0, 10);
-
-        const counts = new Map<string, number>();
-
-        for (const q of sample) {
-          if (!q.quote_no) continue;
-
-          const url =
-            "/api/quote/print?quote_no=" +
-            encodeURIComponent(q.quote_no);
-
-          let res: Response;
-          try {
-            res = await fetch(url, { cache: "no-store" });
-          } catch (e) {
-            console.warn("Materials widget: fetch failed for", q.quote_no);
-            continue;
-          }
-
-          if (!res.ok) {
-            // 404 or other error, skip this quote
-            continue;
-          }
-
-          let json: any;
-          try {
-            json = await res.json();
-          } catch (e) {
-            continue;
-          }
-
-          if (!json || !json.ok || !json.items || !Array.isArray(json.items)) {
-            continue;
-          }
-
-          const items = json.items as any[];
-          if (items.length === 0) continue;
-
-          const primary = items[0];
-          const matName: string | null =
-            primary.material_name ||
-            (primary.material_id != null
-              ? `Material #${primary.material_id}`
-              : null);
-
-          if (!matName) continue;
-
-          const current = counts.get(matName) ?? 0;
-          counts.set(matName, current + 1);
-
-          if (cancelled) return;
-        }
-
-        const list: MaterialUsage[] = Array.from(counts.entries()).map(
-          ([name, count]) => ({ name, count }),
-        );
-
-        list.sort(
-          (a, b) => b.count - a.count || a.name.localeCompare(b.name),
-        );
-
-        if (!cancelled) {
-          setMaterialStats(list);
-        }
-      } catch (err) {
-        console.error("Materials widget: analysis failed:", err);
-        if (!cancelled) {
-          setMaterialStatsError(
-            "Unable to analyze recent material usage.",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setMaterialStatsLoading(false);
-        }
-      }
-    }
-
-    analyzeMaterials();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [quotes]);
 
   return (
     <main className="min-h-screen bg-[var(--surface-page)] text-[var(--text-primary)]">
@@ -653,37 +546,6 @@ export default function AdminQuotesPage() {
             </div>
 
             <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-              {/* Filter chips */}
-              <div className="flex flex-wrap gap-1.5">
-                <StatusChip
-                  label="All"
-                  active={filterKey === "all"}
-                  onClick={() => setFilterKey("all")}
-                />
-                <StatusChip
-                  label="RFM"
-                  active={filterKey === "rfm"}
-                  onClick={() => setFilterKey("rfm")}
-                />
-                <StatusChip
-                  label="Sent"
-                  active={filterKey === "sent"}
-                  onClick={() => setFilterKey("sent")}
-                />
-
-                {salesPills.map((name) => {
-                  const key: FilterKey = `sales:${name}`;
-                  return (
-                    <StatusChip
-                      key={key}
-                      label={name}
-                      active={filterKey === key}
-                      onClick={() => setFilterKey(key)}
-                    />
-                  );
-                })}
-              </div>
-
               {/* Text search */}
               <div className="w-full sm:w-48">
                 <input
@@ -701,59 +563,57 @@ export default function AdminQuotesPage() {
             </div>
           </div>
 
-          {/* Materials used recently widget (Step 38A2: foam shops only) */}
-          {offersFoam(offeredTypes) ? (
-          <div className="mb-4 rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-xs text-[var(--text-secondary)]">
-            <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
-              Materials used recently
+          {/* Step 39R: stage chips (dot + name + count) are the filters */}
+          <div className="mb-3 space-y-2" data-flow-filters>
+            <div className="flex flex-wrap gap-1.5">
+              <StatusChip label={`All ${totalCount}`} active={filterKey === "all"} onClick={() => setFilterKey("all")} />
+              {FLOW_STAGES.map((st) => (
+                <StatusChip
+                  key={st}
+                  label={`${FLOW_INFO[st].label} ${stageCounts[st]}`}
+                  dot={FLOW_INFO[st].color}
+                  title={FLOW_INFO[st].hint}
+                  muted={stageCounts[st] === 0}
+                  active={filterKey === `stage:${st}`}
+                  onClick={() => setFilterKey(filterKey === `stage:${st}` ? "all" : `stage:${st}`)}
+                />
+              ))}
             </div>
-            {materialStatsLoading && (
-              <p className="text-[11px] text-[var(--text-muted)]">
-                Analyzing the latest quotes…
+            {salesPills.length ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Salesperson</span>
+                {salesPills.map((name) => {
+                  const key: FilterKey = `sales:${name}`;
+                  return (
+                    <StatusChip
+                      key={key}
+                      label={name}
+                      active={filterKey === key}
+                      onClick={() => setFilterKey(filterKey === key ? "all" : key)}
+                    />
+                  );
+                })}
+              </div>
+            ) : null}
+            <details className="text-[11px] text-[var(--text-secondary)]" data-flow-legend>
+              <summary className="cursor-pointer select-none text-[var(--text-muted)]">What the colors mean</summary>
+              <ul className="mt-2 grid gap-1 sm:grid-cols-2">
+                {FLOW_STAGES.map((st) => (
+                  <li key={st} className="flex items-center gap-2">
+                    <FlowDot stage={st} />
+                    <span className="font-medium text-[var(--text-primary)]">{FLOW_INFO[st].label}</span>
+                    <span className="text-[var(--text-muted)]">{FLOW_INFO[st].hint}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[var(--text-muted)]">
+                Tags next to the number: <span className="font-medium">Proof out</span> (waiting on the buyer),{" "}
+                <span className="font-medium">Proof changes</span> (the buyer asked for changes),{" "}
+                <span className="font-medium">Needs review</span> (open the quote to see why).
               </p>
-            )}
-            {!materialStatsLoading && materialStatsError && (
-              <p className="text-[11px] text-[var(--attention)]">
-                {materialStatsError}
-              </p>
-            )}
-            {!materialStatsLoading &&
-              !materialStatsError &&
-              materialStats &&
-              materialStats.length === 0 && (
-                <p className="text-[11px] text-[var(--text-muted)]">
-                  No material information found in the latest quotes.
-                </p>
-              )}
-            {!materialStatsLoading &&
-              !materialStatsError &&
-              materialStats &&
-              materialStats.length > 0 && (
-                <ul className="mt-1 space-y-1">
-                  {materialStats.slice(0, 4).map((m) => (
-                    <li
-                      key={m.name}
-                      className="flex items-center justify-between gap-2"
-                    >
-                      <span className="truncate text-[11px] text-[var(--text-primary)]">
-                        {m.name}
-                      </span>
-                      <span className="text-[11px] text-[var(--text-muted)]">
-                        {m.count} quote{m.count === 1 ? "" : "s"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            <p className="mt-2 text-[10px] text-[var(--text-faint)]">
-              Sample based on the latest quotes returned by{" "}
-              <span className="font-mono text-[10px] text-[var(--text-secondary)]">
-                /api/quote/print
-              </span>{" "}
-              for a small batch of recent quote numbers.
-            </p>
+            </details>
           </div>
-          ) : null}
+
 
           <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface-card)]">
             <table className="min-w-full text-left text-xs">
@@ -821,15 +681,33 @@ export default function AdminQuotesPage() {
                       <tr
                         className="border-t border-[var(--border)] hover:bg-[var(--surface-subtle)]"
                       >
-                        <td className="px-3 py-2 font-mono text-[11px]">
-                          <Link
-                            href={`/admin/quotes/${encodeURIComponent(
-                              q.quote_no,
-                            )}`}
-                            className="text-[var(--text-primary)] hover:underline underline-offset-2"
-                          >
-                            {q.quote_no}
-                          </Link>
+                        <td className="px-3 py-2 font-mono text-[11px]" data-flow-stage={q.flow?.stage ?? ""}>
+                          <span className="inline-flex items-center gap-2">
+                            {/* Step 39R: where the quote is in the flow */}
+                            {q.flow ? <FlowDot stage={q.flow.stage} /> : <span className="inline-block h-2.5 w-2.5" />}
+                            <Link
+                              href={`/admin/quotes/${encodeURIComponent(
+                                q.quote_no,
+                              )}`}
+                              className="whitespace-nowrap text-[var(--text-primary)] hover:underline underline-offset-2"
+                            >
+                              {q.quote_no}
+                            </Link>
+                          </span>
+                          {q.flow && (q.flow.proof || q.flow.needs_review) ? (
+                            <div className="mt-1 flex flex-wrap gap-1 pl-[18px] font-sans">
+                              {q.flow.proof ? (
+                                <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-secondary)]">
+                                  {q.flow.proof === "changes" ? "Proof changes" : "Proof out"}
+                                </span>
+                              ) : null}
+                              {q.flow.needs_review ? (
+                                <span className="rounded-full border border-[var(--attention)]/40 px-1.5 py-0.5 text-[9.5px] text-[var(--attention)]">
+                                  Needs review
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2 text-xs text-[var(--text-primary)]">
                           {q.customer_id ? (
@@ -911,10 +789,17 @@ export default function AdminQuotesPage() {
                                 color: "white",
                                 border: "1px solid var(--action-primary)",
                                 cursor: "pointer",
+                                whiteSpace: "nowrap",
                               }}
-                              title="Unlock and open the layout editor"
+                              title={
+                                q.locked
+                                  ? "Unlock this released quote and start the next revision"
+                                  : q.boxes_only
+                                    ? "Open the quote page to edit the boxes"
+                                    : "Open the layout editor"
+                              }
                             >
-                              Revise
+                              {reviseLabel(q)}
                             </button>
 
                             <Link
@@ -1046,21 +931,42 @@ type StatusChipProps = {
   label: string;
   active: boolean;
   onClick: () => void;
+  dot?: string; // Step 39R: a stage color
+  title?: string;
+  muted?: boolean; // Step 39R: a stage with no quotes
 };
 
-function StatusChip({ label, active, onClick }: StatusChipProps) {
+function StatusChip({ label, active, onClick, dot, title, muted }: StatusChipProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] transition ${
+      title={title}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] transition ${
         active
           ? "border-[var(--action-primary)] bg-[var(--surface-subtle)] text-[var(--text-primary)]"
           : "border-[var(--border)] bg-[var(--surface-card)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-      }`}
+      } ${muted && !active ? "opacity-60" : ""}`}
     >
+      {dot ? <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: dot }} /> : null}
       {label}
     </button>
+  );
+}
+
+/** Step 39R: the flow stage dot (color + hover text). */
+function FlowDot({ stage }: { stage: FlowStage }) {
+  const info = FLOW_INFO[stage];
+  return (
+    <span
+      role="img"
+      aria-label={info.label}
+      title={`${info.label}: ${info.hint}`}
+      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+      style={{ background: info.color }}
+      data-flow-dot={stage}
+    />
   );
 }
 

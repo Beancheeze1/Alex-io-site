@@ -13,8 +13,11 @@ import { commissionChoice, resolveCommission } from "@/app/lib/account-rep-core"
 import { customerAccountRepId, markRepSetByStaff } from "@/app/lib/account-rep";
 import { displayRevisionLabel } from "@/app/lib/revision-label";
 import { isInternalCall } from "@/lib/internal-call";
+import { quoteFlows } from "@/app/lib/quote-flow"; // Step 39R
 
 // GET /api/quotes?limit=25
+// Step 39R: each row also has `flow` { stage, proof, needs_review } (app/lib/quote-flow.ts)
+// for the color dots, legend and stage filters on the admin quotes list.
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -88,7 +91,9 @@ export async function GET(req: NextRequest) {
         }),
       );
 
-      return NextResponse.json({ ok: true, quotes: withRevision });
+      // Step 39R: where each quote is in the flow
+      const flows = await quoteFlows(Number(user.tenant_id), withRevision.map((r) => Number(r.id))).catch(() => new Map());
+      return NextResponse.json({ ok: true, quotes: withRevision.map((r) => ({ ...r, flow: flows.get(Number(r.id)) ?? null })) });
     }
 
     // Admin + CS: all quotes (within tenant)
@@ -132,7 +137,9 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    return NextResponse.json({ ok: true, quotes: withRevision });
+    // Step 39R: where each quote is in the flow
+    const flows = await quoteFlows(Number(user.tenant_id), withRevision.map((r) => Number(r.id))).catch(() => new Map());
+    return NextResponse.json({ ok: true, quotes: withRevision.map((r) => ({ ...r, flow: flows.get(Number(r.id)) ?? null })) });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: String(err?.message ?? err) },
