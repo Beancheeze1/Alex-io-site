@@ -615,7 +615,8 @@ export default function AdminQuotesPage() {
           </div>
 
 
-          <div className="overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface-card)]">
+          {/* Step 39R2: scroll sideways instead of cutting off the row buttons */}
+          <div className="overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface-card)]">
             <table className="min-w-full text-left text-xs">
               <thead className="bg-[var(--surface-subtle)] text-[var(--text-muted)]">
                 <tr>
@@ -746,7 +747,7 @@ export default function AdminQuotesPage() {
 </td>
 
                         <td className="px-3 py-2 text-right">
-                          <div className="inline-flex items-center gap-2">
+                          <div className="inline-flex flex-wrap items-center justify-end gap-2">
                             {q.revision && (
                               <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--status-neutral-bg)] px-2 py-1 text-[10px] font-medium text-[var(--status-neutral-text)]">
                                 {q.revision}
