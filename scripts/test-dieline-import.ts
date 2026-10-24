@@ -18,6 +18,12 @@ import {
   dielinePartLines,
   dielineSizeSuspect,
   parseDielineBlank,
+  cleanPartRun,
+  partGradeAsked,
+  partRunDefaultLabel,
+  partRunLabel,
+  partRunOf,
+  partRunOr,
   splitDieline,
 } from "../lib/dieline-import";
 import { dielineDxf, slottedDieline } from "../lib/box-dieline";
@@ -337,6 +343,32 @@ check("dieline style reads as a part", boxStyleInfo("dieline").label === "Die-cu
     check("39W: lines of part 2 are not in part 1's drawing (own lines only)", (sp.pieces[0].lines?.length ?? 0) < 200 && (sp.pieces[0].lines?.length ?? 0) + (sp.pieces[1].lines?.length ?? 0) <= 441, [sp.pieces[0].lines?.length, sp.pieces[1].lines?.length]);
   }
   check("39W: no lines = empty", dielineLinesSvg([]) === "");
+}
+
+// Step 39X: each display part's board and how it's made
+{
+  check("39X: cleanPartRun", cleanPartRun("plates") === "plates" && cleanPartRun("digital") === "digital" && cleanPartRun("auto") === null && cleanPartRun(1) === null);
+  check("39X: partRunOf", partRunOf({ run: "digital" }) === "digital" && partRunOf({ run: "laser" }) === null && partRunOf(null) === null);
+  check("39X: part's run wins over the quote's", partRunOr({ run: "digital" }, "plates") === "digital" && partRunOr({ run: "plates" }, "digital") === "plates");
+  check("39X: no part run = the quote's, else auto (null)", partRunOr({}, "plates") === "plates" && partRunOr({}, null) === null && partRunOr(null, undefined) === null);
+  const blob = { length_in: 10, width_in: 8, cut_in: 40, crease_in: 10, perf_in: 0, rule_in: 50 };
+  check("39X: parseDielineBlank keeps the run", parseDielineBlank({ ...blob, run: "digital" })?.run === "digital");
+  check("39X: parseDielineBlank drops a bad run", parseDielineBlank({ ...blob, run: "auto" })?.run === undefined);
+  check("39X: partGradeAsked by piece", partGradeAsked([{ piece: 2, grade_id: 7 }, { piece: 3, grade_id: "x" }], 2) === 7 && partGradeAsked([{ piece: 3, grade_id: "x" }], 3) === null && partGradeAsked([{ piece: 2, grade_id: 7 }], 1) === null && partGradeAsked(null, 2) === null && partGradeAsked([{ piece: 2, grade_id: 7 }], null) === null);
+  check("39X: labels", partRunLabel("plates") === "Die cut + press" && partRunLabel("digital") === "CAD cut + digital" && partRunLabel(null) === "Auto by quantity");
+  check("39X: default label: quote's pick", partRunDefaultLabel("plates", "digital") === "Quote's (Die cut + press)");
+  check("39X: default label: auto shows what it chose", partRunDefaultLabel("auto", "digital") === "Auto (CAD cut + digital)" && partRunDefaultLabel("auto", null) === "Auto by quantity");
+  const disp = readFileSync(new URL("./fixtures/display-red-cut.dxf", import.meta.url), "utf8");
+  const asked = [
+    { piece: 1, label: "Shelf", per_display: 4, run: "plates", grade_id: 5 },
+    { piece: 2, label: "Side", per_display: 1, run: "digital" },
+    { piece: 3, run: "laser" },
+  ];
+  const staff = buyerDielineParts(disp, "d.dxf", asked, { units: "in", as: "display", runs: true });
+  check("39X: staff: runs kept per part", staff.ok && staff.parts[0].run === "plates" && staff.parts[1].run === "digital" && staff.parts[2].run === undefined, staff.ok && staff.parts.map((p) => p.run));
+  const buyer = buyerDielineParts(disp, "d.dxf", asked, { units: "in", as: "display" });
+  check("39X: buyer: no runs kept", buyer.ok && buyer.parts.every((p) => p.run === undefined));
+  check("39X: grade is not stored on the blob (it's the line's board grade)", staff.ok && staff.parts.every((p) => !("grade_id" in p)));
 }
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");

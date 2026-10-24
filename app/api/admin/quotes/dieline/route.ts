@@ -304,6 +304,7 @@ export async function POST(req: NextRequest) {
       piece: attachmentId != null ? prev?.piece ?? null : null, // Step 39E: Edit lines keeps which piece it is
       ...(scale !== 1 ? { scale } : {}), // Step 39F
       ...(prev?.print ? { print: prev.print } : {}), // Step 39G: Edit lines keeps the part's own printing
+      ...(prev?.run ? { run: prev.run } : {}), // Step 39X: and how it's made
     };
     // Step 39D: one line per separate part in the file (asked for with split=1).
     const sp = split ? splitDieline(text, { roles, units, scale }) : null;

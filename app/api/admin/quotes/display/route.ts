@@ -22,6 +22,13 @@
 //               a part's own printing (null = the quote's printing again);
 //               every line is repriced. GET returns each part's own `print`
 //               and the quote's `quote_print`.
+//     part_run { part_id, run: "plates" | "digital" | null } -> (Step 39X)
+//               how one part is made: "plates" = die cut + press, "digital" =
+//               CAD cut + digital, null = the quote's run method (else auto by
+//               the part's own quantity); every line is repriced. GET returns
+//               each part's own `run`, the method it's priced with (`run_used`),
+//               the quote's `quote_run` ("auto" | "plates" | "digital") and
+//               `short_runs_on` / `cutoff` from the shop's rates.
 //   Every change sets each part's qty = displays x per display (other lines =
 //   displays), the quote's qty and compare quantity = displays, and reprices
 //   every line at today's rates. Released (locked) quotes are refused.
@@ -32,7 +39,8 @@ import { one, q } from "@/lib/db";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
 import { isPlatformOwner } from "@/lib/admin-auth";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
-import { parsePrintSpec } from "@/lib/corrugated-price";
+import { parsePrintSpec, parseRunMethod, shortRunsOn } from "@/lib/corrugated-price";
+import { loadCorrugated } from "@/lib/corrugated";
 import {
   customSelectionInsert,
   displayContext,
@@ -40,7 +48,7 @@ import {
   resolveAssemblySelection,
   setQuoteBoxQty,
 } from "@/app/lib/packaging-selection";
-import { parseDielineBlank, partPrintOf } from "@/lib/dieline-import";
+import { cleanPartRun, parseDielineBlank, partPrintOf, partRunOf } from "@/lib/dieline-import";
 import { ASSEMBLY_STYLE, parseAssemblyOverride, perDisplayOf } from "@/lib/display-assembly";
 
 export const runtime = "nodejs";
@@ -107,6 +115,8 @@ export async function GET(req: NextRequest) {
     if (!boxesOnly) return json({ ok: true, boxes_only: false });
     const asm = lines.find((l) => l.custom_style === ASSEMBLY_STYLE) ?? null;
     const ctx = await displayContext(quote.id);
+    // Step 39X: the shop's short-run setup, for the Made by picks
+    const cfg = await loadCorrugated(Number(quote.tenant_id)).catch(() => null);
     return json({
       ok: true,
       boxes_only: true,
@@ -115,6 +125,9 @@ export async function GET(req: NextRequest) {
       is_display: !!asm,
       displays: ctx.displays,
       quote_print: parsePrintSpec(facts.print_spec) ?? { colors: [], sides: 1 }, // Step 39G
+      quote_run: parseRunMethod(facts.run_method) ?? "auto", // Step 39X
+      short_runs_on: cfg ? shortRunsOn(cfg.settings) : false,
+      cutoff: cfg ? Number(cfg.settings.digital_under_qty) || 0 : 0,
       parts: lines
         .filter((l) => l.custom_style === "dieline")
         .map((l) => {
@@ -126,6 +139,8 @@ export async function GET(req: NextRequest) {
             piece: d?.piece ?? null,
             per_display: perDisplayOf(l.dieline),
             print: partPrintOf(l.dieline), // Step 39G: own printing, null = the quote's
+            run: partRunOf(l.dieline), // Step 39X: own run, null = the quote's / auto
+            run_used: parseRunMethod((l.pricing_detail as { run_method?: unknown } | null)?.run_method),
             qty: Number(l.qty) || 0,
             unit: num(l.unit_price_usd),
             extended: num(l.extended_price_usd),
@@ -177,7 +192,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const action =
-      b.action === "start" || b.action === "stop" || b.action === "remove_part" || b.action === "part_print"
+      b.action === "start" || b.action === "stop" || b.action === "remove_part" || b.action === "part_print" || b.action === "part_run"
         ? b.action
         : "update";
     const asm = lines.find((l) => l.custom_style === ASSEMBLY_STYLE) ?? null;
@@ -209,6 +224,24 @@ export async function POST(req: NextRequest) {
       await saveFacts(quote.quote_no, { ...facts, part_print: partPrint, printed: printed ? 1 : 0 });
       await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), print);
       return json({ ok: true, part_id: Number(line.id), print: own });
+    }
+
+    // Step 39X: how one part is made (or back to the quote's / auto).
+    if (action === "part_run") {
+      const line = parts.find((x) => Number(x.id) === Number(b.part_id));
+      if (!line) return json({ ok: false, error: "part_not_found", message: "That part isn't on this quote." }, 404);
+      const run = b.run == null || b.run === "auto" ? null : cleanPartRun(b.run);
+      if (b.run != null && b.run !== "auto" && !run) {
+        return json({ ok: false, error: "invalid_run", message: "Pick Die cut + press, CAD cut + digital, or Auto." }, 400);
+      }
+      await q(
+        run
+          ? `UPDATE public.quote_box_selections SET dieline = COALESCE(dieline, '{}'::jsonb) || jsonb_build_object('run', $2::text) WHERE id = $1`
+          : `UPDATE public.quote_box_selections SET dieline = dieline - 'run' WHERE id = $1`,
+        run ? [line.id, run] : [line.id],
+      );
+      await repriceQuoteBoxes(quote.id, Number(quote.tenant_id), print);
+      return json({ ok: true, part_id: Number(line.id), run });
     }
 
     // Step 39D2: take one part off (buyers can't remove display parts on the quote page).

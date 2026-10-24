@@ -15,11 +15,15 @@
 // a display to save room.
 // Step 39G: each part can have its own printing (Printing column: "Quote's"
 // or the part's own, Change opens an editor in the row).
+// Step 39X: Made by: each part die cut + press, CAD cut + digital, or the
+// quote's run method / auto by the part's own quantity (shown when the shop
+// has short runs set up). Saving reprices the quote.
 
 "use client";
 
 import * as React from "react";
 import DielineImportCard from "@/components/admin/DielineImportCard";
+import { partRunDefaultLabel, partRunLabel } from "@/lib/dieline-import";
 
 type Part = {
   id: number;
@@ -34,6 +38,8 @@ type Part = {
   description: string | null;
   blank: { length_in: number; width_in: number; rule_in: number } | null;
   print?: Print | null; // Step 39G: own printing, null = the quote's
+  run?: "plates" | "digital" | null; // Step 39X: own run, null = the quote's / auto
+  run_used?: "plates" | "digital" | null; // Step 39X: what it's priced with now
 };
 type Print = { colors: ("spot" | "flood")[]; sides: 1 | 2 };
 type Assembly = {
@@ -56,6 +62,9 @@ type Info = {
   other_lines: { id: number; description: string | null; qty: number }[];
   assembly: Assembly | null;
   quote_print?: Print; // Step 39G
+  quote_run?: "auto" | "plates" | "digital"; // Step 39X
+  short_runs_on?: boolean;
+  cutoff?: number;
 };
 
 const usd = (n: number | null | undefined) =>
@@ -365,8 +374,31 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
       setBusy(false);
     }
   };
+  // Step 39X: how one part is made (null = the quote's / auto)
+  const savePartRun = async (id: number, run: "plates" | "digital" | null) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/quotes/display", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_no: quoteNo, action: "part_run", part_id: id, run }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setNote(j?.message || `Couldn't save (HTTP ${res.status}).`);
+        return;
+      }
+      window.location.reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const workHere = info.is_display; // Step 39E2: the other cards are hidden on a display
-  const cols = 6 + (workHere && grades.length ? 1 : 0) + (workHere ? 1 : 0) + (!info.locked ? 1 : 0);
+  const madeBy = workHere && !!info.short_runs_on; // Step 39X
+  const cols = 6 + (workHere && grades.length ? 1 : 0) + (workHere ? 1 : 0) + (madeBy ? 1 : 0) + (!info.locked ? 1 : 0);
 
   const locked = info.locked;
   const asm = info.assembly;
@@ -423,6 +455,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                 <th style={{ padding: "4px 6px" }}>Blank</th>
                 {workHere && grades.length ? <th style={{ padding: "4px 6px" }}>Board grade</th> : null}
                 {workHere ? <th style={{ padding: "4px 6px" }}>Printing</th> : null}
+                {madeBy ? <th style={{ padding: "4px 6px" }}>Made by</th> : null}
                 <th style={{ padding: "4px 6px" }}>Per display</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Qty</th>
                 <th style={{ padding: "4px 6px", textAlign: "right" }}>Each</th>
@@ -499,6 +532,26 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                           </button>
                         </>
                       ) : null}
+                    </td>
+                  ) : null}
+                  {/* Step 39X: how the part is made */}
+                  {madeBy ? (
+                    <td style={{ padding: "4px 6px" }}>
+                      <select
+                        style={{ ...input, maxWidth: 170 }}
+                        value={p.run ?? ""}
+                        disabled={locked || busy}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          void savePartRun(p.id, v === "plates" || v === "digital" ? v : null);
+                        }}
+                        aria-label="Made by"
+                        data-display-part-run={p.id}
+                      >
+                        <option value="">{partRunDefaultLabel(info.quote_run, p.run ? null : p.run_used)}</option>
+                        <option value="plates">{partRunLabel("plates")}</option>
+                        <option value="digital">{partRunLabel("digital")}</option>
+                      </select>
                     </td>
                   ) : null}
                   <td style={{ padding: "4px 6px" }}>
@@ -581,6 +634,19 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
               ))}
             </tbody>
           </table>
+          {/* Step 39X */}
+          {madeBy ? (
+            <div style={{ ...small, marginTop: 4 }} data-display-run-hint>
+              Made by: Auto uses your short-run cutoff on each part&apos;s own quantity
+              {info.cutoff ? ` (under ${info.cutoff.toLocaleString("en-US")} = CAD cut + digital)` : ""}. Pick Die cut + press
+              or CAD cut + digital to set a part yourself.
+            </div>
+          ) : workHere ? (
+            <div style={{ ...small, marginTop: 4 }} data-display-run-hint>
+              Every part is die cut. To CAD cut and digitally print short runs, set the short-run cutoff, CAD table rate and
+              speed (Pricing → Corrugated boxes).
+            </div>
+          ) : null}
 
           {/* Step 39E2: the quote's printing and a new part, here instead of the other cards */}
           {workHere ? (

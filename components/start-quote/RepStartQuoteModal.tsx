@@ -1367,7 +1367,7 @@ export default function RepStartQuoteModal({
                       ) : (
                         <>
                           {/* Step 39H: price from the customer's die line (boxes only) */}
-                          {quoteType === "boxes_only" ? <DielineUploadCard value={dieline} onChange={setDieline} /> : null}
+                          {quoteType === "boxes_only" ? <DielineUploadCard value={dieline} onChange={setDieline} grades={boxGrades} /> : null}
                           {!dlMode ? (
                           <>
                           <div className="grid grid-cols-3 gap-3">

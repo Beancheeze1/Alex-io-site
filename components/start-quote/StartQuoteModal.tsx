@@ -493,7 +493,8 @@ export default function StartQuoteModal({
   const [dlFile, setDlFile] = React.useState<File | null>(null);
   const [dlRead, setDlRead] = React.useState<DielineRead | null>(null);
   const [dlError, setDlError] = React.useState<string | null>(null);
-  const [dlParts, setDlParts] = React.useState<Record<number, { label: string; per: string }>>({});
+  // Step 39X: grade = the part's own board grade id ("" = the quote's Board grade)
+  const [dlParts, setDlParts] = React.useState<Record<number, { label: string; per: string; grade?: string }>>({});
   const [dlInputKey, setDlInputKey] = React.useState(0);
   // The chat said the buyer has a die line: the form opens on Box Setup to upload it.
   const [dlWanted, setDlWanted] = React.useState(false);
@@ -1497,6 +1498,7 @@ export default function StartQuoteModal({
                   piece: Number(piece),
                   label: v.label.trim() || null,
                   per_display: Number(v.per) || 1,
+                  grade_id: /^\d+$/.test(v.grade ?? "") ? Number(v.grade) : null, // Step 39X
                 }))
               : [],
             dieline_units: dlUnits, // Step 39P
@@ -1875,7 +1877,8 @@ export default function StartQuoteModal({
                                     <div>
                                       Your file has{" "}
                                       <span className="font-medium text-[var(--text-primary)]">{dlRead.pieces.length} parts</span>.
-                                      Name them if you like, and say how many of each go in one display.
+                                      Name them if you like, say how many of each go in one display, and pick a board for any
+                                      part that needs a different one.
                                     </div>
                                     <table className="w-full text-xs" data-dieline-parts>
                                       <thead>
@@ -1883,7 +1886,8 @@ export default function StartQuoteModal({
                                           <th className="py-1 pr-2 font-medium">Part</th>
                                           <th className="py-1 pr-2 font-medium">Name</th>
                                           <th className="py-1 pr-2 font-medium">Blank</th>
-                                          <th className="py-1 font-medium">Per display</th>
+                                          <th className="py-1 pr-2 font-medium">Per display</th>
+                                          {boxGrades.length ? <th className="py-1 font-medium">Board</th> : null}
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -1901,7 +1905,7 @@ export default function StartQuoteModal({
                                                 onChange={(e) =>
                                                   setDlParts((x) => ({
                                                     ...x,
-                                                    [p.piece]: { per: x[p.piece]?.per ?? "1", label: e.target.value.slice(0, 60) },
+                                                    [p.piece]: { ...x[p.piece], per: x[p.piece]?.per ?? "1", label: e.target.value.slice(0, 60) },
                                                   }))
                                                 }
                                                 className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
@@ -1919,6 +1923,7 @@ export default function StartQuoteModal({
                                                   setDlParts((x) => ({
                                                     ...x,
                                                     [p.piece]: {
+                                                      ...x[p.piece],
                                                       label: x[p.piece]?.label ?? "",
                                                       per: e.target.value.replace(/[^\d]/g, "").slice(0, 5),
                                                     },
@@ -1927,6 +1932,34 @@ export default function StartQuoteModal({
                                                 className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                                               />
                                             </td>
+                                            {/* Step 39X: this part's own board */}
+                                            {boxGrades.length ? (
+                                              <td className="py-1">
+                                                <select
+                                                  aria-label={`Part ${p.piece} board`}
+                                                  value={dlParts[p.piece]?.grade ?? ""}
+                                                  onChange={(e) =>
+                                                    setDlParts((x) => ({
+                                                      ...x,
+                                                      [p.piece]: {
+                                                        label: x[p.piece]?.label ?? "",
+                                                        per: x[p.piece]?.per ?? "1",
+                                                        grade: e.target.value,
+                                                      },
+                                                    }))
+                                                  }
+                                                  className="max-w-[140px] rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1.5 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
+                                                  data-dieline-part-grade={p.piece}
+                                                >
+                                                  <option value="">Same as the quote</option>
+                                                  {boxGrades.map((g) => (
+                                                    <option key={g.id} value={String(g.id)}>
+                                                      {g.name}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </td>
+                                            ) : null}
                                           </tr>
                                         ))}
                                       </tbody>
@@ -2710,7 +2743,10 @@ export default function StartQuoteModal({
                                   v={
                                     dlDisplay
                                       ? dlRead.pieces
-                                          .map((p) => `${dlParts[p.piece]?.label.trim() || `Part ${p.piece}`} ×${dlParts[p.piece]?.per || "1"}`)
+                                          .map((p) => {
+                                            const g = boxGrades.find((x) => String(x.id) === dlParts[p.piece]?.grade); // Step 39X
+                                            return `${dlParts[p.piece]?.label.trim() || `Part ${p.piece}`} ×${dlParts[p.piece]?.per || "1"}${g ? ` (${g.name})` : ""}`;
+                                          })
                                           .join(", ")
                                       : `${dlRead.length_in} × ${dlRead.width_in} in`
                                   }

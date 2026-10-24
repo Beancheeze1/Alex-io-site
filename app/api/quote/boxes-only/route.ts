@@ -46,6 +46,10 @@
 // units is read as inches unless mm is picked), payload.dieline_as ("single" |
 // "display"; Display on a one-outline file is refused with the reason) and,
 // staff only, payload.dieline_roles ({ groupKey: role }, kept on each part).
+// Step 39X: each display part can name its own board (parts[].grade_id; none =
+// box.grade_id) and, staff only, how it's made (parts[].run "plates" = die cut
+// + press, "digital" = CAD cut + digital; none = run_method, else auto by the
+// part's own quantity). The run is kept on the part's dieline blob.
 // Every part is flagged for staff to check the lines (review queue) until
 // they confirm them on the admin quote page. A file that can't be read is
 // refused with a message; the form offers the shop's spec request page.
@@ -78,6 +82,7 @@ import {
   cleanDielineAs,
   cleanDielineRoles,
   cleanDielineUnits,
+  partGradeAsked,
   type DielineBlank,
   type DielineSource,
 } from "@/lib/dieline-import"; // Step 39E; Step 39P: the form's units / one part or display / line roles
@@ -174,7 +179,7 @@ export async function POST(req: NextRequest) {
     const sku = dielineFile ? null : str(box.sku, 80);
     let custom: (CustomBoxInput & { gradeId: number | null }) | null = null;
     // Step 39E: the buyer's die line -> part(s), read before any quote row is made.
-    let dieline: { parts: DielineBlank[]; display: boolean; gradeId: number | null } | null = null;
+    let dieline: { parts: DielineBlank[]; display: boolean; gradeId: number | null; asked: Record<string, unknown>[] } | null = null;
     if (dielineFile) {
       // Step 39F: a vector PDF is read into the same lines a DXF gives
       let src: DielineSource = dielineFile.bytes.toString("utf8");
@@ -187,10 +192,12 @@ export async function POST(req: NextRequest) {
       }
       // Step 39P: the form's choices: units (inches unless mm), one part or a display,
       // and (staff only) the line roles from the form's line table.
-      const read = buyerDielineParts(src, dielineFile.name, Array.isArray(b.parts) ? b.parts.slice(0, 50) : [], {
+      const asked = (Array.isArray(b.parts) ? b.parts.slice(0, 50) : []) as Record<string, unknown>[];
+      const read = buyerDielineParts(src, dielineFile.name, asked, {
         units: cleanDielineUnits(b.dieline_units),
         as: cleanDielineAs(b.dieline_as),
         roles: isStaff ? cleanDielineRoles(b.dieline_roles) : null,
+        runs: isStaff, // Step 39X: only staff pick how a part is made
       });
       if (!read.ok) {
         return bad("dieline_unreadable", `${read.message} You can send the file to the shop instead and they'll quote it.`, 422);
@@ -204,7 +211,7 @@ export async function POST(req: NextRequest) {
             return own;
           })
         : read.parts;
-      dieline = { parts, display: read.display, gradeId: Number.isInteger(g) && g > 0 ? g : null };
+      dieline = { parts, display: read.display, gradeId: Number.isInteger(g) && g > 0 ? g : null, asked };
     } else if (!sku) {
       // Step 27: any style (pads have no depth; partitions need cells).
       const parsed = parseCustomBoxInput(box);
@@ -366,8 +373,10 @@ export async function POST(req: NextRequest) {
       for (const part0 of dieline.parts) {
         const part: DielineBlank = { ...part0, attachment_id: att ? Number(att.id) : null };
         const lineQty = dieline.display ? qty * (part.per_display ?? 1) : qty;
+        // Step 39X: the part's own board, else the quote's (another shop's / an inactive grade falls back to the default)
+        const partGrade = dieline.display ? partGradeAsked(dieline.asked, part.piece ?? null) : null;
         const resolved = await resolveCustomSelection(part.length_in, part.width_in, 0, "dieline", lineQty, tenantId, {
-          gradeId: dieline.gradeId,
+          gradeId: partGrade ?? dieline.gradeId,
           print,
           method: runMethod,
           dieline: part,

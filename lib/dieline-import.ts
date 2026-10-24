@@ -219,6 +219,44 @@ export function partPrintOf(dieline: unknown): PartPrint | null {
   return { colors, sides: Number(p.sides) === 2 ? 2 : 1 };
 }
 
+/**
+ * Step 39X: how one display part is made, picked by staff:
+ *   "plates"  = die cut (+ press print with plates), the production run
+ *   "digital" = CAD cut (+ digital print), a short run
+ * Not set = the quote's run method (Run method on the quote), else auto by
+ * the part's own quantity against the shop's short-run cutoff.
+ */
+export type PartRun = "plates" | "digital";
+export function cleanPartRun(raw: unknown): PartRun | null {
+  return raw === "plates" || raw === "digital" ? raw : null;
+}
+export function partRunOf(dieline: unknown): PartRun | null {
+  return cleanPartRun((dieline as { run?: unknown } | null)?.run);
+}
+/** Step 39X: the run a die line part is priced with: its own, else the quote's (null = auto by quantity). */
+export function partRunOr<M extends string>(dieline: unknown, quoteMethod: M | null | undefined): PartRun | M | null {
+  return partRunOf(dieline) ?? quoteMethod ?? null;
+}
+/** Step 39X: the Made by names. */
+export function partRunLabel(run: unknown): string {
+  return run === "digital" ? "CAD cut + digital" : run === "plates" ? "Die cut + press" : "Auto by quantity";
+}
+/**
+ * Step 39X: the "not picked" option of a part's Made by: the quote's run
+ * method when staff set one, else auto, with what auto chose for this part.
+ */
+export function partRunDefaultLabel(quoteRun: unknown, used: unknown): string {
+  if (quoteRun === "plates" || quoteRun === "digital") return `Quote's (${partRunLabel(quoteRun)})`;
+  return used === "plates" || used === "digital" ? `Auto (${partRunLabel(used)})` : "Auto by quantity";
+}
+/** Step 39X: the board grade the form picked for one part (by piece), or null = the quote's grade. */
+export function partGradeAsked(asked: { piece?: unknown; grade_id?: unknown }[] | null | undefined, piece: number | null): number | null {
+  if (piece == null || !Array.isArray(asked)) return null;
+  const want = asked.find((x) => Number(x?.piece) === piece);
+  const g = Number(want?.grade_id);
+  return Number.isInteger(g) && g > 0 ? g : null;
+}
+
 /** Step 39F: a drawing scale picked by staff (1 = full size; 2 = drawn at 1:2, so x2). */
 export function cleanDielineScale(raw: unknown): number {
   const v = Number(raw);
@@ -402,6 +440,7 @@ export type DielineBlank = {
   label?: string | null; // Step 39D: staff's name for the part ("Header", "Shelf")
   scale?: number; // Step 39F: the drawing scale staff set (1 = full size); kept for Edit lines
   print?: PartPrint; // Step 39G: this part's own printing (a display part printed differently); none = the quote's
+  run?: PartRun; // Step 39X: how this part is made (staff pick); none = the quote's choice, else auto by its own quantity
   check?: boolean; // Step 39E: read automatically from a buyer's upload; staff haven't confirmed the lines yet
 };
 
@@ -426,6 +465,7 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
     label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 60) : null,
     ...(cleanDielineScale(o.scale) !== 1 ? { scale: cleanDielineScale(o.scale) } : {}),
     ...(partPrintOf(o) ? { print: partPrintOf(o) as PartPrint } : {}),
+    ...(partRunOf(o) ? { run: partRunOf(o) as PartRun } : {}),
     ...(o.check === true ? { check: true } : {}),
   };
 }
@@ -703,10 +743,11 @@ export const DIELINE_NOT_DISPLAY =
 export function buyerDielineParts(
   text: DielineSource,
   filename: string,
-  asked: { piece?: unknown; label?: unknown; per_display?: unknown }[] = [],
+  asked: { piece?: unknown; label?: unknown; per_display?: unknown; run?: unknown; grade_id?: unknown }[] = [],
   // Step 39P: the in/mm pick, the form's "One part / A display" choice
   // (auto = by the outlines found) and staff's line roles (staff only).
-  opts: { units?: DielineUnits; as?: DielineAs; roles?: Record<string, unknown> | null } = {},
+  // Step 39X: runs = keep each part's "Made by" pick (staff only).
+  opts: { units?: DielineUnits; as?: DielineAs; roles?: Record<string, unknown> | null; runs?: boolean } = {},
 ):
   | { ok: true; parts: DielineBlank[]; display: boolean; warnings: string[]; units: "in" | "mm" }
   | { ok: false; error: string; message: string } {
@@ -756,6 +797,7 @@ export function buyerDielineParts(
     const want = asked.find((x) => Number(x?.piece) === pc.piece) ?? null;
     const pd = Number(want?.per_display);
     const label = typeof want?.label === "string" ? want.label.trim().slice(0, 60) : "";
+    const run = opts.runs ? cleanPartRun(want?.run) : null; // Step 39X
     return {
       length_in: pc.length_in,
       width_in: pc.width_in,
@@ -767,6 +809,7 @@ export function buyerDielineParts(
       per_display: Number.isInteger(pd) && pd >= 1 && pd <= 10000 ? pd : 1,
       piece: pc.piece,
       label: label || `Part ${pc.piece}`,
+      ...(run ? { run } : {}),
     };
   });
   return { ok: true, display: true, units: a.units, warnings: a.warnings, parts };

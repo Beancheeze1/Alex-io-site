@@ -9,11 +9,14 @@
 // Step 39P: the Units pick (inches unless mm), "This file is One part / A
 // display", and the line table (each color: cut / crease / perf / ignore),
 // so a file is set up here instead of on the quote page.
+// Step 39X: each display part's Board (blank = the quote's Board grade) and
+// Made by (Auto by quantity / Die cut + press / CAD cut + digital; Auto
+// follows the quote's Run method, else the part's own quantity).
 
 "use client";
 
 import * as React from "react";
-import { DIELINE_ROLES, type DielineRole } from "@/lib/dieline-import";
+import { DIELINE_ROLES, partRunLabel, type DielineRole } from "@/lib/dieline-import";
 import DielineChoices, {
   DielinePartThumb,
   aciName,
@@ -27,10 +30,13 @@ import DielineChoices, {
 } from "@/components/start-quote/DielineChoices";
 
 export type { DielineRead };
+// Step 39X: grade = a grade id ("" = the quote's), run = "" (auto) | "plates" | "digital"
+export type DielinePartPick = { label: string; per: string; grade?: string; run?: string };
+export type DielineGradeOption = { id: number; name: string; is_default?: boolean };
 export type DielineUpload = {
   file: File;
   read: DielineRead;
-  parts: Record<number, { label: string; per: string }>;
+  parts: Record<number, DielinePartPick>;
   units: DielineUnitsPick; // Step 39P
   as: DielineAsPick; // Step 39P
   roles: Record<string, DielineRole>; // Step 39P: only the lines staff changed
@@ -51,12 +57,20 @@ export function dielineChoicesPayload(d: DielineUpload): {
 }
 
 /** The parts to send with the quote (empty for a one-part file). */
-export function dielinePartsPayload(d: DielineUpload): { piece: number; label: string | null; per_display: number }[] {
+export function dielinePartsPayload(d: DielineUpload): {
+  piece: number;
+  label: string | null;
+  per_display: number;
+  grade_id: number | null;
+  run: "plates" | "digital" | null;
+}[] {
   if (!d || !dielineIsDisplay(d)) return [];
   return Object.entries(d.parts).map(([piece, v]) => ({
     piece: Number(piece),
     label: v.label.trim() || null,
     per_display: Number(v.per) || 1,
+    grade_id: /^\d+$/.test(v.grade ?? "") ? Number(v.grade) : null, // Step 39X
+    run: v.run === "plates" || v.run === "digital" ? v.run : null,
   }));
 }
 /** Every part has a whole-number count of 1 or more. */
@@ -69,9 +83,11 @@ export function dielinePartsOk(d: DielineUpload): boolean {
 export default function DielineUploadCard({
   value,
   onChange,
+  grades = [],
 }: {
   value: DielineUpload;
   onChange: (v: DielineUpload) => void;
+  grades?: DielineGradeOption[]; // Step 39X: the shop's board grades (Board column hidden when none)
 }) {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -133,7 +149,7 @@ export default function DielineUploadCard({
     void load(value.file, { units: value.units, roles }, value);
   };
 
-  const setPart = (piece: number, patch: Partial<{ label: string; per: string }>) => {
+  const setPart = (piece: number, patch: Partial<DielinePartPick>) => {
     if (!value) return;
     onChange({ ...value, parts: { ...value.parts, [piece]: { ...(value.parts[piece] ?? { label: "", per: "1" }), ...patch } } });
   };
@@ -169,7 +185,7 @@ export default function DielineUploadCard({
             <>
               <div>
                 <span className="font-medium text-[var(--text-primary)]">{value.read.pieces.length} parts</span>: name them and
-                set how many of each go in one display.
+                set how many of each go in one display, its board and how it&apos;s made.
               </div>
               <table className="w-full text-xs">
                 <thead>
@@ -177,7 +193,9 @@ export default function DielineUploadCard({
                     <th className="py-1 pr-2 font-medium">Part</th>
                     <th className="py-1 pr-2 font-medium">Name</th>
                     <th className="py-1 pr-2 font-medium">Blank</th>
-                    <th className="py-1 font-medium">Per display</th>
+                    <th className="py-1 pr-2 font-medium">Per display</th>
+                    {grades.length ? <th className="py-1 pr-2 font-medium">Board</th> : null}
+                    <th className="py-1 font-medium">Made by</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,7 +217,7 @@ export default function DielineUploadCard({
                       <td className="whitespace-nowrap py-1 pr-2">
                         {p.length_in} × {p.width_in} in
                       </td>
-                      <td className="py-1">
+                      <td className="py-1 pr-2">
                         <input
                           aria-label={`Part ${p.piece} per display`}
                           inputMode="numeric"
@@ -208,12 +226,55 @@ export default function DielineUploadCard({
                           className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-primary)]"
                         />
                       </td>
+                      {/* Step 39X: the part's own board and how it's made */}
+                      {grades.length ? (
+                        <td className="py-1 pr-2">
+                          <select
+                            aria-label={`Part ${p.piece} board`}
+                            value={value.parts[p.piece]?.grade ?? ""}
+                            onChange={(e) => setPart(p.piece, { grade: e.target.value })}
+                            className="max-w-[140px] rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1.5 py-1 text-xs text-[var(--text-primary)]"
+                            data-rep-dieline-part-grade={p.piece}
+                          >
+                            <option value="" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                              Same as the quote
+                            </option>
+                            {grades.map((g) => (
+                              <option key={g.id} value={String(g.id)} style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                                {g.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      ) : null}
+                      <td className="py-1">
+                        <select
+                          aria-label={`Part ${p.piece} made by`}
+                          value={value.parts[p.piece]?.run ?? ""}
+                          onChange={(e) => setPart(p.piece, { run: e.target.value })}
+                          className="rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-1.5 py-1 text-xs text-[var(--text-primary)]"
+                          data-rep-dieline-part-run={p.piece}
+                        >
+                          <option value="" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                            {partRunLabel(null)}
+                          </option>
+                          <option value="plates" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                            {partRunLabel("plates")}
+                          </option>
+                          <option value="digital" style={{ color: "#0f172a", backgroundColor: "#fff" }}>
+                            {partRunLabel("digital")}
+                          </option>
+                        </select>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {!dielinePartsOk(value) ? <div className="text-xs text-[var(--attention)]">Enter at least 1 of each part per display.</div> : null}
-              <div className="text-xs text-[var(--text-muted)]">Assembly and packing is added from your shop&apos;s rates.</div>
+              <div className="text-xs text-[var(--text-muted)]">
+                Assembly and packing is added from your shop&apos;s rates. Made by: Auto follows the Run method below, else
+                each part&apos;s own quantity against your short-run cutoff (e.g. 200 shelves die cut, 50 sides CAD cut).
+              </div>
             </>
           ) : dielineDisplayBlocked(value.read, value.as) ? null : (
             <div>

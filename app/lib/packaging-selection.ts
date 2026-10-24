@@ -30,7 +30,7 @@
 // pricing_detail.run_method on each row.
 
 import { boxShapeIssue } from "@/lib/box-shape"; // Step 39B
-import { dielineSizeSuspect, parseDielineBlank, partPrintOf, type DielineBlank } from "@/lib/dieline-import"; // Step 39C, 39D2, 39G
+import { dielineSizeSuspect, parseDielineBlank, partPrintOf, partRunOr, type DielineBlank } from "@/lib/dieline-import"; // Step 39C, 39D2, 39G, 39X
 import {
   ASSEMBLY_STYLE,
   assemblyDescription,
@@ -321,7 +321,9 @@ export async function resolveCustomSelection(
   const baseDesc = partName + customBoxBaseDesc(style, L, W, H, cells) + perSet;
   const print = opts.print ?? null;
   const printed = !!print && print.colors.length > 0;
-  const method = opts.method ?? null; // Step 15: null = auto by quantity
+  // Step 15: null = auto by quantity. Step 39X: a display part made its own way
+  // (its dieline blob's run) wins over the quote's choice.
+  const method: RunMethod | null = style === "dieline" ? partRunOr(opts.dieline, opts.method) : opts.method ?? null;
   const printDesc = (m: RunMethod | null | undefined) => (printed ? ` · ${describePrintSpec(print, m)}` : "");
 
   if (!style || !tenantId) {
