@@ -44,10 +44,16 @@ export type TicketFoamSheet = {
   file: number; // sheet cut file (TicketSheetFile.file)
 };
 
-/** Step 39M: one sheet cut file = one steel-rule die / CNC program. */
+/**
+ * Step 39M: one sheet cut file = one CNC program / die pattern. Step 39T: a
+ * file is also one sheet thickness (named for it, "…__Cut-2__2in"), so two
+ * files can share a steel-rule die (same_die_as).
+ */
 export type TicketSheetFile = {
   file: number; // 1-based
   name: string; // DXF base name (no extension)
+  thickness_in: number; // Step 39T: the sheet thickness it's cut from (after skiving)
+  same_die_as: number | null; // Step 39T: an earlier file with the same outline + cavities (same die)
   per_part: number; // sheets cut with it per finished part
   cavities: number; // cavities cut through
   used_in: string; // "Part 1 layers 3-4, Part 2 layer 1"
@@ -78,6 +84,20 @@ function runList(ns: number[]): string {
   return out.join(", ");
 }
 
+/** Step 39T: "2in", "1.5in", "0.375in" for a cut file name. */
+export function thicknessName(inches: number): string {
+  const n = Number(inches);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${n.toFixed(3).replace(/\.?0+$/, "")}in`;
+}
+
+/** Step 39T: how the ticket describes a cut file: '2" thick, 1 cavity' (+ shared die). */
+export function sheetFileLabel(f: Pick<TicketSheetFile, "thickness_in" | "cavities" | "same_die_as">): string {
+  const t = `${Number(f.thickness_in.toFixed(3))}" thick`;
+  const c = f.cavities ? `${f.cavities} cavit${f.cavities === 1 ? "y" : "ies"}` : "solid";
+  return `${t}, ${c}${f.same_die_as ? ` (same die as Cut ${f.same_die_as})` : ""}`;
+}
+
 /**
  * Step 39M: the ticket's sheet build from a geometry that has its sheets
  * (withSheets in app/lib/pricing/foam-geometry.ts). Sheets that are cut the
@@ -96,14 +116,22 @@ export function foamBuildForTicket(args: {
   const files: TicketSheetFile[] = [];
   const q = sanitizeFilenamePart(args.quoteNo || "quote");
   const rev = sanitizeFilenamePart(args.revision || "");
+  // Step 39T: one file per pattern AND sheet thickness, named for the thickness
+  const keyOf = (s: { pattern: string; thickness_in: number }) => `${s.pattern}#${Math.round(s.thickness_in * 1000)}`;
+  const dieOf = new Map<string, number>();
   for (const s of sheets) {
-    if (fileOf.has(s.pattern)) continue;
+    const key = keyOf(s);
+    if (fileOf.has(key)) continue;
     const file = files.length + 1;
-    fileOf.set(s.pattern, file);
+    fileOf.set(key, file);
     const cav = s.cavity_index.length;
+    const sameDie = dieOf.get(s.pattern) ?? null;
+    if (sameDie == null) dieOf.set(s.pattern, file);
     files.push({
       file,
-      name: [q, rev, `Cut-${file}`, cav ? `${cav}-cavit${cav === 1 ? "y" : "ies"}` : "solid"].filter(Boolean).join("__"),
+      name: [q, rev, `Cut-${file}`, thicknessName(s.thickness_in)].filter(Boolean).join("__"),
+      thickness_in: s.thickness_in,
+      same_die_as: sameDie,
       per_part: 0,
       cavities: cav,
       used_in: "",
@@ -114,7 +142,7 @@ export function foamBuildForTicket(args: {
   // Step 39M2 / 39N: "Part 2 Top Pad", or "Part 1" when it only has the default name
   const layerName = (n: number) => partName(args.labels[n - 1], n - 1);
   for (const f of files) {
-    const mine = sheets.filter((s) => fileOf.get(s.pattern) === f.file);
+    const mine = sheets.filter((s) => fileOf.get(keyOf(s)) === f.file);
     f.per_part = mine.length;
     const layers = Array.from(new Set(mine.map((s) => s.layer))).sort((a, b) => a - b);
     f.used_in = layers
@@ -150,7 +178,7 @@ export function foamBuildForTicket(args: {
       stock_in: s.stock_in,
       skived: s.skived,
       cavities: s.cavity_index.length,
-      file: fileOf.get(s.pattern) ?? 0,
+      file: fileOf.get(keyOf(s)) ?? 0,
     })),
     files,
     steps,

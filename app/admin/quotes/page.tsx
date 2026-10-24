@@ -496,7 +496,7 @@ export default function AdminQuotesPage() {
               </button>
             </form>
             <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-              Admin only – not visible to customers.
+              Staff only – not visible to customers.
             </p>
           </div>
 

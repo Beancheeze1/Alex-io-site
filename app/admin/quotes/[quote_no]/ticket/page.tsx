@@ -15,7 +15,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { dimsText, ticketDate, type JobTicket } from "@/app/lib/job-ticket-core";
+import { dimsText, sheetFileLabel, ticketDate, type JobTicket } from "@/app/lib/job-ticket-core";
 import { formatInches } from "@/lib/corrugated-blank";
 import { partName } from "@/app/lib/foam-terms";
 
@@ -223,7 +223,7 @@ export default function JobTicketPage() {
                       {ticket.foam.build.files.map((f) => (
                         <tr key={f.file} data-ticket-sheet-file={f.file}>
                           <td className={cell}>
-                            Cut {f.file}: {f.cavities ? `${f.cavities} cavit${f.cavities === 1 ? "y" : "ies"}` : "solid"}
+                            Cut {f.file}: {sheetFileLabel(f)}
                             <div className="font-mono text-[11px] text-[var(--text-muted)]">{f.name}</div>
                           </td>
                           <td className={cell}>{f.per_part}</td>

@@ -8,7 +8,7 @@
 
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from "pdf-lib";
 import type { JobTicket } from "@/app/lib/job-ticket-core";
-import { dimsText, ticketDate } from "@/app/lib/job-ticket-core";
+import { dimsText, sheetFileLabel, ticketDate } from "@/app/lib/job-ticket-core";
 import type { Dieline } from "@/lib/box-dieline";
 import { formatInches } from "@/lib/corrugated-blank";
 import { partName } from "@/app/lib/foam-terms";
@@ -245,7 +245,7 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
         ["Cut file (.dxf)", "Per set", "Total", "Used in"],
         [230, 50, 60, 192],
         b.files.map((x) => [
-          `Cut ${x.file}: ${x.cavities ? `${x.cavities} cavit${x.cavities === 1 ? "y" : "ies"}` : "solid"}\n${x.name}`,
+          `Cut ${x.file}: ${sheetFileLabel(x)}\n${x.name}`,
           String(x.per_part),
           (x.per_part * f.sets).toLocaleString("en-US"),
           x.used_in,

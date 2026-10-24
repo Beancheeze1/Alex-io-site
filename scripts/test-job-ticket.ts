@@ -6,7 +6,7 @@
 // Run: npm run test:ticket   (= npx --yes tsx scripts/test-job-ticket.ts)
 
 import { foamGeometry, withSheets } from "../app/lib/pricing/foam-geometry";
-import { foamBuildForTicket, sheetLayout, type JobTicket } from "../app/lib/job-ticket-core";
+import { foamBuildForTicket, sheetFileLabel, sheetLayout, thicknessName, type JobTicket } from "../app/lib/job-ticket-core";
 import { buildDxfForLayer } from "../app/lib/layout/layer-dxf";
 import { jobTicketPdf } from "../lib/pdf/job-ticket";
 
@@ -47,10 +47,18 @@ check(
   build.sheets.map((s) => `${s.layer}.${s.n}:${s.from_in}+${s.thickness_in}@${s.stock_in}/${s.cavities}`).join(" "),
   "1.1:0+1@1/2 1.2:1+2@2/1 1.3:3+2@2/0 1.4:5+2@2/0 2.1:0+1@1/0",
 );
-check("build: 3 sheet files (= 3 dies)", build.files.length, 3);
-check("build: file per-set counts", build.files.map((f) => f.per_part).join(","), "1,1,3");
-check("build: solid file used by both layers", build.files[2].used_in, "Part 1 layers 3-4, Part 2 layer 1");
-check("build: file names", build.files.map((f) => f.name).join(" | "), "Q-A-1__A__Cut-1__2-cavities | Q-A-1__A__Cut-2__1-cavity | Q-A-1__A__Cut-3__solid");
+// Step 39T: one file per pattern AND thickness (the 2" solid sheets and the 1" top pad are separate files on one die)
+check("build: 4 sheet files (3 dies)", build.files.length, 4);
+check("build: file per-set counts", build.files.map((f) => f.per_part).join(","), "1,1,2,1");
+check("build: 2in solid file = Part 1 layers 3-4", build.files[2].used_in, "Part 1 layers 3-4");
+check("build: 1in solid file = the top pad, same die as Cut 3", `${build.files[3].used_in} / ${build.files[3].same_die_as}`, "Part 2 layer 1 / 3");
+check("build: only the shared die is marked", build.files.map((f) => f.same_die_as ?? "-").join(","), "-,-,-,3");
+check("build: file names carry the sheet thickness", build.files.map((f) => f.name).join(" | "), "Q-A-1__A__Cut-1__1in | Q-A-1__A__Cut-2__2in | Q-A-1__A__Cut-3__2in | Q-A-1__A__Cut-4__1in");
+check("build: thickness on each file", build.files.map((f) => f.thickness_in).join(","), "1,2,2,1");
+check("build: sheets point at the right file", build.sheets.map((x) => x.file).join(","), "1,2,3,3,4");
+check("label: thickness + cavities", sheetFileLabel(build.files[0]), '1" thick, 2 cavities');
+check("label: shared die", sheetFileLabel(build.files[3]), '1" thick, solid (same die as Cut 3)');
+check("thicknessName", [thicknessName(1.5), thicknessName(0.375), thicknessName(2), thicknessName(0)].join(","), "1.5in,0.375in,2in,");
 check("build: sheet 2 file keeps only the deep cavity", build.files[1].cavity_index.join(","), "0");
 check(
   "build: steps",
@@ -69,7 +77,7 @@ const glued = withSheets(
 const gb = foamBuildForTicket({ geom: glued, labels: [null, null], quoteNo: "Q-A-2", revision: null });
 check("glued: glue step between layers", gb?.steps.includes("Glue part 1 to part 2 (1 glue line)."), true);
 check("glued: 1.5\" layer skived from 2\" stock", gb?.sheets[0].skived === true && gb?.sheets[0].stock_in === 2, true);
-check("glued: one solid file for both layers", gb?.files.length, 1);
+check("glued: 1.5in and 1in layers = 2 files on one die", `${gb?.files.length} ${gb?.files.map((f) => f.name).join(" ")} ${gb?.files[1]?.same_die_as}`, "2 Q-A-2__Cut-1__1.5in Q-A-2__Cut-2__1in 1");
 const plainNames = foamBuildForTicket({ geom, labels: ["Layer 1", "Layer 2"], quoteNo: "Q-A-3", revision: null });
 check("steps: default layer names aren't repeated", plainNames?.steps[0], "Part 1: laminate layers 1-4 (3 glue lines), layer 1 on the cavity face.");
 check("no sheets: no build", foamBuildForTicket({ geom: foamGeometry(layout, { L: 10, W: 10, H: 8 }), labels: [], quoteNo: "x", revision: null }), null);
