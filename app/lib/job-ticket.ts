@@ -26,6 +26,8 @@ import { boxStyleLabel, parseBoxStyle } from "@/lib/box-styles";
 import { describePrintSpec, parsePrintSpec } from "@/lib/corrugated-price";
 import { loadCorrugated } from "@/lib/corrugated";
 import { isSlottedStyle, slottedDieline, type Dieline } from "@/lib/box-dieline";
+import { dielinePartDxf, dielinePartFilename, dielinePartLines, parseDielineBlank, type DielineSource } from "@/lib/dieline-import"; // Step 39Q
+import { looksLikePdf, pdfDielineLines } from "@/lib/dieline-pdf"; // Step 39Q
 import {
   TERMS_SHORT,
   addressLines,
@@ -81,6 +83,8 @@ type BoxRow = {
   detail: Record<string, unknown> | null;
   cells_across: number | null;
   cells_down: number | null;
+  dieline: unknown; // Step 39Q: the stored die line blank (parts priced from a file)
+  dieline_file: string | null; // Step 39Q: the customer's file name
 };
 
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v == null || v === "" ? null : String(v));
@@ -117,17 +121,29 @@ async function loadBoxRows(quoteId: number): Promise<BoxRow[]> {
             qbs.print_colors, qbs.print_sides,
             to_jsonb(qbs) -> 'pricing_detail' AS detail,
             (to_jsonb(qbs) ->> 'custom_cells_across')::int AS cells_across,
-            (to_jsonb(qbs) ->> 'custom_cells_down')::int AS cells_down
+            (to_jsonb(qbs) ->> 'custom_cells_down')::int AS cells_down,
+            to_jsonb(qbs) -> 'dieline' AS dieline,
+            qa.filename AS dieline_file
        FROM public.quote_box_selections qbs
        LEFT JOIN public.boxes b ON b.id = qbs.box_id
        LEFT JOIN public.corrugated_board_grades g ON g.id = qbs.board_grade_id
+       LEFT JOIN public.quote_attachments qa
+              ON qa.quote_id = qbs.quote_id
+             AND qa.id::text = (to_jsonb(qbs) -> 'dieline' ->> 'attachment_id')
       WHERE qbs.quote_id = $1
       ORDER BY qbs.id ASC`,
     [quoteId],
   );
 }
 
-function boxFromRow(r: BoxRow, line: number): TicketBox {
+/** Step 39Q: the stored die line of a part line, when its file is kept on the quote. */
+function partDielineOf(r: BoxRow) {
+  if (r.custom_style !== "dieline") return null;
+  const b = parseDielineBlank(r.dieline);
+  return b && Number(b.attachment_id) > 0 ? b : null;
+}
+
+function boxFromRow(r: BoxRow, line: number, file?: { quoteNo: string; revision: string | null }): TicketBox {
   const detail = (r.detail && typeof r.detail === "object" ? r.detail : {}) as Record<string, unknown>;
   // Step 39D: the assembly / packing line of a display, and die line parts (flat blank, no depth).
   const isAssembly = r.custom_style === "assembly";
@@ -152,6 +168,8 @@ function boxFromRow(r: BoxRow, line: number): TicketBox {
   const spec = parsePrintSpec({ colors, sides: r.print_sides });
   const method = detail.run_method ?? null;
   const blank = detail.blank && typeof detail.blank === "object" ? (detail.blank as Record<string, unknown>) : null;
+  const part = isPart ? partDielineOf(r) : null; // Step 39Q
+  const partBlank = isPart ? parseDielineBlank(r.dieline) : null;
   const sheet = detail.sheet && typeof detail.sheet === "object" ? (detail.sheet as Record<string, unknown>) : null;
   return {
     line,
@@ -177,12 +195,24 @@ function boxFromRow(r: BoxRow, line: number): TicketBox {
     cells: r.cells_across && r.cells_down ? { across: Number(r.cells_across), down: Number(r.cells_down) } : null,
     print: isAssembly ? "—" : describePrintSpec(spec, method === "digital" ? "digital" : method === "plates" ? "plates" : null),
     run: r.kind === "custom" && !isAssembly ? runText(method) : null,
-    blank: blank && pos(blank.length_in) && pos(blank.width_in) ? { length_in: Number(blank.length_in), width_in: Number(blank.width_in) } : null,
+    blank:
+      blank && pos(blank.length_in) && pos(blank.width_in)
+        ? { length_in: Number(blank.length_in), width_in: Number(blank.width_in) }
+        : partBlank // Step 39Q: a part's blank from its die line
+          ? { length_in: partBlank.length_in, width_in: partBlank.width_in }
+          : null,
     sheet:
       sheet && pos(sheet.length_in) && pos(sheet.width_in)
         ? { length_in: Number(sheet.length_in), width_in: Number(sheet.width_in), up: Number(sheet.up) || 1 }
         : null,
     dxf: r.kind === "custom" && isSlottedStyle(style) && !!inside && inside.D > 0,
+    part_file: part
+      ? {
+          name: dielinePartFilename(file?.quoteNo ?? "quote", file?.revision ?? null, line, part.label ?? null),
+          source: r.dieline_file,
+          piece: part.piece ?? null,
+        }
+      : null,
   };
 }
 
@@ -330,7 +360,10 @@ export async function buildJobTicket(quoteNo: string, tenantId: number): Promise
       weight_lb: kept && Number(kept.actual_lb) > 0 ? Math.round(Number(kept.actual_lb)) : null,
     },
     foam,
-    boxes: await withDieLineBlanks(boxRows.map((r, i) => boxFromRow(r, i + 1)), tenantId),
+    boxes: await withDieLineBlanks(
+      boxRows.map((r, i) => boxFromRow(r, i + 1, { quoteNo: quote.quote_no, revision })),
+      tenantId,
+    ),
     proof:
       proofs && (proofs.required || proofs.versions.length > 0)
         ? {
@@ -390,6 +423,47 @@ export async function boxDieline(quoteNo: string, tenantId: number, selectionId:
 }
 
 export type SheetDxfResult = { ok: true; dxf: string; filename: string } | { ok: false; status: number; error: string; message: string };
+
+/**
+ * Step 39Q: the cut file for one part priced from the customer's die line:
+ * only that part's lines (roles, units, scale and piece as quoted), drawn from
+ * the file kept on the quote. { ok:false, error:"not_a_part" } for other lines.
+ */
+export async function partDielineDxf(quoteNo: string, tenantId: number, selectionId: number): Promise<SheetDxfResult> {
+  const quote = await loadQuote(quoteNo, tenantId);
+  if (!quote) return { ok: false, status: 404, error: "not_found", message: "Quote not found." };
+  const rows = await loadBoxRows(quote.id);
+  const idx = rows.findIndex((r) => Number(r.id) === selectionId);
+  if (idx < 0) return { ok: false, status: 404, error: "line_not_found", message: "That box line isn't on this quote." };
+  const row = rows[idx];
+  const part = partDielineOf(row);
+  if (!part) return { ok: false, status: 422, error: "not_a_part", message: "This line wasn't priced from a die line file." };
+  const att = await one<{ filename: string | null; data: Buffer }>(
+    `SELECT filename, data FROM public.quote_attachments WHERE id = $1 AND quote_id = $2 LIMIT 1`,
+    [part.attachment_id, quote.id],
+  );
+  if (!att?.data) return { ok: false, status: 404, error: "file_missing", message: "The die line file isn't on this quote any more." };
+  const bytes = Buffer.from(att.data);
+  const fname = String(att.filename || "dieline.dxf");
+  let src: DielineSource = bytes.toString("utf8");
+  if (/\.pdf$/i.test(fname) || looksLikePdf(bytes)) {
+    const pdf = await pdfDielineLines(bytes);
+    if (!pdf.ok) return { ok: false, status: 422, error: pdf.error, message: pdf.message };
+    src = pdf.lines;
+  }
+  const lines = dielinePartLines(src, { roles: part.roles ?? null, units: part.units ?? null, scale: part.scale ?? 1, piece: part.piece ?? null });
+  if (!lines.ok) return { ok: false, status: 422, error: lines.error, message: lines.message };
+  const facts = ((await loadFacts(quote.quote_no).catch(() => null)) || {}) as Record<string, unknown>;
+  const revision = String(facts.released_rev || facts.revision || "").replace(/^rev\s*/i, "").trim() || null;
+  const box = boxFromRow(row, idx + 1, { quoteNo: quote.quote_no, revision });
+  const r1 = (n: number) => Math.round(n * 1000) / 1000;
+  const notes = [
+    `${quote.quote_no}${revision ? ` rev ${revision}` : ""} line ${idx + 1}: ${part.label || "Part"}, qty ${box.qty.toLocaleString("en-US")}${box.grade ? `, ${box.grade}` : ""}`,
+    `Blank ${r1(lines.length_in)} x ${r1(lines.width_in)} in. From the customer's file ${fname}${part.piece ? `, part ${part.piece}` : ""}.`,
+    `Layers: CUT, CREASE${lines.lines.some((l) => l.role === "perf") ? ", PERF" : ""}. Inches.`,
+  ];
+  return { ok: true, dxf: dielinePartDxf(lines, notes), filename: box.part_file?.name ?? `${quote.quote_no}__Line-${idx + 1}.dxf` };
+}
 
 /**
  * Step 39M: the DXF for one sheet cut file of the quote's foam (the outline

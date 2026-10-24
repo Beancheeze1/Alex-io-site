@@ -7,10 +7,13 @@
 //   GET ...&format=json -> { ok, dieline, line, priced_blank_differs }
 // Staff (admin / cs / sales) of the shop. Any time (samples are often cut
 // before release); the job ticket links to it after release.
+// Step 39Q: a part priced from the customer's die line file gets its own cut
+// file instead: just that part's lines (CUT / CREASE / PERF, inches) from
+// the file kept on the quote.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth";
-import { boxDieline } from "@/app/lib/job-ticket";
+import { boxDieline, partDielineDxf } from "@/app/lib/job-ticket";
 import { dielineDxf, dielineFilename } from "@/lib/box-dieline";
 import { dimsText } from "@/app/lib/job-ticket-core";
 
@@ -31,6 +34,22 @@ export async function GET(req: NextRequest) {
     const lineId = Number(sp.get("line_id"));
     if (!quoteNo) return json({ ok: false, error: "missing_quote_no", message: "quote_no is required." }, 400);
     if (!Number.isInteger(lineId) || lineId <= 0) return json({ ok: false, error: "missing_line_id", message: "line_id is required." }, 400);
+
+    // Step 39Q: die line parts first
+    if (sp.get("format") !== "json") {
+      const part = await partDielineDxf(quoteNo, Number(user.tenant_id), lineId);
+      if (part.ok) {
+        return new NextResponse(part.dxf, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/dxf",
+            "Content-Disposition": `attachment; filename="${part.filename}"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+      if (part.error !== "not_a_part") return json({ ok: false, error: part.error, message: part.message }, part.status);
+    }
 
     const r = await boxDieline(quoteNo, Number(user.tenant_id), lineId);
     if (!r.ok) return json({ ok: false, error: r.error, message: r.message }, r.status);

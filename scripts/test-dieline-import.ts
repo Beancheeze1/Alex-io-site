@@ -12,6 +12,9 @@ import {
   cleanDielineAs,
   cleanDielineRoles,
   cleanDielineUnits,
+  dielinePartDxf,
+  dielinePartFilename,
+  dielinePartLines,
   dielineSizeSuspect,
   parseDielineBlank,
   splitDieline,
@@ -294,6 +297,27 @@ check("dieline style reads as a part", boxStyleInfo("dieline").label === "Die-cu
     "39P: cleanDielineRoles keeps known roles only",
     JSON.stringify(cleanDielineRoles('{"a|b|1":"cut","c|d|2":"glue"}')) === '{"a|b|1":"cut"}' && JSON.stringify(cleanDielineRoles("not json")) === "{}",
   );
+}
+
+// Step 39Q: each part's own cut file for the job ticket
+{
+  const disp = readFileSync(new URL("./fixtures/display-red-cut.dxf", import.meta.url), "utf8");
+  const p1 = dielinePartLines(disp, { units: "in", piece: 1 });
+  check("39Q: part 1 lines = its blank 24.375 x 53.75, moved to 0,0", p1.ok && p1.length_in === 24.375 && p1.width_in === 53.75 && Math.min(...p1.lines.map((l) => Math.min(l.x1, l.x2))) === 0, p1.ok && [p1.length_in, p1.width_in]);
+  if (p1.ok) {
+    const back = analyzeDieline(dielinePartDxf(p1, ["Q-TEST line 1: Header"]));
+    check("39Q: part DXF reads back as one part, same blank, layers CUT + CREASE", back.ok && back.measure.pieces === 1 && back.measure.length_in === 24.375 && back.measure.width_in === 53.75 && back.units_set && back.groups.some((g) => g.layer === "CUT" && g.role === "cut") && back.groups.some((g) => g.layer === "CREASE" && g.role === "crease"), back.ok && back);
+    check("39Q: part DXF rule = the part's rule (cut 167.6, crease 111.5)", back.ok && near(back.measure.cut_in, 167.6, 0.2) && near(back.measure.crease_in, 111.5, 0.2), back.ok && back.measure);
+    check("39Q: notes go on NOTES (not counted)", back.ok && !back.groups.some((g) => g.layer === "NOTES"), back.ok && back.groups);
+  }
+  const p3 = dielinePartLines(disp, { units: "in", piece: 3 });
+  check("39Q: part 3 = 29.458 x 38.05", p3.ok && p3.length_in === 29.458 && p3.width_in === 38.05, p3.ok && [p3.length_in, p3.width_in]);
+  const whole = dielinePartLines(disp, { units: "in", piece: null });
+  check("39Q: whole file = 181.5 x 53.75", whole.ok && whole.length_in === 181.5 && whole.width_in === 53.75, whole.ok && [whole.length_in, whole.width_in]);
+  const noYellow = dielinePartLines(disp, { units: "in", piece: 1, roles: { "DESIGN|CONTINUOUS|2": "ignore" } });
+  check("39Q: the part's stored roles are used (yellow ignored = fewer lines)", noYellow.ok && p1.ok && noYellow.lines.length < p1.lines.length && noYellow.lines.every((l) => l.role !== "perf"), noYellow.ok && noYellow.lines.length);
+  check("39Q: missing piece -> piece_missing", (() => { const r = dielinePartLines(disp, { units: "in", piece: 9 }); return !r.ok && r.error === "piece_missing"; })());
+  check("39Q: file name", dielinePartFilename("Q-A-261024-87248", "A", 3, "Header / top") === "Q-A-261024-87248__A__Line-3__Header-top.dxf" && dielinePartFilename("Q-1", null, 2, null) === "Q-1__Line-2__Part.dxf");
 }
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");

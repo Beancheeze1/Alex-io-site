@@ -198,6 +198,9 @@ export type TicketBox = {
   blank_from_die_line?: boolean; // Step 36C: no priced blank, so it comes from the RSC / HSC / FOL die line
   sheet: { length_in: number; width_in: number; up: number } | null; // as priced (sheet board)
   dxf: boolean; // a flat blank DXF can be made (custom RSC / HSC / FOL)
+  // Step 39Q: a part priced from the customer's die line file: its own cut file
+  // (just this part's lines, from the file kept on the quote) and the file it came from.
+  part_file?: { name: string; source: string | null; piece: number | null } | null;
 };
 
 export type JobTicket = {

@@ -6,6 +6,8 @@
 // Step 39M: the foam layer build (layers, stock sheets, skiving, glue steps)
 // and a DXF per cut file (GET /api/admin/quotes/foam-sheet-dxf). Step 39N:
 // a stack entry is a "part", each laminated sheet a "layer".
+// Step 39Q: a part priced from the customer's die line gets a "Part DXF" (just
+// that part's lines, from the file kept on the quote).
 // No prices: this is the floor copy.
 
 "use client";
@@ -300,7 +302,24 @@ export default function JobTicketPage() {
                         {b.sheet && b.sheet.up > 1 ? <div className="text-[11px] text-[var(--text-muted)]">{b.sheet.up} up</div> : null}
                       </td>
                       <td className={cell} data-no-print>
-                        {b.dxf ? (
+                        {b.part_file ? (
+                          <>
+                            {/* Step 39Q: this part's own cut file from the customer's die line */}
+                            <a
+                              className="text-[var(--action-primary)] underline"
+                              href={`/api/admin/quotes/box-dxf?quote_no=${enc}&line_id=${b.id}`}
+                              data-part-dxf={b.line}
+                            >
+                              Part DXF
+                            </a>
+                            {b.part_file.source ? (
+                              <div className="text-[11px] text-[var(--text-muted)]">
+                                from {b.part_file.source}
+                                {b.part_file.piece ? `, part ${b.part_file.piece}` : ""}
+                              </div>
+                            ) : null}
+                          </>
+                        ) : b.dxf ? (
                           <a
                             className="text-[var(--action-primary)] underline"
                             href={`/api/admin/quotes/box-dxf?quote_no=${enc}&line_id=${b.id}`}

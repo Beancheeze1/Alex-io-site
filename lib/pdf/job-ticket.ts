@@ -277,6 +277,18 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
           : "-",
       ]),
     );
+    // Step 39Q: die line parts' cut files (download from the job ticket page)
+    const partFiles = t.boxes.filter((b) => b.part_file);
+    if (partFiles.length) {
+      text(c, "Cut files (download from the job ticket page):", { size: 8.5, color: MUTED });
+      for (const b of partFiles) {
+        text(
+          c,
+          `Line ${b.line}: ${b.part_file!.name}${b.part_file!.source ? ` (from ${b.part_file!.source}${b.part_file!.piece ? `, part ${b.part_file!.piece}` : ""})` : ""}`,
+          { size: 8.5, color: MUTED },
+        );
+      }
+    }
   }
 
   if (t.proof) {

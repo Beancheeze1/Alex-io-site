@@ -440,11 +440,15 @@ export function parseDielineBlank(raw: unknown): DielineBlank | null {
  * units as analyzeDieline. Pieces are numbered left to right, then top to
  * bottom, so piece numbers stay the same each time the file is read.
  */
-export type DielinePiece = DielineMeasure & { piece: number };
+export type DielinePiece = DielineMeasure & { piece: number; lines?: DielineLine[] };
+
+/** Step 39Q: one line of a die line in inches, with what it is (ignored lines left out). */
+export type DielineLine = { x1: number; y1: number; x2: number; y2: number; role: "cut" | "crease" | "perf" };
 
 export function splitDieline(
   text: DielineSource,
-  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits; scale?: number } = {},
+  // Step 39Q: lines = also return each piece's own lines (for its cut file)
+  opts: { roles?: Record<string, unknown> | null; units?: DielineUnits; scale?: number; lines?: boolean } = {},
 ): { ok: true; pieces: DielinePiece[]; stray_in: number } | { ok: false; error: string; message: string } {
   const a = analyzeDieline(text, opts);
   if (!a.ok) return a;
@@ -477,6 +481,7 @@ export function splitDieline(
     .sort((p, q) => (Math.abs(q.y1 - p.y1) > 1 ? q.y1 - p.y1 : p.x0 - q.x0));
   const tol = 0.05;
   const acc = boxes.map(() => ({ cut: 0, crease: 0, perf: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }));
+  const linesOf: DielineLine[][] = boxes.map(() => []);
   let stray = 0;
   for (const sg of used) {
     const mx = (sg.x1 + sg.x2) / 2;
@@ -498,6 +503,7 @@ export function splitDieline(
       continue;
     }
     const t = acc[best];
+    if (opts.lines) linesOf[best].push({ x1: sg.x1, y1: sg.y1, x2: sg.x2, y2: sg.y2, role: sg.role as DielineLine["role"] });
     if (sg.role === "cut") t.cut += len;
     else if (sg.role === "crease") t.crease += len;
     else t.perf += len;
@@ -520,9 +526,106 @@ export function splitDieline(
       perf_in,
       rule_in: r1(cut_in + crease_in + perf_in),
       pieces: 1,
+      ...(opts.lines ? { lines: linesOf[i] } : {}),
     };
   });
   return { ok: true, pieces, stray_in: r1(stray) };
+}
+
+/**
+ * Step 39Q: the lines of one part as it was quoted (the stored blank's roles,
+ * units, scale and piece), moved so the part's corner is at 0,0. For the
+ * job ticket's cut file. piece null = the whole file.
+ */
+export function dielinePartLines(
+  src: DielineSource,
+  b: { roles?: Record<string, unknown> | null; units?: "in" | "mm" | null; scale?: number | null; piece?: number | null },
+): { ok: true; lines: DielineLine[]; length_in: number; width_in: number } | { ok: false; error: string; message: string } {
+  const units: DielineUnits = b.units === "mm" ? "mm" : b.units === "in" ? "in" : "auto";
+  const opts = { roles: b.roles ?? null, units, scale: cleanDielineScale(b.scale ?? 1) };
+  let lines: DielineLine[];
+  if (b.piece != null && Number(b.piece) >= 1) {
+    const sp = splitDieline(src, { ...opts, lines: true });
+    if (!sp.ok) return sp;
+    const pc = sp.pieces.find((p) => p.piece === Number(b.piece));
+    if (!pc) return { ok: false, error: "piece_missing", message: `Part ${b.piece} wasn't found in the file.` };
+    lines = pc.lines ?? [];
+  } else {
+    const a = analyzeDieline(src, opts);
+    if (!a.ok) return a;
+    const roleOf = new Map(a.groups.map((g) => [g.key, g.role]));
+    lines = toParsed(src)
+      .segments.filter((x) => segLen(x) > 1e-6)
+      .map((x) => ({ x1: x.x1 * a.scale, y1: x.y1 * a.scale, x2: x.x2 * a.scale, y2: x.y2 * a.scale, role: roleOf.get(groupKey(x.tag)) ?? "ignore" }))
+      .filter((x): x is DielineLine => x.role !== "ignore");
+  }
+  if (!lines.length) return { ok: false, error: "no_rule", message: "No cut or crease lines to draw." };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const l of lines) {
+    x0 = Math.min(x0, l.x1, l.x2); x1 = Math.max(x1, l.x1, l.x2);
+    y0 = Math.min(y0, l.y1, l.y2); y1 = Math.max(y1, l.y1, l.y2);
+  }
+  return {
+    ok: true,
+    lines: lines.map((l) => ({ x1: l.x1 - x0, y1: l.y1 - y0, x2: l.x2 - x0, y2: l.y2 - y0, role: l.role })),
+    length_in: r3(x1 - x0),
+    width_in: r3(y1 - y0),
+  };
+}
+
+/**
+ * Step 39Q: a clean R12 DXF of a die line part: CUT (white/black), CREASE
+ * (red), PERF (blue) layers in inches, plus NOTES text under the part.
+ */
+export function dielinePartDxf(part: { lines: DielineLine[]; length_in: number; width_in: number }, notes: string[] = []): string {
+  const fmt = (n: number) => (Number.isFinite(n) ? n.toFixed(6) : "0.000000");
+  const txt = (s: string) => String(s ?? "").replace(/[×]/g, "x").replace(/[^\x20-\x7E]/g, "").slice(0, 200);
+  const out: string[] = [];
+  const push = (...v: (string | number)[]) => {
+    for (const x of v) out.push(String(x));
+  };
+  push("0", "SECTION", "2", "HEADER");
+  push("9", "$ACADVER", "1", "AC1009");
+  push("9", "$INSUNITS", "70", "1");
+  push("9", "$EXTMIN", "10", fmt(0), "20", fmt(-(notes.length + 1) * 0.45), "30", "0.0");
+  push("9", "$EXTMAX", "10", fmt(part.length_in), "20", fmt(part.width_in), "30", "0.0");
+  push("0", "ENDSEC");
+  push("0", "SECTION", "2", "TABLES");
+  push("0", "TABLE", "2", "LTYPE", "70", "1");
+  push("0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0");
+  push("0", "ENDTAB");
+  push("0", "TABLE", "2", "LAYER", "70", "4");
+  for (const [name, color] of [
+    ["CUT", 7],
+    ["CREASE", 1],
+    ["PERF", 5],
+    ["NOTES", 3],
+  ] as const) {
+    push("0", "LAYER", "2", name, "70", "0", "62", color, "6", "CONTINUOUS");
+  }
+  push("0", "ENDTAB");
+  push("0", "ENDSEC");
+  push("0", "SECTION", "2", "BLOCKS", "0", "ENDSEC");
+  push("0", "SECTION", "2", "ENTITIES");
+  const layerOf = { cut: "CUT", crease: "CREASE", perf: "PERF" } as const;
+  for (const l of part.lines) {
+    push("0", "LINE", "8", layerOf[l.role], "10", fmt(l.x1), "20", fmt(l.y1), "30", "0.0", "11", fmt(l.x2), "21", fmt(l.y2), "31", "0.0");
+  }
+  const th = 0.25;
+  notes.forEach((n, k) => {
+    push("0", "TEXT", "8", "NOTES", "10", fmt(0), "20", fmt(-0.75 - k * th * 1.8), "30", "0.0", "40", fmt(th), "1", txt(n));
+  });
+  push("0", "ENDSEC");
+  push("0", "EOF");
+  return out.join("\n") + "\n";
+}
+
+/** Step 39Q: "Q-A-261024-87248__A__Line-3__Header.dxf" (the part's cut file). */
+export function dielinePartFilename(quoteNo: string, revision: string | null, line: number, label: string | null): string {
+  const clean = (s: string) => s.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  const rev = revision ? `__${clean(revision)}` : "";
+  const name = clean(label || "") || "Part";
+  return `${clean(quoteNo) || "quote"}${rev}__Line-${line}__${name.slice(0, 40)}.dxf`;
 }
 
 /** Step 39E: the most a buyer's quote can hold from one file (more = send it to the shop). */
