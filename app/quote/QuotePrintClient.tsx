@@ -998,6 +998,49 @@ const isBoxesOnly = (facts as any)?.pack_type === "boxes_only";
     window.location.href = mailto;
   }, [quoteNo, quote, items, requestedBoxes, salesRepEmail]);
 
+  // Step 41: staff "Email quote" sends the quote email from the app (the same
+  // send as the admin quote page's "Send to customer"), instead of opening
+  // the staff member's own email program. Customers keep "Forward to sales".
+  const [sendBusy, setSendBusy] = React.useState(false);
+  const [sendNote, setSendNote] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const handleSendQuote = React.useCallback(async () => {
+    const quoteNoValue = quote?.quote_no || quoteNo;
+    const to = (quote?.email || "").trim();
+    if (!quoteNoValue || sendBusy) return;
+    if (!to) {
+      setSendNote({ ok: false, text: "No customer email on this quote. Add one on the admin quote page first." });
+      return;
+    }
+    const sentBefore = /sent/i.test(String(quote?.status || ""));
+    const ok = window.confirm(
+      sentBefore
+        ? `This quote was already sent.\n\nSend the quote email again to:\n${to}`
+        : `Send the quote email to:\n${to}`,
+    );
+    if (!ok) return;
+    setSendBusy(true);
+    setSendNote(null);
+    try {
+      const res = await fetch(`/api/admin/send-quote?t=${Date.now()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ quoteNo: quoteNoValue }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        const why = j?.message || j?.error || `HTTP ${res.status}`;
+        setSendNote({ ok: false, text: `Couldn't send the quote email (${why}).` });
+        return;
+      }
+      setSendNote({ ok: true, text: `Quote email sent to ${to}.` });
+    } catch (e) {
+      setSendNote({ ok: false, text: `Couldn't send the quote email (${e instanceof Error ? e.message : String(e)}).` });
+    } finally {
+      setSendBusy(false);
+    }
+  }, [quote, quoteNo, sendBusy]);
+
   // Schedule call handler (Calendly or Google Calendar URL)
   const handleScheduleCall = React.useCallback(() => {
     if (typeof window === "undefined") return;
@@ -2603,10 +2646,13 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                     </button>
                     <button
                       type="button"
-                      onClick={handleForwardToSales}
-                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}
+                      onClick={isStaffView ? () => void handleSendQuote() : handleForwardToSales}
+                      disabled={isStaffView && sendBusy}
+                      title={isStaffView ? (quote.email ? `Send the quote email to ${quote.email}` : "No customer email on this quote") : undefined}
+                      data-quote-email-button
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border-strong)", background: "var(--surface-card)", color: "var(--text-primary)", fontSize: 12, fontWeight: 500, cursor: isStaffView && sendBusy ? "wait" : "pointer" }}
                     >
-                      {isStaffView ? "Email quote" : "Forward to sales"}
+                      {isStaffView ? (sendBusy ? "Sending…" : "Email quote") : "Forward to sales"}
                     </button>
                     <button
                       type="button"
@@ -2618,7 +2664,17 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   </div>
                 </div>
                 {/* Step 39J: Accept (or where the quote stands) right in the header */}
-                {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} variant="header" /> : null}
+                {/* Step 41: the staff's send result */}
+                {isStaffView && sendNote ? (
+                  <div
+                    data-quote-email-note
+                    style={{ flexBasis: "100%", textAlign: "right", fontSize: 12, color: sendNote.ok ? "var(--status-success-text)" : "var(--attention)" }}
+                  >
+                    {sendNote.text}
+                  </div>
+                ) : null}
+                {/* Step 41: staff see where it stands, not the customer's Accept button */}
+                {quoteNo ? <QuoteApprovalCard quoteNo={quoteNo} approval={approval} variant="header" staffView={isStaffView} /> : null}
               </div>
             ))}
 

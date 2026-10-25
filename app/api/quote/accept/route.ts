@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one, q } from "@/lib/db";
 import { buyerEditGuard } from "@/lib/quote-edit";
+import { getCurrentUserFromRequest, isRoleAllowed } from "@/lib/auth"; // Step 41
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { approvalForQuote } from "@/app/lib/quote-approval";
 import { sendQuoteStatusEmail } from "@/app/lib/quote-mail";
@@ -58,6 +59,17 @@ export async function POST(req: NextRequest) {
       lockedMessage: "This quote has been released. Contact the shop with any changes.",
     });
     if (guard) return guard;
+
+    // Step 41: accepting is the customer's. Staff record an acceptance for them
+    // on the admin quote page (Approval → Confirm), which marks it as by staff.
+    const caller = await getCurrentUserFromRequest(req).catch(() => null);
+    if (caller && isRoleAllowed(caller, ["admin", "cs", "sales"])) {
+      return bad(
+        "staff_accept",
+        "Staff can't accept for the customer here. Record their acceptance on the admin quote page (Approval → Confirm).",
+        403,
+      );
+    }
 
     const freightSettings = await shopFreightSettings(Number(quote.tenant_id));
     if (freightSettings.ship_from_zip) {

@@ -8,6 +8,9 @@
 // (Chuck: buyers didn't scroll down to find Accept). It shows the total, how
 // long the price is valid and a big "Accept quote" button; the button opens
 // the same name / PO / "I accept" form right there.
+// Step 41: staff viewing the quote page (staffView) see where it stands but no
+// Accept button: accepting is the customer's. To record it for them (a PO by
+// email or phone), staff use Approval → Confirm on the admin quote page.
 
 "use client";
 
@@ -47,10 +50,12 @@ export default function QuoteApprovalCard({
   quoteNo,
   approval,
   variant = "card",
+  staffView = false,
 }: {
   quoteNo: string;
   approval: QuoteApprovalView | null;
   variant?: "card" | "header";
+  staffView?: boolean;
 }) {
   // Step 36C: a re-approval starts from the earlier acceptance's name and PO.
   const earlier = approval?.stage === "needs_reapproval" ? approval.accepted : null;
@@ -88,7 +93,7 @@ export default function QuoteApprovalCard({
   };
 
   // Step 37I: when the buyer can accept, the card stands out in the shop's color.
-  const actionable = !!a.can_accept && !a.expired;
+  const actionable = !staffView && !!a.can_accept && !a.expired; // Step 41: never for staff
   const brand = "var(--tenant-primary, var(--action-primary))";
   const box: React.CSSProperties = {
     borderRadius: 16,
@@ -170,10 +175,14 @@ export default function QuoteApprovalCard({
         : a.stage === "accepted"
           ? "Accepted: waiting for the shop to confirm"
           : reapprove
-            ? "The price changed: please re-approve"
+            ? staffView
+              ? "The price changed: waiting for the customer to re-approve" // Step 41
+              : "The price changed: please re-approve"
             : a.expired
               ? "This price has expired"
-              : "Ready to order? Accept this quote";
+              : staffView
+                ? "Estimate: waiting for the customer to accept" // Step 41
+                : "Ready to order? Accept this quote";
     const detail = [
       a.stage === "confirmed" && a.confirmed
         ? `Confirmed ${day(a.confirmed.at)} at ${usd(a.confirmed.total)}`
@@ -237,6 +246,14 @@ export default function QuoteApprovalCard({
             >
               Not now
             </button>
+          ) : staffView && (a.stage === "estimate" || reapprove) && !a.expired ? (
+            <div style={{ ...muted, maxWidth: 300, textAlign: "right" }} data-approval-staff-note>
+              The customer accepts here. To record it for them, use Approval on the{" "}
+              <a href={`/admin/quotes/${encodeURIComponent(quoteNo)}`} style={{ color: "var(--text-secondary)" }}>
+                admin quote page
+              </a>
+              .
+            </div>
           ) : (a.stage === "estimate" || reapprove) && !a.expired && !a.buyer_can_edit ? (
             <div style={{ ...muted, maxWidth: 260, textAlign: "right" }}>To accept, open this quote from the link in your quote email.</div>
           ) : null}
