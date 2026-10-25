@@ -32,6 +32,7 @@ import { findOrCreateUploadDraft } from "@/lib/quote-draft";
 import { addEditGrant, buyerEditGuard } from "@/lib/quote-edit";
 import { stlToFacesJson } from "@/lib/stl/processor";
 import { dxfFacesForUpload } from "@/lib/dxf/upload";
+import { pdfFacesForUpload } from "@/lib/dxf/pdf-upload"; // Step 40
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -552,9 +553,15 @@ async function sketchUploadPost(req: NextRequest, grant: { quoteNo: string | nul
     // plus forge_faces.json for the editor. A drawing with several inserts
     // carries all of them (faces.inserts); the editor imports the first and
     // offers the rest.
-    if (kind.ok && kind.sourceType === "dxf") {
-      const dxf = dxfFacesForUpload(buf);
-      if (!dxf.ok) return err("dxf_unreadable", dxf.message, 422);
+    // Step 40: a vector PDF drawing is read in process too (lib/dxf/pdf-upload.ts,
+    // the display die line PDF reader), the same way and with the same output,
+    // when it comes from the layout editor or the Start Quote form (they send
+    // importMode / drawing=1). The /sketch-upload page's PDFs keep their own path.
+    const asDrawing = form.get("importMode") != null || form.get("drawing") === "1";
+    if (kind.ok && (kind.sourceType === "dxf" || (kind.sourceType === "pdf" && asDrawing))) {
+      const isPdf = kind.sourceType === "pdf";
+      const dxf = isPdf ? await pdfFacesForUpload(new Uint8Array(buf)) : dxfFacesForUpload(buf);
+      if (!dxf.ok) return err(isPdf ? "pdf_unreadable" : "dxf_unreadable", dxf.message, 422);
       const facesBytes = Buffer.from(JSON.stringify(dxf.faces), "utf8");
 
       const inserted = (await one<AttachRow>(

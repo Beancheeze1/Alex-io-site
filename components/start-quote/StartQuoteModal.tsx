@@ -22,6 +22,7 @@ import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo, isDemoQuoteNo } from "@/lib/quote-no";
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
 import { QUOTE_TYPE_LABELS } from "@/lib/quote-types";
+import FoamDrawingCard, { uploadFoamDrawing, type FoamDrawing } from "@/components/start-quote/FoamDrawingCard"; // Step 40
 import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import { BOX_STYLES, boxStyleInfo, parseBoxStyle, parseCells, type BoxStyle } from "@/lib/box-styles";
 import { matchGrade } from "@/lib/corrugated/grade-match";
@@ -479,6 +480,20 @@ export default function StartQuoteModal({
   const [boArtwork, setBoArtwork] = React.useState<File[]>([]);
   const [boArtworkNote, setBoArtworkNote] = React.useState<string | null>(null);
   const [boError, setBoError] = React.useState<string | null>(null);
+  // Step 40: a foam drawing (DXF / PDF) picked on the form; it's attached to the
+  // quote when the editor opens, and the editor opens with it.
+  const [foamDrawing, setFoamDrawing] = React.useState<FoamDrawing>(null);
+  const [launchError, setLaunchError] = React.useState<string | null>(null);
+  const [launching, setLaunching] = React.useState(false);
+  // Foam Insert: the drawing's outline sets the insert's length and width.
+  const pickFoamDrawing = (d: FoamDrawing) => {
+    setFoamDrawing(d);
+    setLaunchError(null);
+    if (d && quoteType === "foam_insert") {
+      setInsertL(String(d.summary.length_in));
+      setInsertW(String(d.summary.width_in));
+    }
+  };
   // Step 9B: sizes 2..10 on a boxes-only quote. Size 1 is the box fields above.
   const [extraSizes, setExtraSizes] = React.useState<ExtraBoxSize[]>([]);
   const extraSizesProblemText = extraSizesProblem(extraSizes);
@@ -1290,9 +1305,27 @@ export default function StartQuoteModal({
       typeof prefillData?.quoteNo === "string" && isDemoQuoteNo(prefillData.quoteNo)
         ? prefillData.quoteNo.trim()
         : null;
+    if (launching) return;
+    setLaunchError(null);
+    setLaunching(true);
     const quote_no = prefillQuoteNo ?? (await fetchNewQuoteNo("A"));
 
     const p = new URLSearchParams();
+
+    // Step 40: attach the drawing first; the editor opens with it (drawing=1).
+    if (foamDrawing) {
+      const up = await uploadFoamDrawing(foamDrawing, {
+        quoteNo: quote_no,
+        tenantSlug: (searchParams.get("tenant") || searchParams.get("t") || "").trim() || null,
+        quoteSource: quoteSource || null,
+      });
+      if (!up.ok) {
+        setLaunchError(`${up.message} You can remove the drawing and upload it in the editor instead.`);
+        setLaunching(false);
+        return;
+      }
+      p.set("drawing", "1");
+    }
 
     const salesSlugFromPrefill =
       typeof prefillData?.salesRepSlug === "string" ? prefillData.salesRepSlug : "";
@@ -1356,7 +1389,7 @@ export default function StartQuoteModal({
       p.set("activeLayer", "1");
       p.set("active_layer", "1");
 
-      if (seedCav) p.set("cavities", seedCav);
+      if (seedCav && !foamDrawing) p.set("cavities", seedCav); // Step 40: the drawing has the pockets
     } else {
       // Bottom insert dims always based on FOAM FIT (L/W) and bottom thickness (D)
       const L = foamFitLenIn;
@@ -1386,7 +1419,7 @@ export default function StartQuoteModal({
         p.set("active_layer", "1");
       }
 
-      if (seedCav) p.set("cavities", seedCav);
+      if (seedCav && !foamDrawing) p.set("cavities", seedCav); // Step 40
 
       if (boxLNum) p.set("box_l", String(boxLNum));
       if (boxWNum) p.set("box_w", String(boxWNum));
@@ -1714,7 +1747,9 @@ export default function StartQuoteModal({
                         <>
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Cavities</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{normalizedSeed || "—"}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">
+                              {foamDrawing ? `From ${foamDrawing.file.name}` : normalizedSeed || "—"}
+                            </div>
                           </div>
                           <div>
                             <div className="text-[11px] font-medium tracking-widest text-[var(--text-muted)]">Material</div>
@@ -2477,6 +2512,15 @@ export default function StartQuoteModal({
 
                   {activeStep === "specs" && quoteType === "foam_insert" ? (
                     <StepCard title="Foam Specs" hint="Block size (L × W × D)">
+                      {/* Step 40: a drawing sets the length, width and pockets */}
+                      <div className="mb-4">
+                        <FoamDrawingCard
+                          value={foamDrawing}
+                          onChange={pickFoamDrawing}
+                          note="It sets the length and width below; enter the depth."
+                          dataPrefix="foam-drawing"
+                        />
+                      </div>
                       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4">
                         <div className="text-xs font-medium tracking-widest text-[var(--text-muted)]">
                           FOAM BLOCK DIMENSIONS
@@ -2572,12 +2616,30 @@ export default function StartQuoteModal({
                           : "Optional"
                       }
                     >
-                      <GuidedCavityBuilder
-                        value={cavitySeed}
-                        onChange={setCavitySeed}
-                        normalizedSeed={normalizedSeed}
-                        isInvalid={cavitySeedInvalid}
-                      />
+                      {/* Step 40: Complete Pack picks the drawing here; with a drawing the pockets come from it */}
+                      {quoteType === "complete_pack" ? (
+                        <div className="mb-4">
+                          <FoamDrawingCard
+                            value={foamDrawing}
+                            onChange={pickFoamDrawing}
+                            note="It sets the bottom insert's shape and pockets."
+                            dataPrefix="foam-drawing"
+                          />
+                        </div>
+                      ) : null}
+                      {foamDrawing ? (
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]" data-foam-drawing-cavities>
+                          The pockets come from your drawing ({foamDrawing.summary.cavities} found). You can move, resize or add
+                          pockets in the layout editor.
+                        </div>
+                      ) : (
+                        <GuidedCavityBuilder
+                          value={cavitySeed}
+                          onChange={setCavitySeed}
+                          normalizedSeed={normalizedSeed}
+                          isInvalid={cavitySeedInvalid}
+                        />
+                      )}
                     </StepCard>
                   ) : null}
 
@@ -3025,10 +3087,11 @@ export default function StartQuoteModal({
 
                             <Row k="Material" v={materialText || "-"} />
                             <Row k="Material ID" v={materialId || "-"} />
-                            <Row
-                              k="Cavity seed"
-                              v={normalizedSeed || "-"}
-                            />
+                            {foamDrawing ? (
+                              <Row k="Drawing" v={`${foamDrawing.file.name} (${foamDrawing.summary.cavities} pockets)`} />
+                            ) : (
+                              <Row k="Cavity seed" v={normalizedSeed || "-"} />
+                            )}
                           </div>
                         </div>
 
@@ -3078,6 +3141,15 @@ export default function StartQuoteModal({
                           />
                         </div>
 
+                        {launchError ? (
+                          <div
+                            className="rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]"
+                            data-foam-drawing-launch-error
+                          >
+                            {launchError}
+                          </div>
+                        ) : null}
+
                         <div className="flex flex-wrap items-center justify-end gap-3">
                           <button
                             type="button"
@@ -3098,7 +3170,7 @@ export default function StartQuoteModal({
                           <button
                             type="button"
                             onClick={onLaunchEditor}
-                            disabled={!qtyOk || (quoteType === "foam_insert" ? !insertDimsOk : (!boxOk || !foamFitOk || !thicknessOk))}
+                            disabled={launching || !qtyOk || (quoteType === "foam_insert" ? !insertDimsOk : (!boxOk || !foamFitOk || !thicknessOk))}
                             className={[
                               "rounded-md px-6 py-3 text-sm font-medium",
                               qtyOk && (quoteType === "foam_insert" ? insertDimsOk : (boxOk && foamFitOk && thicknessOk))
@@ -3106,7 +3178,7 @@ export default function StartQuoteModal({
                                 : "cursor-not-allowed bg-[var(--action-primary)]/30 text-white/60",
                             ].join(" ")}
                           >
-                            Launch Layout Editor
+                            {launching ? (foamDrawing ? "Attaching your drawing…" : "Opening…") : "Launch Layout Editor"}
                           </button>
                         </div>
                       </div>

@@ -12,7 +12,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { Cavity, CavityShape, LayoutModel } from "./editor/layoutTypes";
-import { facesJsonToLayoutSeed } from "@/lib/forgeFacesSeed";
+import { facesJsonToLayoutSeed, withFormLayers } from "@/lib/forgeFacesSeed"; // Step 40: withFormLayers
 import type { DxfFaces } from "@/lib/dxf/parse";
 import { useLayoutModel } from "./editor/useLayoutModel";
 import InteractiveCanvas, { CANVAS_WIDTH, CANVAS_HEIGHT, SNAP_IN as RESIZE_SNAP_IN } from "./editor/InteractiveCanvas";
@@ -850,6 +850,9 @@ export default function LayoutPage({
     null,
   );
   const [facesJson, setFacesJson] = React.useState<any | null>(null);
+  // Step 40: the Start Quote form's layers (thicknesses, names, crop corners)
+  // for a drawing uploaded on the form (URL drawing=1), applied to the file's seed.
+  const formLayersRef = React.useRef<{ thicknesses: number[]; labels?: string[]; cropCorners?: boolean[] } | null>(null);
   const [seed, setSeed] = React.useState<LayoutModel | null>(null);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   // Step 37A: a requested older layout package (layout_pkg_id) that couldn't be opened
@@ -884,7 +887,8 @@ export default function LayoutPage({
 
   React.useEffect(() => {
     if (!facesJson) return;
-    const s = facesJsonToLayoutSeed(facesJson);
+    let s = facesJsonToLayoutSeed(facesJson);
+    s = withFormLayers(s, formLayersRef.current); // Step 40 (no form layers = unchanged)
     
     // If forge detected chamfers, automatically enable cropCorners on all layers
     if (s.block?.cornerStyle === "chamfer" && s.block?.chamferIn && s.block.chamferIn > 0) {
@@ -1556,6 +1560,9 @@ setInitialMaterialId(materialIdOverride ?? materialSeedLocal ?? materialIdFromUr
               }
 
               if (!cancelled) {
+                // Step 40: a drawing from the Start Quote form keeps the form's thicknesses and layers
+                formLayersRef.current =
+                  new URLSearchParams(window.location.search).get("drawing") === "1" ? layersInfo ?? null : null;
                 setFacesJson(facesJson);
                 setInitialNotes(notesSeedLocal || "");
 
@@ -3491,165 +3498,11 @@ else nextYIn = snapInches(nextYIn);
         return;
       }
 
-      // ===== PDF HANDLING =====
-      // PDFs need special handling - save them directly, then extract geometry
-      const isPdf = file.name.toLowerCase().endsWith('.pdf');
-      
-      if (isPdf) {
-        setUploadStatus("uploading");
-        setUploadError(null);
-        
-        try {
-          // Save PDF using dedicated endpoint (bypasses forge)
-          const pdfFormData = new FormData();
-          pdfFormData.append("file", file);
-          pdfFormData.append("quote_no", currentQuoteNo);
-          // Lets the server create a draft under the right shop if this is
-          // the buyer's first action (before any Apply).
-          try {
-            const sp = new URL(window.location.href).searchParams;
-            const ts = (sp.get("tenant") || sp.get("t") || "").trim().toLowerCase();
-            if (ts) pdfFormData.append("tenant_slug", ts);
-            const qs = (sp.get("quote_source") || "").trim();
-            if (qs) pdfFormData.append("quote_source", qs);
-          } catch {}
-          
-          const saveRes = await fetch('/api/quote-attachments/save-pdf', {
-            method: 'POST',
-            body: pdfFormData
-          });
-          
-          if (!saveRes.ok) {
-            const errorText = await saveRes.text();
-            throw new Error(`PDF save failed: ${errorText}`);
-          }
-          
-          const saveJson = await saveRes.json();
-          const attachmentId = saveJson.id || saveJson.attachmentId;
-          
-          if (!attachmentId) {
-            throw new Error("No attachment ID returned from save");
-          }
-          
-          setUploadStatus("done");
-          
-          // Extract geometry from the saved PDF
-          const geomRes = await fetch('/api/quote/import-pdf-geometry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              quote_no: currentQuoteNo,
-              attachment_id: attachmentId
-            })
-          });
-          
-          const geomData = await geomRes.json();
+      // Step 40: a PDF drawing goes through /api/sketch-upload like a DXF (read
+      // in process by the display die line PDF reader: lines, arcs and curves),
+      // instead of the old save-pdf + rectangles/circles extraction.
 
-          const extractedLengthIn = Number(geomData?.blockDimensions?.lengthIn);
-          const extractedWidthIn = Number(geomData?.blockDimensions?.widthIn);
-          const hasRealGeometry =
-            geomData.ok &&
-            geomData.blockDimensions &&
-            geomData.cavities &&
-            Number.isFinite(extractedLengthIn) &&
-            extractedLengthIn > 0 &&
-            Number.isFinite(extractedWidthIn) &&
-            extractedWidthIn > 0;
-
-          if (hasRealGeometry) {
-            const { blockDimensions, cavities } = geomData;
-            const lengthIn = blockDimensions.lengthIn;
-            const widthIn = blockDimensions.widthIn;
-
-            const confirmed = window.confirm(
-              `PDF geometry extracted!\n\n` +
-              `Block: ${lengthIn.toFixed(2)}" × ${widthIn.toFixed(2)}"\n` +
-              `Found ${cavities.length} cavities\n\n` +
-              `Import this layout?`
-            );
-            
-            if (confirmed && lengthIn > 0 && widthIn > 0) {
-              updateBlockDims({ lengthIn, widthIn });
-              
-              const editorCavities = cavities.map((cav: any, idx: number) => {
-                if (cav.type === "circle") {
-                  const diameter = cav.diameterIn || 1;
-                  return {
-                    id: `cav_${Date.now()}_${idx}`,
-                    shape: "circle" as const,
-                    x: cav.x,
-                    y: cav.y,
-                    lengthIn: diameter,  // For circles, lengthIn = diameter
-                    widthIn: diameter,    // For circles, widthIn = diameter
-                    cornerRadiusIn: 0,
-                    depthIn: 1,
-                    label: null,
-                  };
-                } else {
-                  return {
-                    id: `cav_${Date.now()}_${idx}`,
-                    shape: "rect" as const,
-                    x: cav.x,
-                    y: cav.y,
-                    lengthIn: cav.lengthIn || 1,
-                    widthIn: cav.widthIn || 1,
-                    depthIn: 1,
-                    cornerRadiusIn: 0,
-                    label: null,
-                  };
-                }
-              });
-              
-              const layerSeed: any = {
-                block: { lengthIn, widthIn, cornerStyle: "square" as const, chamferIn: 0 },
-                stack: [{
-                  id: `layer_${Date.now()}`,
-                  label: `PDF Import`,
-                  thicknessIn: 2,
-                  materialId: initialMaterialId || null,
-                  cavities: editorCavities,
-                  cropCorners: false,
-                }]
-              };
-              
-              importLayerFromSeed(layerSeed, {
-                mode: "replace",
-                label: undefined,
-                targetLayerId: activeLayerId,
-              });
-              
-              alert(`PDF imported! ${cavities.length} cavities added.`);
-            }
-          } else if (geomData.ok === false) {
-            // The extraction pipeline itself failed (e.g. a missing server
-            // dependency) -- this is a different failure mode from "we tried
-            // and genuinely found no shapes in your PDF" and must never look
-            // the same to the user (no-silent-failures rule). The PDF itself
-            // was already saved successfully above; only geometry extraction
-            // failed.
-            const detail = geomData.detail || geomData.error || "Unknown error";
-            setUploadStatus("error");
-            setUploadError(`PDF import is currently unavailable: ${detail}`);
-            alert(
-              `PDF import is currently unavailable.\n\n${detail}\n\n` +
-                `The PDF was saved to this quote, but geometry could not be extracted. ` +
-                `Create the layout manually for now, or try again later.`,
-            );
-          } else {
-            alert(`PDF saved but no geometry found.\n\nCreate layout manually.`);
-          }
-        } catch (e: any) {
-          console.error('PDF upload/extraction failed:', e);
-          setUploadStatus("error");
-          setUploadError(e.message || "PDF upload failed");
-        }
-        
-        inputEl.value = "";
-        return; // EXIT EARLY - do not continue to DXF/STL handling
-      }
-
-      // ===== DXF/STL HANDLING =====
-      // Continue with normal forge converter flow for non-PDF files
+      // ===== DXF / PDF / STL HANDLING =====
       const hasExistingLayers = Array.isArray(stack) && stack.length > 0;
       const hasExistingGeometry =
         hasExistingLayers && stack.some((layer) => (layer.cavities?.length ?? 0) > 0);
@@ -3660,7 +3513,7 @@ else nextYIn = snapInches(nextYIn);
 
       if (shouldPrompt && typeof window !== "undefined") {
         const ok = window.confirm(
-          "Import DXF:\nOK = Add as a new part (recommended)\nCancel = Replace the current part",
+          "Import drawing:\nOK = Add as a new part (recommended)\nCancel = Replace the current part",
         );
         importMode = ok ? "append" : "replace";
       }
@@ -3753,7 +3606,8 @@ try {
           }));
         }
 
-        const importLabel = file?.name ? `DXF: ${file.name}` : "";
+        const importKind = /\.pdf$/i.test(file?.name || "") ? "PDF" : /\.stl$/i.test(file?.name || "") ? "STL" : "DXF"; // Step 40
+        const importLabel = file?.name ? `${importKind}: ${file.name}` : "";
         const resolvedTargetLayerId = importMode === "replace" ? activeLayerId : null;
 
         // Detect a footprint change BEFORE importing (append mode now syncs

@@ -38,7 +38,7 @@ export type DxfFaces = {
   outerLoopIndex: number;
   loopsCount: number;
   loops: FacesLoop[];
-  source: "dxf";
+  source: "dxf" | "pdf"; // Step 40: a vector PDF drawing is read the same way
   insert: { index: number; count: number; lengthIn: number; widthIn: number };
   warnings: string[];
 };
@@ -641,14 +641,48 @@ function tidy(pts: Pt[], minEdge = 0.01): Pt[] {
  * them apart. Inserts are ordered left to right, then top to bottom.
  */
 export function dxfToFaces(text: string, opts: { gapIn?: number } = {}): DxfResult {
-  const warnings: string[] = [];
   const parsed = parseDxf(text);
+  return facesFromSegments(parsed.segments, { counts: parsed.counts, unitsLabel: parsed.unitsLabel, gapIn: opts.gapIn });
+}
+
+/**
+ * Step 40: line segments (inches) -> inserts, shared by DXF and vector PDF
+ * drawings. For a PDF, `page` (inches) drops a loop drawn around (nearly) the
+ * whole page (the drawing's border), and inserts are listed biggest first
+ * (a title block's boxes come after the part).
+ */
+export function facesFromSegments(
+  segments: Seg[],
+  opts: {
+    counts?: Record<string, number>;
+    unitsLabel?: string;
+    gapIn?: number;
+    source?: "dxf" | "pdf";
+    page?: { w: number; h: number } | null;
+  } = {},
+): DxfResult {
+  const warnings: string[] = [];
+  const source = opts.source ?? "dxf";
+  const parsed = { segments, counts: opts.counts ?? {}, unitsLabel: opts.unitsLabel ?? "inches" };
   const { loops, openChains } = buildLoops(parsed.segments, opts.gapIn ?? 0.005);
   if (openChains) warnings.push(`${openChains} line${openChains === 1 ? "" : "s"} / chain${openChains === 1 ? "" : "s"} didn't close into a shape and were skipped.`);
 
-  const info = loops
-    .map((pts) => ({ pts: tidy(pts), area: Math.abs(signedArea(pts)) }))
-    .sort((a, b) => b.area - a.area);
+  let all = loops.map((pts) => ({ pts: tidy(pts), area: Math.abs(signedArea(pts)) }));
+  // Step 40: a PDF's page border (a loop nearly as big as the page) is not the part
+  if (opts.page && opts.page.w > 0 && opts.page.h > 0) {
+    const pw = opts.page.w;
+    const ph = opts.page.h;
+    const before = all.length;
+    all = all.filter((l) => {
+      const xs = l.pts.map((p) => p.x);
+      const ys = l.pts.map((p) => p.y);
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
+      return !(w >= 0.85 * pw && h >= 0.85 * ph);
+    });
+    if (all.length < before) warnings.push("The drawing's page border was skipped.");
+  }
+  const info = all.sort((a, b) => b.area - a.area);
   // parent = smallest bigger loop that contains this one
   const parent: number[] = info.map(() => -1);
   for (let i = 0; i < info.length; i++) {
@@ -678,7 +712,13 @@ export function dxfToFaces(text: string, opts: { gapIn?: number } = {}): DxfResu
     })
     // tiny stray shapes (< 0.25 sq in) on their own are not inserts
     .filter((r) => info[r.i].area >= 0.25)
-    .sort((a, b) => (Math.abs(a.minX - b.minX) > 0.5 ? a.minX - b.minX : b.maxY - a.maxY));
+    .sort((a, b) =>
+      source === "pdf"
+        ? info[b.i].area - info[a.i].area // Step 40: biggest first
+        : Math.abs(a.minX - b.minX) > 0.5
+          ? a.minX - b.minX
+          : b.maxY - a.maxY,
+    );
 
   const inserts: DxfFaces[] = roots.map((r, n) => {
     const members = info.map((_, i) => i).filter((i) => rootOf(i) === r.i);
@@ -702,13 +742,13 @@ export function dxfToFaces(text: string, opts: { gapIn?: number } = {}): DxfResu
       outerLoopIndex: 0,
       loopsCount: loopsOut.length,
       loops: loopsOut,
-      source: "dxf",
+      source,
       insert: { index: n, count: roots.length, lengthIn: round(r.maxX - r.minX), widthIn: round(r.maxY - r.minY) },
       warnings: [],
     };
   });
 
-  if (!inserts.length) warnings.push("No closed outline found in this DXF.");
+  if (!inserts.length) warnings.push(`No closed outline found in this ${source === "pdf" ? "PDF" : "DXF"}.`);
   return {
     inserts,
     warnings,

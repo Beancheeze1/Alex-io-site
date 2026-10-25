@@ -31,6 +31,7 @@ import ProgressRail, {
 import StepCard from "@/components/start-quote/StepCard";
 import { FIT_ALLOW_IN } from "@/components/start-quote/constants";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
+import FoamDrawingCard, { uploadFoamDrawing, type FoamDrawing } from "@/components/start-quote/FoamDrawingCard"; // Step 40
 import { ARTWORK_ACCEPT, artworkProblem, uploadArtwork } from "@/lib/artwork";
 import { useQuoteTypes } from "@/components/start-quote/useQuoteTypes";
 import BoxSizesEditor, {
@@ -250,6 +251,9 @@ export default function RepStartQuoteModal({
   const [completedSteps, setCompletedSteps] = React.useState<Set<StepKey>>(new Set());
   const [submitting, setSubmitting] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string>("");
+  // Step 40: a foam drawing (DXF / PDF) picked on the form; attached to the
+  // quote before the editor opens, and the editor opens with it.
+  const [foamDrawing, setFoamDrawing] = React.useState<FoamDrawing>(null);
 
   // ----- Step 1: Customer & sales -----
   const [customerName, setCustomerName] = React.useState("");
@@ -679,6 +683,7 @@ export default function RepStartQuoteModal({
   }
 
   function resetForm() {
+    setFoamDrawing(null); // Step 40
     setActiveStep("customer");
     setCompletedSteps(new Set());
     setSubmitError("");
@@ -915,10 +920,21 @@ export default function RepStartQuoteModal({
         return;
       }
 
+      // Step 40: attach the foam drawing; the editor opens with it (drawing=1).
+      if (foamDrawing) {
+        const up = await uploadFoamDrawing(foamDrawing, { quoteNo: quote_no });
+        if (!up.ok) {
+          throw new Error(
+            `Quote ${quote_no} was created, but the drawing couldn't be attached: ${up.message} Open the quote and upload the drawing in the layout editor.`,
+          );
+        }
+      }
+
       // Build the same URL param contract StartQuoteModal uses so
       // /quote/layout opens pre-filled.
       const p = new URLSearchParams();
       p.set("quote_no", quote_no);
+      if (foamDrawing) p.set("drawing", "1"); // Step 40
       if (repSlugOut) p.set("sales_rep_slug", repSlugOut);
       if (toNumOrNull(qty)) p.set("qty", String(toNumOrNull(qty)));
       // internalNotes is staff-only (persisted separately via internal_notes
@@ -1028,7 +1044,7 @@ export default function RepStartQuoteModal({
       // cavity_l{n}) so cavities land on exactly the layer the rep picked
       // instead of being guessed at by the editor.
       for (const [layerIndex, tokens] of cavityBuild.tokensByLayer.entries()) {
-        if (!tokens.length) continue;
+        if (!tokens.length || foamDrawing) continue; // Step 40: the drawing has the pockets
         p.set(`cavities_l${layerIndex}`, tokens.join(";"));
       }
 
@@ -1301,6 +1317,21 @@ export default function RepStartQuoteModal({
                     >
                       {quoteType === "foam_insert" ? (
                         <>
+                          {/* Step 40: a drawing sets the length, width and pockets */}
+                          <div className="mb-4">
+                            <FoamDrawingCard
+                              value={foamDrawing}
+                              onChange={(d) => {
+                                setFoamDrawing(d);
+                                if (d) {
+                                  setInsertL(String(d.summary.length_in));
+                                  setInsertW(String(d.summary.width_in));
+                                }
+                              }}
+                              note="It sets the length and width below; enter the depth."
+                              dataPrefix="rep-foam-drawing"
+                            />
+                          </div>
                           <div className="grid grid-cols-3 gap-3">
                             <Field label="Length (in)">
                               <Input value={insertL} onChange={setInsertL} placeholder="12" />
@@ -1733,7 +1764,24 @@ export default function RepStartQuoteModal({
                       title="Cavities"
                       hint="Add one row per distinct cavity shape/size"
                     >
-                      <div className="space-y-3">
+                      {/* Step 40: Complete Pack picks the drawing here; with a drawing the pockets come from it */}
+                      {quoteType === "complete_pack" ? (
+                        <div className="mb-4">
+                          <FoamDrawingCard
+                            value={foamDrawing}
+                            onChange={setFoamDrawing}
+                            note="It sets the bottom insert's shape and pockets."
+                            dataPrefix="rep-foam-drawing"
+                          />
+                        </div>
+                      ) : null}
+                      {foamDrawing ? (
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-4 text-sm text-[var(--text-secondary)]" data-rep-foam-drawing-cavities>
+                          The pockets come from the drawing ({foamDrawing.summary.cavities} found). Any rows below are ignored; adjust
+                          pockets in the layout editor.
+                        </div>
+                      ) : null}
+                      <div className="space-y-3" style={foamDrawing ? { display: "none" } : undefined}>
                         {cavityRows.map((row) => {
                           const layerIndex = resolveRowLayerIndex(row, layerOptions);
                           const depthPlaceholder = defaultDepthForLayer(layerIndex) || "1";
@@ -1924,6 +1972,8 @@ export default function RepStartQuoteModal({
                         })}
                       </div>
 
+                      {!foamDrawing ? (
+                      <>
                       <button
                         type="button"
                         onClick={() => setCavityRows((prev) => [...prev, newCavityRow()])}
@@ -1943,6 +1993,8 @@ export default function RepStartQuoteModal({
                           </div>
                         ))}
                       </div>
+                      </>
+                      ) : null}
                     </StepCard>
                   ) : null}
 
@@ -2086,13 +2138,17 @@ export default function RepStartQuoteModal({
                         ) : (
                           <>
                             <ReviewRow label="Material" value={materialText || "—"} />
-                            {layerOptions.map((opt) => (
-                              <ReviewRow
-                                key={opt.index}
-                                label={`Cavities — ${opt.label}`}
-                                value={(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "none"}
-                              />
-                            ))}
+                            {foamDrawing ? (
+                              <ReviewRow label="Drawing" value={`${foamDrawing.file.name} (${foamDrawing.summary.cavities} pockets)`} />
+                            ) : (
+                              layerOptions.map((opt) => (
+                                <ReviewRow
+                                  key={opt.index}
+                                  label={`Cavities — ${opt.label}`}
+                                  value={(cavityBuild.tokensByLayer.get(opt.index) || []).join(";") || "none"}
+                                />
+                              ))
+                            )}
                           </>
                         )}
                       </div>
@@ -2131,7 +2187,7 @@ export default function RepStartQuoteModal({
                         </div>
                       ) : null}
 
-                      {quoteType !== "boxes_only" && cavityBuild.incompleteRowIds.size > 0 ? (
+                      {quoteType !== "boxes_only" && !foamDrawing && cavityBuild.incompleteRowIds.size > 0 ? (
                         <div className="mt-4 rounded-md border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-sm text-[var(--attention)]">
                           {cavityBuild.incompleteRowIds.size === 1
                             ? "1 cavity row is missing dimensions and will be excluded from the quote."

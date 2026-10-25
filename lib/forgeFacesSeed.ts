@@ -662,3 +662,51 @@ export function facesJsonToLayoutSeed(facesJson: any): LayoutModel {
     ],
   };
 }
+
+/**
+ * Step 40: a drawing uploaded on the Start Quote form (DXF / PDF) seeds the
+ * editor's first layer (footprint and cavities from the file); the form's
+ * layers give the thicknesses, names and crop corners: layer 1 takes the
+ * form's first thickness (cavities no deeper than it), any further form
+ * layers (e.g. a Complete Pack top pad) are added empty, and the block is
+ * the stack's total. No form layers = the seed as is. Pure.
+ */
+export function withFormLayers(
+  seed: LayoutModel,
+  layers: { thicknesses: number[]; labels?: string[]; cropCorners?: boolean[] } | null | undefined,
+): LayoutModel {
+  const t = (layers?.thicknesses ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  if (!t.length || !Array.isArray(seed.stack) || !seed.stack.length) return seed;
+  const first = seed.stack[0];
+  type SeedCavity = LayoutModel["stack"] extends (infer L)[] | undefined ? (L extends { cavities: (infer C)[] } ? C : never) : never;
+  const fit = (c: SeedCavity): SeedCavity => {
+    const depthIn = Math.min(Number(c.depthIn) || t[0], t[0]);
+    if (depthIn === c.depthIn) return c;
+    return { ...c, depthIn, label: formatCavityLabel({ shape: c.shape, lengthIn: c.lengthIn, widthIn: c.widthIn, depthIn }) };
+  };
+  const label = (i: number, d: string) => (layers?.labels?.[i] || "").trim() || d;
+  const crop = (i: number, d: boolean | undefined) =>
+    Array.isArray(layers?.cropCorners) && typeof layers!.cropCorners![i] === "boolean" ? layers!.cropCorners![i] || !!d : d;
+  const layer1 = {
+    ...first,
+    label: label(0, first.label || "Layer 1"),
+    thicknessIn: t[0],
+    cavities: (first.cavities ?? []).map(fit),
+    ...(crop(0, first.cropCorners) !== undefined ? { cropCorners: crop(0, first.cropCorners) } : {}),
+  };
+  const more = t.slice(1).map((thicknessIn, k) => ({
+    id: `seed-layer-${k + 2}`,
+    label: label(k + 1, `Layer ${k + 2}`),
+    thicknessIn,
+    cavities: [],
+    ...(crop(k + 1, first.cropCorners) !== undefined ? { cropCorners: crop(k + 1, first.cropCorners) } : {}),
+  }));
+  return {
+    ...seed,
+    block: { ...seed.block, thicknessIn: t.reduce((a, b) => a + b, 0) },
+    cavities: layer1.cavities.map((c) => ({ ...c })),
+    stack: [layer1, ...more] as LayoutModel["stack"],
+    // the editor opens on layer 1, where the drawing's pockets are (useLayoutModel)
+    layerCavityLayerIndex: 1,
+  } as LayoutModel;
+}
