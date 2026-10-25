@@ -16,6 +16,7 @@ import {
 import { priceRscBox } from "../lib/corrugated-price";
 import { DEFAULT_FLUTES } from "../lib/corrugated-blank";
 import { parseDielineBlank, partPrintOf } from "../lib/dieline-import";
+import { PRODUCT_INFO, withDisplayProduct } from "../lib/tenant-products";
 import { computePrintCharges } from "../app/lib/pricing/print-charges";
 
 let failed = 0;
@@ -149,6 +150,18 @@ check("print charges: one printing for the quote unchanged", same.isPrinted && !
     withMin.ok && without.ok && withMin.quantities[0].box_total_usd === 150 && without.quantities[0].box_total_usd < 150 && !without.quantities[0].min_applied,
     withMin.ok && without.ok && [withMin.quantities[0].box_total_usd, without.quantities[0].box_total_usd],
   );
+}
+
+// Step 42: the "Displays" tile on the shop's page
+{
+  const all = ["foam_insert", "complete_pack", "boxes_only"] as const;
+  check("42: Displays added after the box tiles", JSON.stringify(withDisplayProduct(["rsc", "printed", "mailer"], [...all])) === JSON.stringify(["rsc", "printed", "mailer", "display"]));
+  check("42: before foam tiles", JSON.stringify(withDisplayProduct(["rsc", "foam", "kit"], [...all])) === JSON.stringify(["rsc", "display", "foam", "kit"]));
+  check("42: foam-only list: first", JSON.stringify(withDisplayProduct(["foam"], [...all])) === JSON.stringify(["display", "foam"]));
+  check("42: not offered without Boxes and Displays quotes", JSON.stringify(withDisplayProduct(["rsc"], ["foam_insert", "complete_pack"])) === JSON.stringify(["rsc"]));
+  check("42: no products = section stays hidden", withDisplayProduct([], [...all]).length === 0);
+  check("42: never twice", withDisplayProduct(["display", "rsc", "display"], [...all]).filter((k) => k === "display").length === 1);
+  check("42: label", PRODUCT_INFO.display.label === "Displays");
 }
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");

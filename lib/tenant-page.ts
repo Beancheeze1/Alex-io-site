@@ -6,17 +6,11 @@
 // colors are hex-only, links are http(s)-only, and every field is length-capped.
 
 import { one } from "@/lib/db";
+import { quoteTypesFromTheme } from "@/lib/quote-types";
+import { PRODUCT_KEYS, withDisplayProduct, type ProductKey } from "@/lib/tenant-products";
 
-export const PRODUCT_KEYS = ["rsc", "printed", "mailer", "foam", "kit"] as const;
-export type ProductKey = (typeof PRODUCT_KEYS)[number];
-
-export const PRODUCT_INFO: Record<ProductKey, { label: string; desc: string }> = {
-  rsc: { label: "Corrugated boxes", desc: "Regular slotted cartons in single and double wall." },
-  printed: { label: "Printed packaging", desc: "Boxes printed with your logo and handling marks." },
-  mailer: { label: "Die-cut mailers", desc: "Self-locking mailers for shipping and retail." },
-  foam: { label: "Foam inserts", desc: "Foam cut to hold your product in place." },
-  kit: { label: "Foam-in-box kits", desc: "Box and insert quoted together as one kit." },
-};
+// Step 42: the product tiles live in lib/tenant-products.ts (pure, tested).
+export { PRODUCT_KEYS, PRODUCT_INFO, withDisplayProduct, type ProductKey } from "@/lib/tenant-products";
 
 export type TenantStat = { label: string; value: string };
 
@@ -213,7 +207,7 @@ export async function loadTenantPage(slugRaw: string): Promise<TenantPage | null
       str(th.quoteIntro, 300) ||
       `Price ${quoteScope} online any time, or talk to our team about anything custom.`,
     quoteScope,
-    products,
+    products: withDisplayProduct(products, quoteTypesFromTheme(th)), // Step 42
     aboutText: str(th.aboutText, 1200),
     stats,
   };

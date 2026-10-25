@@ -74,6 +74,13 @@ function ProductIcon({ k }: { k: ProductKey }) {
           <path d="M3 9l3-4h12l3 4M9 13h6" />
         </svg>
       );
+    case "display": // Step 42: a display stand (header card and shelves)
+      return (
+        <svg {...common}>
+          <rect x="6" y="3" width="12" height="5" rx="1" />
+          <path d="M7 8v13M17 8v13M7 12h10M7 16h10M5 21h14" />
+        </svg>
+      );
     case "foam":
       return (
         <svg {...common}>

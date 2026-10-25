@@ -749,7 +749,10 @@ export default function TenantsPage() {
                       ))}
 
                       <div className="space-y-1">
-                        <div className="text-xs text-[var(--text-muted)]">Products shown under “What you can quote online”</div>
+                        <div className="text-xs text-[var(--text-muted)]">
+                          Products shown under “What you can quote online” (Displays is added on its own when the shop offers
+                          Boxes and Displays quotes)
+                        </div>
                         <div className="flex flex-wrap gap-x-5 gap-y-2">
                           {PRODUCT_OPTIONS.map((p) => (
                             <label key={p.key} className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
