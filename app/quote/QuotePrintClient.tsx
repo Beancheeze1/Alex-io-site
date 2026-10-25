@@ -2906,7 +2906,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   ) : (
                     <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
                       {isBoxesOnly
-                        ? "Boxes-only quote — box prices, printing and plates are in the line items below."
+                        ? "Boxes and Displays quote — prices, printing, plates and dies are in the line items below."
                         : "Pricing is still being finalized for this quote. Once pricing is applied, the per-piece and subtotal values will appear here and in the line items below."}
                     </div>
                   )}
@@ -2965,7 +2965,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                   ) : (
                     <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>
                       {isBoxesOnly ? (
-                        "This is a boxes-only quote, so there's no foam layout."
+                        "This is a Boxes and Displays quote, so there's no foam layout."
                       ) : (
                         <>
                           No foam layout has been saved yet. Use the layout editor link in your emailed quote to place cavities
@@ -3947,7 +3947,7 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                 {!layoutPkg ? (
                   <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
                     {isBoxesOnly ? (
-                      "This is a boxes-only quote, so there's no foam layout package."
+                      "This is a Boxes and Displays quote, so there's no foam layout package."
                     ) : (
                       <>
                         No foam layout has been saved for this quote yet. Use the <strong>Open layout preview</strong> button

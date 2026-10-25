@@ -1278,8 +1278,8 @@ export default function RepStartQuoteModal({
                         ) : null}
                         {offeredTypes.includes("boxes_only") ? (
                         <ChoiceCard
-                          title="Boxes only"
-                          desc="Corrugated boxes, plain or printed — no foam"
+                          title="Boxes and Displays"
+                          desc="Corrugated boxes, displays and die-cut parts, plain or printed — no foam"
                           selected={quoteType === "boxes_only"}
                           onClick={() => setQuoteType("boxes_only")}
                         />
@@ -2031,7 +2031,7 @@ export default function RepStartQuoteModal({
                         />
                         <ReviewRow
                           label="Quote type"
-                          value={quoteType === "foam_insert" ? "Foam Insert" : quoteType === "boxes_only" ? "Boxes only" : "Complete Pack"}
+                          value={quoteType === "foam_insert" ? "Foam Insert" : quoteType === "boxes_only" ? "Boxes and Displays" : "Complete Pack"}
                         />
                         {quoteType === "boxes_only" ? (
                           <>

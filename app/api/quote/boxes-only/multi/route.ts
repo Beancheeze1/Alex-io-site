@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
         [quote.id],
       );
       if (Number(used?.n ?? 0) > 0) {
-        return bad("quote_not_empty", "That quote already has items. Start a new quote for boxes only.", 409);
+        return bad("quote_not_empty", "That quote already has items. Start a new Boxes and Displays quote.", 409);
       }
       tenantId = Number(quote.tenant_id);
     } else {
@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
 
     // Step 11: the shop must offer boxes-only quotes.
     if (!(await tenantOffersQuoteType(tenantId, "boxes_only"))) {
-      return bad("quote_type_unavailable", "This shop doesn't offer boxes-only quotes.", 403);
+      return bad("quote_type_unavailable", "This shop doesn't offer Boxes and Displays quotes.", 403);
     }
 
     // ---- Stock cartons (validated before any quote row is created) ----
@@ -343,7 +343,7 @@ export async function POST(req: NextRequest) {
         tenantId,
         quoteNo: quote.quote_no,
         kind: "new_quote",
-        title: "New boxes-only quote",
+        title: "New Boxes and Displays quote",
         detail: [
           name,
           company,

@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
 
     const facts = ((await loadFacts(quoteNo)) || {}) as Record<string, any>;
     if (facts.pack_type !== "boxes_only") {
-      return bad("not_boxes_only", "Quantity breaks are only available on boxes-only quotes.");
+      return bad("not_boxes_only", "Quantity breaks are only available on Boxes and Displays quotes.");
     }
 
     // ---- Multi-size: switch one size ----

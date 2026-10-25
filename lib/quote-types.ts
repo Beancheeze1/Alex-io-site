@@ -13,7 +13,7 @@ export const QUOTE_TYPE_KEYS: QuoteTypeKey[] = ["foam_insert", "complete_pack", 
 export const QUOTE_TYPE_LABELS: Record<QuoteTypeKey, string> = {
   foam_insert: "Foam insert",
   complete_pack: "Complete Pack (box + foam)",
-  boxes_only: "Boxes only",
+  boxes_only: "Boxes and Displays", // Step 39Z (was "Boxes only")
 };
 
 /** The shop's offered types, in canonical order. Missing / empty / invalid = all types. */

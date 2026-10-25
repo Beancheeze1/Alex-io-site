@@ -1650,7 +1650,7 @@ export default function StartQuoteModal({
                 {quoteType === "complete_pack"
                   ? "Complete Pack: box + foam (bottom insert + optional top pad)."
                   : quoteType === "boxes_only"
-                    ? "Boxes only: corrugated boxes, plain or printed."
+                    ? "Boxes and Displays: corrugated boxes, displays and die-cut parts, plain or printed."
                     : "Foam Insert: foam only (block + cavities)."}
               </div>
             </div>
@@ -1782,8 +1782,8 @@ export default function StartQuoteModal({
                           ) : null}
                           {offeredTypes.includes("boxes_only") ? (
                           <ChoiceCard
-                            title="Boxes only"
-                            desc="Corrugated boxes, plain or printed — no foam"
+                            title="Boxes and Displays"
+                            desc="Corrugated boxes, displays and die-cut parts, plain or printed — no foam"
                             selected={quoteType === "boxes_only"}
                             onClick={() => setQuoteType("boxes_only")}
                           />
@@ -2733,7 +2733,7 @@ export default function StartQuoteModal({
                             SUMMARY
                           </div>
                           <div className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
-                            <Row k="Quote type" v="Boxes only" />
+                            <Row k="Quote type" v="Boxes and Displays" />
                             {dlMode && dlRead ? (
                               <>
                                 {/* Step 39E */}

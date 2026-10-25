@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
     const facts = ((await loadFacts(quote.quote_no)) || {}) as Record<string, unknown>;
     const rows = await loadRows(quote.id);
     if (!(facts.pack_type === "boxes_only" && rows.length > 0)) {
-      return json({ ok: false, error: "not_boxes_only", message: "Die lines can be priced on boxes-only quotes." }, 400);
+      return json({ ok: false, error: "not_boxes_only", message: "Die lines can be priced on Boxes and Displays quotes." }, 400);
     }
     // Step 39E: staff confirm a buyer's die line reading (no file needed).
     if (rawMode === "confirm") {

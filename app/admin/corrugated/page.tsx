@@ -761,7 +761,7 @@ export default function CorrugatedSettingsPage() {
         {/* Run and print rates */}
         <section className={`${CARD} mb-6`}>
           <div className={SECTION_LABEL}>Run and print rates</div>
-          <p className="mb-3 mt-1 text-xs">Dollar rates start at 0. Set them before Boxes-only quoting goes live.</p>
+          <p className="mb-3 mt-1 text-xs">Dollar rates start at 0. Set them before Boxes and Displays quoting goes live.</p>
           <div className={TABLE_WRAP}>
             <table className="min-w-full text-left text-xs">
               <thead className={THEAD}>

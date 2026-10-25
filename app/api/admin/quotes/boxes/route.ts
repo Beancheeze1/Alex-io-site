@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
     const facts = ((await loadFacts(quote.quote_no)) || {}) as Record<string, unknown>;
     const rows = await loadRows(quote.id);
     if (!isBoxesOnly(facts, rows)) {
-      return json({ ok: false, error: "not_boxes_only", message: "Only boxes-only quotes are edited here." }, 400);
+      return json({ ok: false, error: "not_boxes_only", message: "Only Boxes and Displays quotes are edited here." }, 400);
     }
 
     const boxId = Number(b.box_id);
