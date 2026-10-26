@@ -617,12 +617,12 @@ export default function TenantsPage() {
                           onChange={(e) => updateEdit(t.id, { plan: e.target.value })}
                         >
                           <option value="starter">Starter — $799/mo · 2 seats · PDF only</option>
-                          <option value="pro">Pro — $1,299/mo · 10 seats · CAD + HubSpot</option>
+                          <option value="pro">Pro — $1,299/mo · 10 seats · CAD + commissions</option>
                           <option value="shop">Shop — $1,999/mo · Unlimited · Multi-location</option>
                         </select>
                         <div className="text-[10px] text-[var(--text-faint)]">
-                          {s.plan === "starter" && "No CAD exports · No HubSpot sync · No commissions · 2 seat max"}
-                          {s.plan === "pro" && "CAD/DXF/STEP exports · HubSpot sync · Commission tracking · 10 seat max"}
+                          {s.plan === "starter" && "No CAD exports · No commissions · 2 seat max"}
+                          {s.plan === "pro" && "CAD/DXF/STEP exports · Commission tracking · 10 seat max"}
                           {s.plan === "shop" && "All Pro features · Multi-location · White-label · API · Unlimited seats"}
                         </div>
                       </div>

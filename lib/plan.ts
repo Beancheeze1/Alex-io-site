@@ -4,7 +4,7 @@
 //
 // Plans:
 //   starter  $799/mo   2 seats   PDF only · layout editor · email parsing
-//   pro      $1299/mo  10 seats  + CAD/DXF/STEP · HubSpot · commissions
+//   pro      $1299/mo  10 seats  + CAD/DXF/STEP · commissions
 //   shop     $1999/mo  unlimited + Multi-location · white-label · API
 //
 // Pilot program: $399/mo for 90 days (Starter features), converts to $799 at day 91
@@ -26,7 +26,7 @@ export type Plan = "starter" | "pro" | "shop";
 export type PlanLimits = {
   seats: number;           // max users per tenant (Infinity = unlimited)
   cadExports: boolean;     // DXF / STEP / 3-view PDF exports
-  hubspot: boolean;        // HubSpot CRM sync
+  hubspot: boolean;        // Step 43: not used or advertised (CRM deal sync was never built)
   commissions: boolean;    // Commission tracking module
   multiTenant: boolean;    // Can create additional tenants (Shop only)
   whiteLabel: boolean;     // Custom branding / white-label

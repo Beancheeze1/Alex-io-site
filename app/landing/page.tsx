@@ -290,8 +290,8 @@ function CapabilitiesSection() {
           />
           <CapabilityCard
             icon="🔗"
-            title="Every quote becomes a tracked deal"
-            body="Quotes sync to HubSpot automatically as deals. Contacts are matched or created. Your CRM stays current without anyone manually updating it after every customer conversation."
+            title="See where every quote stands"
+            body="Every quote shows where it is at a glance: draft, sent, accepted, confirmed, in production or shipped. Filter by stage, add internal notes, and release confirmed orders with a job ticket for the floor."
           />
           <CapabilityCard
             icon="✉️"
@@ -320,7 +320,7 @@ function CapabilitiesSection() {
         {/* Admin dashboard trust screenshot */}
         <div className="mb-8">
           <div className="mb-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">Admin dashboard — system health, integrations, everything wired up</div>
-          <Shot src="/splash/admin-dashboard.png" alt="Alex-IO admin dashboard showing system health, HubSpot and email configured" />
+          <Shot src="/splash/admin-dashboard.png" alt="Alex-IO admin dashboard showing system health and email configured" />
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-6 sm:p-8">
@@ -1082,7 +1082,6 @@ export default function LandingPage() {
               <ul className="mt-5 space-y-2 text-sm text-[var(--text-secondary)] flex-1">
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Everything in Starter</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>CAD exports (DXF / STEP)</li>
-                <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>HubSpot CRM sync</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>Commission tracking</li>
                 <li className="flex items-start gap-2"><span className="mt-0.5 text-[var(--text-primary)]">✓</span>10 user seats</li>
               </ul>
