@@ -397,11 +397,16 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Load current revision for package tagging
+    // Load current revision for package tagging.
+    // Step 44e: tag the snapshot with the released letter this release is about
+    // to mint (A on the first release, then B, C …; same rule as mintReleasedRev
+    // below). It used to take facts.revision, which on a first release is still
+    // the staging letter, so the release snapshot was tagged AS and the drawing's
+    // revision block never showed the release.
     let currentRevision = "A";
     try {
       const facts: any = await loadFacts(quoteNo);
-      currentRevision = facts?.released_rev || facts?.revision || "A";
+      currentRevision = nextReleasedLetter(facts?.released_rev || "");
     } catch {
       // Non-fatal: use default
     }

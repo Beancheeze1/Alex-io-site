@@ -8,11 +8,12 @@
 // views, and the "auto-generated" line on every sheet.
 // Step 44c: the revision block (lib/pdf/drawing-revisions.ts revisionRows).
 // Step 44d: the Revise box's description + initials (lib/revision-notes.ts).
+// Step 44e: a released quote always shows its released letter (withReleasedRow).
 // Run: npm run test:drawing-pdf
 
 import { PDFDocument } from "pdf-lib";
 import { generate3ViewPDF, fmtIn, threeviewInternals, type Cavity3D, type Drawing3DInput } from "../lib/pdf/threeview";
-import { revisionRows, initialsOf } from "../lib/pdf/drawing-revisions";
+import { revisionRows, initialsOf, withReleasedRow } from "../lib/pdf/drawing-revisions";
 import { cleanRevBy, cleanRevDescription, revisionNotesOf, upcomingStageLetter, withRevisionNote, REV_DESC_MAX } from "../lib/revision-notes";
 
 const { partData, depthProfile, AUTO_NOTE } = threeviewInternals;
@@ -156,6 +157,13 @@ const pocketSet: Drawing3DInput = {
   );
   check("typed description and initials replace the worked-out ones", typedRows[1].description === "Added finger slots" && typedRows[1].by === "AW", typedRows[1]);
   check("rows without a typed note are unchanged", typedRows[0].description === "Initial layout" && typedRows[0].by === "CJ" && typedRows[2].description === "Released", typedRows);
+
+  // Step 44e: released quote whose snapshot was tagged with the staging letter
+  const legacy = withReleasedRow([{ rev: "AS", description: "Initial layout", by: "CA", date: "2026-10-24" }], "A", "2026-10-24T19:15:08Z");
+  check("released letter added as the last row", legacy.length === 2 && legacy[1].rev === "A" && legacy[1].description === "Released" && legacy[1].date === "2026-10-24", legacy);
+  check("not added twice when the history has it", withReleasedRow(rows, "A").length === rows.length);
+  check("a staging letter is never added", withReleasedRow(legacy.slice(0, 1), "BS").length === 1);
+  check("no current letter: unchanged", withReleasedRow(legacy.slice(0, 1), null).length === 1);
 
   // sheets: one per part + the assembly; a single part is one sheet
   const setPdf = await PDFDocument.load(await generate3ViewPDF(pocketSet));

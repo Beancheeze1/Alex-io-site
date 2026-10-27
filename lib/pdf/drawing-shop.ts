@@ -7,9 +7,10 @@
 // layouts). Never throws: a drawing without history shows its current revision.
 
 import { one, q } from "@/lib/db";
-import { revisionRows, type DrawingRevision, type RevisionPackage, type RevisionUser } from "@/lib/pdf/drawing-revisions";
+import { revisionRows, withReleasedRow, type DrawingRevision, type RevisionPackage, type RevisionUser } from "@/lib/pdf/drawing-revisions";
 import { revisionNotesOf } from "@/lib/revision-notes";
 import { loadFacts } from "@/app/lib/memory";
+import { displayRevisionLabel } from "@/app/lib/revision-label";
 
 export async function drawingShopName(tenantId: number | string | null | undefined): Promise<string | undefined> {
   if (tenantId == null || tenantId === "") return undefined;
@@ -43,13 +44,20 @@ export async function drawingRevisions(quoteId: number, quoteNo: string, tenantI
       ? await q<RevisionUser>(`SELECT id, name, email FROM public."users" WHERE id = ANY($1::int[]) AND tenant_id = $2`, [ids, tenantId])
       : [];
     // Step 44d: descriptions / initials typed in the Revise box (never fatal)
-    let notes = {};
+    let facts: Record<string, unknown> = {};
     try {
-      notes = revisionNotesOf(((await loadFacts(quoteNo)) || {}) as Record<string, unknown>);
+      facts = ((await loadFacts(quoteNo)) || {}) as Record<string, unknown>;
     } catch {
-      notes = {};
+      facts = {};
     }
-    return revisionRows(pkgs, users, notes);
+    const rows = revisionRows(pkgs, users, revisionNotesOf(facts));
+    // Step 44e: a released quote always shows its released letter
+    const qrow = await one<{ locked: boolean | null; locked_at: string | Date | null }>(
+      `SELECT locked, locked_at FROM quotes WHERE id = $1 AND tenant_id = $2`,
+      [quoteId, tenantId],
+    );
+    if (!qrow?.locked) return rows;
+    return withReleasedRow(rows, displayRevisionLabel(facts as { revision?: string; released_rev?: string }, true), qrow.locked_at);
   } catch {
     return [];
   }

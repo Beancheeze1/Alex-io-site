@@ -95,6 +95,17 @@ function dateOf(v: string | Date | null): string {
 }
 
 /**
+ * Step 44e: a released quote whose release snapshot isn't in the history (quotes
+ * released before Step 44e tagged it with the staging letter) gets its released
+ * letter as the last row, so the drawing and its title block show it.
+ */
+export function withReleasedRow(rows: DrawingRevision[], current: string | null | undefined, lockedAt?: string | Date | null): DrawingRevision[] {
+  const rev = String(current || "").trim().toUpperCase();
+  if (!rev || /S$/.test(rev) || rows.some((r) => r.rev === rev)) return rows;
+  return [...rows, { rev, description: "Released", by: "", date: dateOf(lockedAt ?? null) }];
+}
+
+/**
  * One row per revision letter, oldest first. Saves that share a letter are one
  * revision (its last save); its description compares with the revision before.
  * A letter without a trailing "S" (A, B …) is a release.
