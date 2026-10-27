@@ -2445,9 +2445,36 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
           const L = Number(sc.inside_length_in);
           const W = Number(sc.inside_width_in);
           const H = Number(sc.inside_height_in);
-          const styleStr = (String(sc.style || "")).trim();
+          let styleStr = (String(sc.style || "")).trim();
 
-          if (Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0 && Number.isFinite(H) && H > 0) {
+          // Step 44g: the editor's "Customer box (inside)" size (editor_box)
+          // reprices the quote's box when it changed. It only applies to a quote
+          // that already has a box (a foam-only quote never gains one), and it
+          // replaces a stock box with a custom box at the new size.
+          const editorBox = (sc as { editor_box?: unknown }).editor_box === true;
+          let editorBoxSkip = false;
+          if (editorBox) {
+            const have = await one<{ stock: string; custom: string; style: string | null }>(
+              `SELECT count(*) FILTER (WHERE kind = 'stock')::text AS stock,
+                      count(*) FILTER (WHERE kind = 'custom' AND COALESCE(custom_style, '') NOT IN ('dieline', 'assembly'))::text AS custom,
+                      MAX(custom_style) FILTER (WHERE kind = 'custom' AND COALESCE(custom_style, '') NOT IN ('dieline', 'assembly')) AS style
+                 FROM public.quote_box_selections
+                WHERE quote_id = $1`,
+              [quote.id],
+            );
+            if (Number(have?.stock || 0) === 0 && Number(have?.custom || 0) === 0) {
+              editorBoxSkip = true;
+              console.log("[layout/apply] editor box ignored: the quote has no box", { quoteNo });
+            } else {
+              if (!styleStr && have?.style) styleStr = String(have.style);
+              if (Number(have?.stock || 0) > 0) {
+                await q(`DELETE FROM public.quote_box_selections WHERE quote_id = $1 AND kind = 'stock'`, [quote.id]);
+                boxesTouched = true;
+              }
+            }
+          }
+
+          if (!editorBoxSkip && Number.isFinite(L) && L > 0 && Number.isFinite(W) && W > 0 && Number.isFinite(H) && H > 0) {
             const cartonNotes =
               `Requested shipping carton: ${L} x ${W} x ${H} in ${sku}` +
               (styleStr ? ` (${styleStr})` : "");
@@ -2531,12 +2558,16 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
                 Number(prevCustom.custom_height_in) === H &&
                 String(prevCustom.custom_style || "").toLowerCase() === customStyle;
               const scGrade = Number((sc as any).board_grade_id);
+              // Step 44g: a new size keeps the box's board grade (staff may have
+              // picked it) unless the editor sent one.
               const gradeIdForCarton =
                 prevSameBox && prevCustom?.board_grade_id != null
                   ? Number(prevCustom.board_grade_id)
                   : Number.isInteger(scGrade) && scGrade > 0
                     ? scGrade
-                    : null;
+                    : prevCustom?.board_grade_id != null
+                      ? Number(prevCustom.board_grade_id)
+                      : null;
 
               // Step 10A: the same box at the same quantity keeps its stored
               // row and price. Only a different box or quantity is re-resolved.
@@ -2578,7 +2609,7 @@ async function applyPost(req: NextRequest, grant: { quoteNo: string | null }): P
                 { quoteNo, sku, existingStockSelectionId: existingStockSelection.id },
               );
             }
-          } else {
+          } else if (!editorBoxSkip) {
             console.warn(
               "[layout/apply] selectedCarton SKU not found and dims invalid — skipping",
               { sku, sc },

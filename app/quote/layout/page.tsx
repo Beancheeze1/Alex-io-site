@@ -8,6 +8,7 @@
 //
 "use client";
 
+import { editorCarton, type EditorCarton } from "@/lib/editor-box"; // Step 44g
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
@@ -4132,6 +4133,19 @@ const handleGoToFoamAdvisor = () => {
             };
           }
         }
+
+        // Step 44g: the "Customer box (inside)" size typed in the editor is the
+        // box that gets priced. Before this it was only saved for display, so a
+        // revision that changed the box size left the quote's box line on the
+        // old size. A stock box picked this session from "Stock sizes that fit"
+        // still wins. Opened without the Start Quote box params (e.g. after
+        // Revise), it's sent as editor_box: the server only uses it on a quote
+        // that already has a box, so a foam-only quote never gains one.
+        const carton = editorCarton(customerBox, payload.selectedCarton as EditorCarton | undefined, {
+          fromStartQuote: isModalPack,
+          stockPickedThisSession: !!selectedCartonKind,
+        });
+        if (carton) payload.selectedCarton = carton;
       } catch { /* ignore URL parse errors */ }
 
       // Attach foam layers summary so the backend can add each pad as a line item
@@ -5559,7 +5573,7 @@ const tenantCssVars = React.useMemo(() => {
                       <div className="text-[11px] text-[var(--text-secondary)]">
                         Customer box (inside)
                         <div className="text-[10px] text-[var(--text-muted)]">
-                          Shown on the quote. Pricing uses the closest matching standard carton for now.
+                          On a quote with a box, Apply prices the box at this size (a stock size picked below wins).
                         </div>
                       </div>
 
