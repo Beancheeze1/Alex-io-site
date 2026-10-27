@@ -109,6 +109,8 @@ const MAIN_Y = M + TB_H;
 const MAIN_W = PW - 2 * M - RC_W;
 const MAIN_H = PH - 2 * M - TB_H;
 const RC_X = MAIN_X + MAIN_W;
+const BANNER_H = 30;        // Step 44b: the "auto-generated" line across the top of the main area
+const AUTO_NOTE = "THIS DRAWING WAS AUTO-GENERATED, SEE STEP AND DXF FILES FOR DETAILS";
 
 // Standard drawing scales (1 : n), smallest n that fits wins
 const SCALES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 30, 40, 50, 60, 80, 100];
@@ -134,6 +136,7 @@ export async function generate3ViewPDF(input: Drawing3DInput): Promise<Buffer> {
     const page = pdfDoc.addPage([PW, PH]);
     const part = partData(input.block, layers[li]);
     frame(page);
+    autoNote(page, f);
     const scale = orthoViews(page, f, part);
     partPanel(page, f, input, layers[li], li, layers.length);
     isoPanel(page, f, part);
@@ -154,6 +157,7 @@ export async function generate3ViewPDF(input: Drawing3DInput): Promise<Buffer> {
   if (assembly) {
     const page = pdfDoc.addPage([PW, PH]);
     frame(page);
+    autoNote(page, f);
     const parts = layers.map((l) => partData(input.block, l));
     assemblyView(page, f, parts);
     bomPanel(page, f, input, parts);
@@ -348,7 +352,7 @@ function orthoViews(page: PDFPage, f: Fonts, p: PartData): number {
   const PAD = 14;
 
   const availW = MAIN_W - 2 * PAD - DIM_L - GAP_H;
-  const availH = MAIN_H - 2 * PAD - DIM_T - GAP_V - LBL;
+  const availH = MAIN_H - BANNER_H - 2 * PAD - DIM_T - GAP_V - LBL;
   const fit = Math.min(availW / (p.L + p.W), availH / (p.W + p.T)); // points per inch
   const n = SCALES.find((k) => 72 / k <= fit) ?? Math.ceil(72 / fit);
   const s = 72 / n;
@@ -356,7 +360,7 @@ function orthoViews(page: PDFPage, f: Fonts, p: PartData): number {
   const groupW = DIM_L + (p.L + p.W) * s + GAP_H;
   const groupH = DIM_T + (p.W + p.T) * s + GAP_V + LBL;
   const gx = MAIN_X + PAD + Math.max(0, (MAIN_W - 2 * PAD - groupW) / 2);
-  const gTop = MAIN_Y + MAIN_H - PAD - Math.max(0, (MAIN_H - 2 * PAD - groupH) / 2);
+  const gTop = MAIN_Y + MAIN_H - BANNER_H - PAD - Math.max(0, (MAIN_H - BANNER_H - 2 * PAD - groupH) / 2);
 
   // view origins (lower-left of each view's part, points)
   const topO = { x: gx + DIM_L, y: gTop - DIM_T - p.W * s };
@@ -396,9 +400,26 @@ function topView(page: PDFPage, f: Fonts, p: PartData, o: Pt, s: number) {
   page.drawText("0,0", { x: o.x - 15, y: o.y - 9, size: 5.5, font: f.r, color: C.muted });
 
   // balloons: at the pocket's center; if that spot is taken (a step inside a pocket) or the
-  // pocket is small, try just inside its corners, else a leader out past its top-right corner
-  const placed: Pt[] = [];
-  const free = (q: Pt) => placed.every((u) => Math.hypot(u.x - q.x, u.y - q.y) >= 14);
+  // pocket is small, try just inside its corners, else a leader out past its top-right corner.
+  // Step 44b: each balloon gets a small size note (5" × 5", Ø1") when it fits without
+  // crowding: under the balloon inside the pocket, or beside a leader balloon. The cavity
+  // schedule stays the full spec, so a note that doesn't fit is simply left off.
+  type Box = { x0: number; y0: number; x1: number; y1: number };
+  const taken: Box[] = [];
+  const hits = (a: Box, b: Box) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const ballBox = (q: Pt): Box => ({ x0: q.x - 7, y0: q.y - 7, x1: q.x + 7, y1: q.y + 7 });
+  const free = (q: Pt) => !taken.some((t) => hits(t, ballBox(q)));
+  const NOTE = 6;
+  // with many pockets, a size is noted once (the rest of that size are in the schedule)
+  const noted = new Set<string>();
+  const once = p.rows.length > 6;
+  const note = (txt: string, box: Box, key: string) => {
+    noted.add(key);
+    page.drawRectangle({ x: box.x0, y: box.y0, width: box.x1 - box.x0, height: box.y1 - box.y0, color: C.white, opacity: 0.85 });
+    page.drawText(txt, { x: box.x0 + 1, y: box.y0 + 1.6, size: NOTE, font: f.r, color: C.ink });
+    taken.push(box);
+  };
+  const viewBox: Box = { x0: o.x, y0: o.y, x1: o.x + p.L * s, y1: o.y + p.W * s };
   // deepest first so a step's balloon sits on the step and its pocket's balloon moves aside
   const rows = [...p.rows].sort((m, q) => q.region.depth - m.region.depth || m.n - q.n);
   for (const row of rows) {
@@ -406,16 +427,71 @@ function topView(page: PDFPage, f: Fonts, p: PartData, o: Pt, s: number) {
     const wPt = (b.x1 - b.x0) * s;
     const hPt = (b.y1 - b.y0) * s;
     const c = P({ x: row.cx, y: row.cy });
+    const lo = P({ x: b.x0, y: b.y0 });
+    const hi = P({ x: b.x1, y: b.y1 });
+    const key = row.size;
+    const count = p.rows.filter((r) => r.size === key).length;
+    const txt = once && count > 1 ? `${count}X ${key}` : key; // drafting style: "18X 2 1/2" × 1 3/4""
+    const tw = f.r.widthOfTextAtSize(txt, NOTE) + 2;
+    const wantNote = !(once && noted.has(key));
     let at: Pt | null = null;
     if (wPt >= 16 && hPt >= 16) {
-      const lo = P({ x: b.x0, y: b.y0 });
-      const hi = P({ x: b.x1, y: b.y1 });
       const tries = [c, { x: lo.x + 9, y: hi.y - 9 }, { x: hi.x - 9, y: hi.y - 9 }, { x: lo.x + 9, y: lo.y + 9 }, { x: hi.x - 9, y: lo.y + 9 }];
       at = tries.find(free) ?? null;
     }
     if (at) {
       balloon(page, f, at.x, at.y, row.n);
-      placed.push(at);
+      taken.push(ballBox(at));
+      // a note never sits on another pocket, a balloon or another note
+      const ownBox = regionBox(row.region);
+      const isOwn = (r: CavityRegion) => {
+        const rb = regionBox(r);
+        return Math.abs(rb.x0 - ownBox.x0) + Math.abs(rb.y0 - ownBox.y0) + Math.abs(rb.x1 - ownBox.x1) + Math.abs(rb.y1 - ownBox.y1) < 1e-6;
+      };
+      const encloses = (r: CavityRegion) => {
+        const rb = regionBox(r);
+        return rb.x0 <= ownBox.x0 + 1e-6 && rb.y0 <= ownBox.y0 + 1e-6 && rb.x1 >= ownBox.x1 - 1e-6 && rb.y1 >= ownBox.y1 - 1e-6;
+      };
+      // other pockets, not counting one this pocket is a step inside of
+      const others = p.regions.filter((r) => !isOwn(r) && !encloses(r)).map((r) => regionPts(r, 24).map(P));
+      const inPoly = (q: Pt, pts: Pt[]) => {
+        let c2 = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          const u = pts[i];
+          const v = pts[j];
+          if (u.y > q.y !== v.y > q.y && q.x < ((v.x - u.x) * (q.y - u.y)) / (v.y - u.y) + u.x) c2 = !c2;
+        }
+        return c2;
+      };
+      const clear = (bx: Box) => {
+        if (bx.x0 < viewBox.x0 + 1 || bx.x1 > viewBox.x1 - 1 || bx.y0 < viewBox.y0 + 1 || bx.y1 > viewBox.y1 - 1) return false;
+        if (taken.some((t) => hits(t, bx))) return false;
+        const xs = [bx.x0, (bx.x0 + bx.x1) / 2, bx.x1];
+        const ys = [bx.y0, (bx.y0 + bx.y1) / 2, bx.y1];
+        return !others.some((pts) => xs.some((x) => ys.some((y) => inPoly({ x, y }, pts))));
+      };
+      // inside the pocket: under the balloon (slid sideways to stay in), else beside it
+      const nx0 = Math.max(lo.x + 2, Math.min(at.x - tw / 2, hi.x - 2 - tw));
+      const inner: Box[] = [
+        { x0: nx0, y0: at.y - 16.5, x1: nx0 + tw, y1: at.y - 8 },
+        { x0: at.x + 8, y0: at.y - 4.5, x1: at.x + 8 + tw, y1: at.y + 4.5 },
+      ];
+      const inOwn = (bx: Box) => bx.x0 >= lo.x + 1 && bx.x1 <= hi.x - 1 && bx.y0 >= lo.y + 0.5 && bx.y1 <= hi.y - 1;
+      const ib = wantNote ? inner.find((bx) => inOwn(bx) && clear(bx)) : undefined;
+      if (ib) {
+        note(txt, ib, key);
+        continue;
+      }
+      // too small inside: below, above, left or right of the pocket, on clear foam
+      const midY = c.y - 3;
+      const outside: Box[] = [
+        { x0: c.x - tw / 2, y0: lo.y - 11, x1: c.x + tw / 2, y1: lo.y - 2 }, // below
+        { x0: c.x - tw / 2, y0: hi.y + 2, x1: c.x + tw / 2, y1: hi.y + 11 }, // above
+        { x0: lo.x - 3 - tw, y0: midY, x1: lo.x - 3, y1: midY + 9 }, // left
+        { x0: hi.x + 3, y0: midY, x1: hi.x + 3 + tw, y1: midY + 9 }, // right
+      ];
+      const ob = wantNote ? outside.find(clear) : undefined;
+      if (ob) note(txt, ob, key);
       continue;
     }
     let to = { x: o.x + b.x1 * s + 13, y: o.y + b.y1 * s + 13 };
@@ -423,7 +499,10 @@ function topView(page: PDFPage, f: Fonts, p: PartData, o: Pt, s: number) {
     page.drawLine({ start: c, end: to, thickness: 0.5, color: C.dim });
     page.drawCircle({ x: c.x, y: c.y, size: 1.2, color: C.dim });
     balloon(page, f, to.x, to.y, row.n);
-    placed.push(to);
+    taken.push(ballBox(to));
+    const nb: Box = { x0: to.x + 8, y0: to.y - 4, x1: to.x + 8 + tw, y1: to.y + 4 };
+    const insideView = hits(nb, viewBox);
+    if (wantNote && !taken.some((t) => hits(t, nb)) && nb.x1 <= MAIN_X + MAIN_W - 4 && !(insideView && p.rows.length > 12)) note(txt, nb, key);
   }
 }
 
@@ -558,7 +637,7 @@ function isoPart(page: PDFPage, p: PartData, z0: number, ox: number, oy: number,
     const open = pts.map((q) => at(q.x, q.y, zt - shelf));
     const floor = pts.map((q) => at(q.x, q.y, zt - r.depth));
     const vis = r.kind === "poly" ? floor : clipConvex(floor, open);
-    return { r, shelf, open, vis, through: r.depth >= p.T - 1e-6 };
+    return { r, shelf, open, floor, vis, through: r.depth >= p.T - 1e-6 };
   });
   // pockets of the same depth that touch (a slot cut into a pocket's edge) are one opening:
   // all their walls first, then all their floors, so one never paints over the other's floor
@@ -567,12 +646,183 @@ function isoPart(page: PDFPage, p: PartData, z0: number, ox: number, oy: number,
     while (j < drawn.length && Math.abs(drawn[j].r.depth - drawn[i].r.depth) < 1e-6) j++;
     const grp = drawn.slice(i, j);
     for (const g of grp) poly(page, g.open, { fill: C.isoWall });
-    for (const g of grp) if (g.vis.length >= 3) poly(page, g.vis, { fill: g.through ? C.white : C.isoFloor });
+    // a floor shows through every opening of its group (one floor plane, cut as one pocket)
+    for (const g of grp) {
+      const fill = g.through ? C.white : C.isoFloor;
+      if (g.vis.length >= 3) poly(page, g.vis, { fill });
+      if (g.r.kind === "poly") continue;
+      for (const h of grp) {
+        if (h === g || h.r.kind === "poly") continue;
+        const v = clipConvex(g.floor, h.open);
+        if (v.length >= 3) poly(page, v, { fill });
+      }
+    }
     for (const g of grp) if (g.shelf > 0) poly(page, g.open, { stroke: C.ink, width: 0.4 });
     i = j;
   }
+  isoPocketWalls(page, p, drawn, at, zt, lineW);
   drawPieces(page, p.pieces, (q) => at(q.x, q.y, zt), 0.5, true);
   poly(page, p.outline.map((q) => at(q.x, q.y, zt)), { stroke: C.ink, width: lineW });
+}
+
+/**
+ * Step 44b: the pocket walls you can see (the back and left walls), shaded like the outside
+ * faces, with ink on the wall-to-floor edge and on the inside corners. Built from the same
+ * merged outline as the top view (so a slot cut into a pocket's side shows no wall across the
+ * overlap); each wall runs from the shallower side's floor (or the top) down to the deeper
+ * side's floor, and is clipped to that pocket's opening so it never paints over the top face.
+ * Anything unexpected just leaves that wall out: the dark opening fill underneath still reads.
+ */
+function isoPocketWalls(
+  page: PDFPage,
+  p: PartData,
+  drawn: { r: CavityRegion; open: Pt[] }[],
+  at: (x: number, y: number, z: number) => Pt,
+  zt: number,
+  lineW: number,
+) {
+  const polys = drawn.map((d) => ({ d, pts: regionPts(d.r, 64) }));
+  const inside = (q: Pt, pts: Pt[]) => {
+    let c = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[i];
+      const b = pts[j];
+      if (a.y > q.y !== b.y > q.y && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) c = !c;
+    }
+    return c;
+  };
+  // deepest pocket under a plan point (0 = foam top)
+  const under = (q: Pt) => {
+    let best: { depth: number; d: (typeof drawn)[number] | null } = { depth: 0, d: null };
+    for (const pp of polys) if (pp.d.r.depth > best.depth && inside(q, pp.pts)) best = { depth: pp.d.r.depth, d: pp.d };
+    return best;
+  };
+  const tint = (c: RGB, k: number): RGB => rgb(c.red * k, c.green * k, c.blue * k);
+  const SIDE = 0.01;
+
+  // the merged edges as short straight runs (arcs every ~10°)
+  const segs: { a: Pt; b: Pt }[] = [];
+  for (const pc of p.pieces) {
+    if (pc.t === "line") segs.push({ a: { x: pc.x1, y: pc.y1 }, b: { x: pc.x2, y: pc.y2 } });
+    else {
+      const span = pc.a1 - pc.a0;
+      const n = Math.max(2, Math.ceil(Math.abs(span) / (Math.PI / 18)));
+      for (let i = 0; i < n; i++) {
+        const t0 = pc.a0 + (span * i) / n;
+        const t1 = pc.a0 + (span * (i + 1)) / n;
+        segs.push({
+          a: { x: pc.cx + pc.r * Math.cos(t0), y: pc.cy + pc.r * Math.sin(t0) },
+          b: { x: pc.cx + pc.r * Math.cos(t1), y: pc.cy + pc.r * Math.sin(t1) },
+        });
+      }
+    }
+  }
+
+  type Wall = { quad: Pt[]; bottom: [Pt, Pt]; open: Pt[]; shade: RGB; nx: number; ny: number; a: Pt; b: Pt; zTop: number; zBot: number };
+  const walls: Wall[] = [];
+  for (const sg of segs) {
+    const dx = sg.b.x - sg.a.x;
+    const dy = sg.b.y - sg.a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) continue;
+    const mid = { x: (sg.a.x + sg.b.x) / 2, y: (sg.a.y + sg.b.y) / 2 };
+    const left = { x: -dy / len, y: dx / len };
+    const sl = under({ x: mid.x + left.x * SIDE, y: mid.y + left.y * SIDE });
+    const sr = under({ x: mid.x - left.x * SIDE, y: mid.y - left.y * SIDE });
+    if (Math.abs(sl.depth - sr.depth) < 1e-6) continue;
+    const deep = sl.depth > sr.depth ? sl : sr;
+    const shallow = sl.depth > sr.depth ? sr : sl;
+    if (!deep.d) continue;
+    // the wall faces into the deeper side; visible when that faces the viewer (front-right)
+    const nx = sl.depth > sr.depth ? left.x : -left.x;
+    const ny = sl.depth > sr.depth ? left.y : -left.y;
+    if (nx - ny <= 1e-6) continue;
+    const zTop = zt - shallow.depth;
+    const zBot = zt - deep.depth;
+    const w = Math.abs(ny) / (Math.abs(nx) + Math.abs(ny)); // 1 = faces front, 0 = faces right
+    const base = rgb(
+      C.isoRight.red + (C.isoFront.red - C.isoRight.red) * w,
+      C.isoRight.green + (C.isoFront.green - C.isoRight.green) * w,
+      C.isoRight.blue + (C.isoFront.blue - C.isoRight.blue) * w,
+    );
+    walls.push({
+      quad: [at(sg.a.x, sg.a.y, zTop), at(sg.b.x, sg.b.y, zTop), at(sg.b.x, sg.b.y, zBot), at(sg.a.x, sg.a.y, zBot)],
+      bottom: [at(sg.a.x, sg.a.y, zBot), at(sg.b.x, sg.b.y, zBot)],
+      open: deep.d.open,
+      shade: tint(base, 0.82), // inside the pocket: a little darker than the outside faces
+      nx,
+      ny,
+      a: sg.a,
+      b: sg.b,
+      zTop,
+      zBot,
+    });
+  }
+  // through-cut walls end at the bottom of the part; the floor there is open (white), keep the edge
+  for (const w of walls) {
+    const vis = clipConvex(w.quad, w.open);
+    if (vis.length >= 3) poly(page, vis, { fill: w.shade, stroke: w.shade, width: 0.3 });
+  }
+  const segClip = (a: Pt, b: Pt, clip: Pt[]): [Pt, Pt] | null => {
+    // a segment clipped to a convex polygon (Cyrus–Beck); null when nothing is left
+    let area = 0;
+    for (let i = 0; i < clip.length; i++) {
+      const u = clip[i];
+      const v = clip[(i + 1) % clip.length];
+      area += u.x * v.y - v.x * u.y;
+    }
+    const sgn = area > 0 ? 1 : -1;
+    let t0 = 0;
+    let t1 = 1;
+    const d = { x: b.x - a.x, y: b.y - a.y };
+    for (let i = 0; i < clip.length; i++) {
+      const u = clip[i];
+      const v = clip[(i + 1) % clip.length];
+      const nIn = { x: -(v.y - u.y) * sgn, y: (v.x - u.x) * sgn };
+      const num = nIn.x * (a.x - u.x) + nIn.y * (a.y - u.y);
+      const den = nIn.x * d.x + nIn.y * d.y;
+      if (Math.abs(den) < 1e-12) {
+        if (num < -1e-9) return null;
+        continue;
+      }
+      const t = -num / den;
+      if (den > 0) t0 = Math.max(t0, t);
+      else t1 = Math.min(t1, t);
+      if (t0 > t1) return null;
+    }
+    return [{ x: a.x + d.x * t0, y: a.y + d.y * t0 }, { x: a.x + d.x * t1, y: a.y + d.y * t1 }];
+  };
+  const ink = (a: Pt, b: Pt, clip: Pt[]) => {
+    const c = clip.length >= 3 ? segClip(a, b, clip) : [a, b];
+    if (c && Math.hypot(c[1].x - c[0].x, c[1].y - c[0].y) > 0.2) page.drawLine({ start: c[0], end: c[1], thickness: lineW * 0.7, color: C.ink });
+  };
+  // the wall-to-floor edge, and a vertical edge where two walls meet at a corner
+  // (a sharp turn, not the small steps around an arc)
+  for (const w of walls) ink(w.bottom[0], w.bottom[1], w.open);
+  const key = (q: Pt) => `${Math.round(q.x * 1e4)},${Math.round(q.y * 1e4)}`;
+  const byEnd = new Map<string, Wall[]>();
+  for (const w of walls) for (const q of [w.a, w.b]) byEnd.set(key(q), [...(byEnd.get(key(q)) ?? []), w]);
+  const done = new Set<string>();
+  for (const [k, ws] of byEnd) {
+    if (done.has(k)) continue;
+    done.add(k);
+    const q = ws[0].a && key(ws[0].a) === k ? ws[0].a : ws[0].b;
+    const sharp = ws.length === 1 || (ws.length >= 2 && ws[0].nx * ws[1].nx + ws[0].ny * ws[1].ny < Math.cos(Math.PI / 9));
+    if (!sharp) continue;
+    const top = Math.max(...ws.map((w) => w.zTop));
+    const bot = Math.min(...ws.map((w) => w.zBot));
+    ink(at(q.x, q.y, top), at(q.x, q.y, bot), ws[0].open);
+  }
+}
+
+/** Step 44b: bold line centered across the top of the main area on every sheet. */
+function autoNote(page: PDFPage, f: Fonts) {
+  let size = 11;
+  const maxW = MAIN_W - 24;
+  while (size > 7 && f.b.widthOfTextAtSize(AUTO_NOTE, size) > maxW) size -= 0.5;
+  const tw = f.b.widthOfTextAtSize(AUTO_NOTE, size);
+  const y = MAIN_Y + MAIN_H - BANNER_H / 2 - size / 2 - 2;
+  page.drawText(AUTO_NOTE, { x: MAIN_X + (MAIN_W - tw) / 2, y, size, font: f.b, color: C.black });
 }
 
 function isoPanel(page: PDFPage, f: Fonts, p: PartData) {
@@ -592,7 +842,7 @@ function assemblyView(page: PDFPage, f: Fonts, parts: PartData[]) {
   const gapIn = Math.max(1, (L + W) * 0.3); // exploded spacing: enough to see into the lower part's pockets
   const total = parts.reduce((s, p) => s + p.T, 0) + gapIn * (parts.length - 1);
   const b = isoBounds(L, W, total);
-  const area = { x: MAIN_X + 30, y: MAIN_Y + 40, w: MAIN_W - 60, h: MAIN_H - 70 };
+  const area = { x: MAIN_X + 30, y: MAIN_Y + 40, w: MAIN_W - 60, h: MAIN_H - 70 - BANNER_H };
   const k = Math.min(area.w / (b.x1 - b.x0), area.h / (b.y1 - b.y0));
   const ox = area.x + (area.w - (b.x1 - b.x0) * k) / 2 - b.x0 * k;
   const oy = area.y + (area.h - (b.y1 - b.y0) * k) / 2 - b.y0 * k;
@@ -1025,4 +1275,4 @@ export function fmtIn(v: number): string {
 }
 
 /** For scripts/test-drawing-pdf.ts only. */
-export const threeviewInternals = { partData, depthProfile };
+export const threeviewInternals = { partData, depthProfile, AUTO_NOTE };

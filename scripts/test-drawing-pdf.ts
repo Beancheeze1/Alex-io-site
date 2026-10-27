@@ -4,12 +4,14 @@
 // plus an assembly sheet for sets, touching / overlapping pockets drawn as one
 // merged outline (like the DXF), floor steps and through-cuts, the hidden
 // depth profile for the side views, and inch fractions.
+// Step 44b: pocket size notes in the top view, visible pocket walls in the iso
+// views, and the "auto-generated" line on every sheet.
 // Run: npm run test:drawing-pdf
 
 import { PDFDocument } from "pdf-lib";
 import { generate3ViewPDF, fmtIn, threeviewInternals, type Cavity3D, type Drawing3DInput } from "../lib/pdf/threeview";
 
-const { partData, depthProfile } = threeviewInternals;
+const { partData, depthProfile, AUTO_NOTE } = threeviewInternals;
 
 let failed = 0;
 function check(name: string, ok: boolean, detail?: unknown) {
@@ -83,6 +85,12 @@ const pocketSet: Drawing3DInput = {
   check("through: depth is capped at the part's thickness", near(step.rows[2].depth, 2));
   const sp = depthProfile(step, "x");
   check("step profile: 3/4, 1 1/2, 3/4, then the 2\" hole", sp.map((r) => r.d).join(",") === "0.75,1.5,0.75,2", sp);
+
+  // Step 44b: the auto-generated line on every sheet
+  check("auto-generated note says to see the STEP and DXF files", /AUTO-GENERATED/.test(AUTO_NOTE) && /STEP AND DXF/.test(AUTO_NOTE), AUTO_NOTE);
+  const plainPdf = await PDFDocument.load(await generate3ViewPDF(pocketSet), { updateMetadata: false });
+  const raw = Buffer.from(await plainPdf.save({ useObjectStreams: false })).toString("latin1");
+  check("the PDF draws in Helvetica Bold (the auto-generated line and headings)", /Helvetica-Bold/.test(raw));
 
   // sheets: one per part + the assembly; a single part is one sheet
   const setPdf = await PDFDocument.load(await generate3ViewPDF(pocketSet));
