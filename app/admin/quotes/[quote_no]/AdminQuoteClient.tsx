@@ -40,6 +40,7 @@ import { sanitizeFilenamePart, buildFullPackageFilename, triggerBlobDownload } f
 import { parseBoxStyle } from "@/lib/box-styles";
 import { partCustomName, partName } from "@/app/lib/foam-terms";
 import CommissionCard from "@/components/admin/CommissionCard";
+import RevisionNoteModal, { saveRevisionNote, type RevisionNoteInput } from "@/components/admin/RevisionNoteModal"; // Step 44d
 
 
 type QuoteRow = {
@@ -1122,6 +1123,7 @@ export default function AdminQuoteClient({ quoteNo }: Props) {
   const [revisionBusy, setRevisionBusy] = React.useState<boolean>(false); // used by Revise action
   const [revisionError, setRevisionError] = React.useState<string | null>(null);
   const [revisionOkAt, setRevisionOkAt] = React.useState<string | null>(null);
+  const [revNoteOpen, setRevNoteOpen] = React.useState<boolean>(false); // Step 44d: the Revise box
 
   React.useEffect(() => {
     if (quoteNoValue) return;
@@ -1895,7 +1897,9 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
   // Revise = unlock. Step 39K: the server opens the next staging revision
   // (e.g. released A -> BS) when a released quote is unlocked.
-  const handleReviseNow = React.useCallback(async () => {
+  // Step 44d: the Revise box's note (description + initials) is saved for the
+  // revision this opens; null = revise without one.
+  const handleReviseNow = React.useCallback(async (note: RevisionNoteInput | null = null) => {
     if (!quoteNoValue) return;
     if (revisionBusy) return;
 
@@ -1920,6 +1924,11 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
       if (!res.ok || !json?.ok) {
         setRevisionError(json?.error || json?.message || "Revise failed.");
         return;
+      }
+
+      if (note) {
+        const saved = await saveRevisionNote(quoteNoValue, note);
+        if (!saved.ok) setRevisionError(`Revised, but the note wasn't saved: ${saved.message}`);
       }
 
       setRevisionOkAt(new Date().toLocaleString());
@@ -2230,7 +2239,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
                     <button
                       type="button"
-                      onClick={handleReviseNow}
+                      onClick={() => setRevNoteOpen(true)}
                       disabled={revisionBusy}
                       style={{
                         padding: "2px 8px",
@@ -2263,6 +2272,16 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
                   {revisionOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)", fontWeight: 700 }}>✅ Saved</span>}
                   {revisionError && <span style={{ fontSize: 11, color: "var(--attention)", fontWeight: 700 }}>❌ {revisionError}</span>}
+                  {revNoteOpen && quoteNoValue ? (
+                    <RevisionNoteModal
+                      quoteNo={quoteNoValue}
+                      onCancel={() => setRevNoteOpen(false)}
+                      onRevise={(note) => {
+                        setRevNoteOpen(false);
+                        void handleReviseNow(note);
+                      }}
+                    />
+                  ) : null}
                                     {sendOkAt && <span style={{ fontSize: 11, color: "var(--status-success-text)", fontWeight: 700 }}>✅ Sent</span>}
                   {sendError && <span style={{ fontSize: 11, color: "var(--attention)", fontWeight: 700 }}>❌ {sendError}</span>}
 

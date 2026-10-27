@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { one } from "@/lib/db";
 import { generate3ViewPDF, type Drawing3DInput, type Layer3D, type Cavity3D } from "@/lib/pdf/threeview";
-import { drawingShopName } from "@/lib/pdf/drawing-shop";
+import { drawingShopName, drawingRevisions } from "@/lib/pdf/drawing-shop";
 import { partCustomName } from "@/app/lib/foam-terms";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { requirePlan, planGateResponse, PlanGateError } from "@/lib/plan";
@@ -146,6 +146,8 @@ export async function GET(req: NextRequest) {
     try {
       // Step 44: the shop's name in the title block
       drawingInput.shopName = await drawingShopName(user.tenant_id);
+      // Step 44c: the revision block (the quote's saved layouts); empty = current revision only
+      drawingInput.revisions = await drawingRevisions(quote.id, quote.quote_no, user.tenant_id);
       pdfBuffer = await generate3ViewPDF(drawingInput);
     } catch (e: any) {
       console.error("3-view PDF generation failed:", e);

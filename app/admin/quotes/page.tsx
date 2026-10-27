@@ -37,6 +37,7 @@ import { offersFoam } from "@/lib/quote-types";
 import { fetchNewQuoteNo } from "@/lib/quote-no";
 import { FLOW_INFO, FLOW_STAGES, flowCounts, reviseLabel, type FlowStage } from "@/app/lib/quote-flow-core"; // Step 39R
 import AddNoteBox from "@/components/admin/AddNoteBox"; // Step 39V
+import RevisionNoteModal, { saveRevisionNote, type RevisionNoteInput } from "@/components/admin/RevisionNoteModal"; // Step 44d
 
 type QuoteRow = {
   id: number;
@@ -78,6 +79,8 @@ export default function AdminQuotesPage() {
   // Step 11: "Skip to blank editor" opens the foam editor — hidden when the shop offers no foam.
   const { types: offeredTypes } = useQuoteTypes(null);
   const [rowBusy, setRowBusy] = React.useState<Record<string, boolean>>({});
+  // Step 44d: the Revise box (description + initials for the drawing's revision block)
+  const [revNoteFor, setRevNoteFor] = React.useState<{ quoteNo: string; locked: boolean } | null>(null);
   const [showStartModal, setShowStartModal] = React.useState(false);
 
   // "Your sales link" -- the logged-in user's own data, formerly on a
@@ -308,13 +311,20 @@ export default function AdminQuotesPage() {
     }
   }
 
-  async function handleReviseQuote(quoteNo: string, isLocked: boolean, boxesOnly = false) {
+  async function handleReviseQuote(quoteNo: string, isLocked: boolean, boxesOnly = false, note: RevisionNoteInput | null = null) {
     // If Released for Mfg, Revise should unlock + open editor. Step 39K: the
     // unlock opens the next staging revision (e.g. released A -> BS).
     let unlockedBoxesOnly = false;
+    let unlocked = !isLocked;
     if (isLocked) {
       const data = await setQuoteLock(quoteNo, false);
       unlockedBoxesOnly = !!data?.boxes_only;
+      unlocked = !!data?.ok;
+    }
+    // Step 44d: the Revise box's note goes with the revision this opens
+    if (note && unlocked) {
+      const saved = await saveRevisionNote(quoteNo, note);
+      if (!saved.ok) alert(`${saved.message}\n\nThe quote is still open for revising; the drawing will describe the change itself.`);
     }
     // Steps 16-17: boxes-only quotes have no layout editor; open the quote
     // page, released or not.
@@ -789,7 +799,12 @@ export default function AdminQuotesPage() {
                               {rowBusy[q.quote_no] ? "" : q.locked ? "Locked" : "RFM"}
                             </button>
                             <button
-                              onClick={() => handleReviseQuote(q.quote_no, !!q.locked, !!q.boxes_only)}
+                              onClick={() =>
+                                // Step 44d: foam quotes ask for the revision's description + initials first
+                                q.boxes_only
+                                  ? handleReviseQuote(q.quote_no, !!q.locked, true)
+                                  : setRevNoteFor({ quoteNo: q.quote_no, locked: !!q.locked })
+                              }
                               style={{
                                 minWidth: 110, // Step 39S: Edit / Revise / Unlock & revise line up
                                 textAlign: "center",
@@ -878,6 +893,17 @@ export default function AdminQuotesPage() {
       </div>
 
       <RepStartQuoteModal open={showStartModal} onClose={() => setShowStartModal(false)} />
+      {revNoteFor ? (
+        <RevisionNoteModal
+          quoteNo={revNoteFor.quoteNo}
+          onCancel={() => setRevNoteFor(null)}
+          onRevise={(note) => {
+            const r = revNoteFor;
+            setRevNoteFor(null);
+            void handleReviseQuote(r.quoteNo, r.locked, false, note);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

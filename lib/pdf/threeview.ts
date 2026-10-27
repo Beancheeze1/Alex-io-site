@@ -74,7 +74,11 @@ export type Drawing3DInput = {
   revision?:      string;
   date?:          string;
   notes?:         string[];
+  revisions?:     DrawingRevisionRow[]; // Step 44c: oldest first (the routes read the quote's saved layouts)
 };
+
+/** Step 44c: one row of the revision block. */
+export type DrawingRevisionRow = { rev: string; description: string; by: string; date: string };
 
 // ─── Look ─────────────────────────────────────────────────────────────────────
 
@@ -109,7 +113,11 @@ const MAIN_Y = M + TB_H;
 const MAIN_W = PW - 2 * M - RC_W;
 const MAIN_H = PH - 2 * M - TB_H;
 const RC_X = MAIN_X + MAIN_W;
-const BANNER_H = 30;        // Step 44b: the "auto-generated" line across the top of the main area
+// Step 44b/44c: a band across the top of the main area: the bold "auto-generated" note on
+// the left, the revision block on the right (above the right view)
+const REV_ROWS = 4;         // the revision block shows the latest 4 revisions
+const REV_W = 250;
+const BANNER_H = 14 + 10 + REV_ROWS * 10 + 6;
 const AUTO_NOTE = "THIS DRAWING WAS AUTO-GENERATED, SEE STEP AND DXF FILES FOR DETAILS";
 
 // Standard drawing scales (1 : n), smallest n that fits wins
@@ -130,13 +138,15 @@ export async function generate3ViewPDF(input: Drawing3DInput): Promise<Buffer> {
   const assembly = layers.length > 1;
   const sheets = layers.length + (assembly ? 1 : 0);
   const date = input.date || new Date().toISOString().split("T")[0];
-  const rev = input.revision || "AS";
+  // the title block's REV: the latest revision in the history, else the route's
+  const rev = input.revisions?.length ? input.revisions[input.revisions.length - 1].rev : input.revision || "AS";
 
   for (let li = 0; li < layers.length; li++) {
     const page = pdfDoc.addPage([PW, PH]);
     const part = partData(input.block, layers[li]);
     frame(page);
     autoNote(page, f);
+    revisionBlock(page, f, input, rev, date);
     const scale = orthoViews(page, f, part);
     partPanel(page, f, input, layers[li], li, layers.length);
     isoPanel(page, f, part);
@@ -158,6 +168,7 @@ export async function generate3ViewPDF(input: Drawing3DInput): Promise<Buffer> {
     const page = pdfDoc.addPage([PW, PH]);
     frame(page);
     autoNote(page, f);
+    revisionBlock(page, f, input, rev, date);
     const parts = layers.map((l) => partData(input.block, l));
     assemblyView(page, f, parts);
     bomPanel(page, f, input, parts);
@@ -815,14 +826,73 @@ function isoPocketWalls(
   }
 }
 
-/** Step 44b: bold line centered across the top of the main area on every sheet. */
+/** Step 44b/44c: the bold note, centered in the band left of the revision block (wrapped to fit). */
 function autoNote(page: PDFPage, f: Fonts) {
-  let size = 11;
-  const maxW = MAIN_W - 24;
-  while (size > 7 && f.b.widthOfTextAtSize(AUTO_NOTE, size) > maxW) size -= 0.5;
-  const tw = f.b.widthOfTextAtSize(AUTO_NOTE, size);
-  const y = MAIN_Y + MAIN_H - BANNER_H / 2 - size / 2 - 2;
-  page.drawText(AUTO_NOTE, { x: MAIN_X + (MAIN_W - tw) / 2, y, size, font: f.b, color: C.black });
+  const maxW = MAIN_W - REV_W - 24;
+  const words = AUTO_NOTE.split(" ");
+  const size = 10.5;
+  const lines: string[] = [];
+  for (const w of words) {
+    const last = lines[lines.length - 1];
+    if (last && f.b.widthOfTextAtSize(`${last} ${w}`, size) <= maxW) lines[lines.length - 1] = `${last} ${w}`;
+    else lines.push(w);
+  }
+  const lh = size + 3;
+  const cx = MAIN_X + 12 + maxW / 2;
+  const top = MAIN_Y + MAIN_H - (BANNER_H - lines.length * lh) / 2 - size;
+  lines.forEach((ln, i) => {
+    const tw = f.b.widthOfTextAtSize(ln, size);
+    page.drawText(ln, { x: cx - tw / 2, y: top - i * lh, size, font: f.b, color: C.black });
+  });
+}
+
+/**
+ * Step 44c: REVISIONS block at the top right of the main area: REV, DESCRIPTION, BY, DATE.
+ * The latest REV_ROWS revisions, oldest at the top (the title block's REV is the last row).
+ * With no history it shows the drawing's current revision.
+ */
+function revisionBlock(page: PDFPage, f: Fonts, input: Drawing3DInput, rev: string, date: string) {
+  const all: DrawingRevisionRow[] = input.revisions?.length ? input.revisions : [{ rev, description: "Initial layout", by: "", date }];
+  const rows = all.slice(-REV_ROWS);
+  const x = MAIN_X + MAIN_W - REV_W;
+  const top = MAIN_Y + MAIN_H;
+  const h = BANNER_H - 6;
+  const y = top - h;
+  page.drawRectangle({ x, y, width: REV_W, height: h, color: C.white, borderColor: C.black, borderWidth: 0.75 });
+  page.drawRectangle({ x, y: top - 14, width: REV_W, height: 14, color: C.header, borderColor: C.black, borderWidth: 0.5 });
+  const title = "REVISIONS";
+  page.drawText(title, { x: x + (REV_W - f.b.widthOfTextAtSize(title, 7)) / 2, y: top - 10, size: 7, font: f.b, color: C.ink });
+  const cols = [
+    { k: "REV", w: 28 },
+    { k: "DESCRIPTION", w: REV_W - 28 - 30 - 52 },
+    { k: "BY", w: 30 },
+    { k: "DATE", w: 52 },
+  ];
+  // column rules
+  let cx = x;
+  for (let i = 0; i < cols.length - 1; i++) {
+    cx += cols[i].w;
+    page.drawLine({ start: { x: cx, y }, end: { x: cx, y: top - 14 }, thickness: 0.4, color: C.rule });
+  }
+  let ry = top - 22;
+  cx = x;
+  for (const c of cols) {
+    page.drawText(c.k, { x: cx + 4, y: ry, size: 5.5, font: f.b, color: C.muted });
+    cx += c.w;
+  }
+  page.drawLine({ start: { x, y: ry - 3 }, end: { x: x + REV_W, y: ry - 3 }, thickness: 0.4, color: C.rule });
+  ry -= 11;
+  rows.forEach((r, i) => {
+    const last = i === rows.length - 1;
+    const vals = [r.rev || "—", r.description || "—", r.by || "—", r.date || "—"];
+    cx = x;
+    vals.forEach((v, ci) => {
+      const font = ci === 0 || last ? f.b : f.r;
+      page.drawText(fit(v, font, 6.5, cols[ci].w - 7), { x: cx + 4, y: ry, size: 6.5, font, color: C.ink });
+      cx += cols[ci].w;
+    });
+    ry -= 10;
+  });
 }
 
 function isoPanel(page: PDFPage, f: Fonts, p: PartData) {
