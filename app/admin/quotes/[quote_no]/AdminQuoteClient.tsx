@@ -1928,7 +1928,16 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
       if (note) {
         const saved = await saveRevisionNote(quoteNoValue, note);
-        if (!saved.ok) setRevisionError(`Revised, but the note wasn't saved: ${saved.message}`);
+        if (!saved.ok && typeof window !== "undefined") {
+          window.alert(`Revised, but the note wasn't saved: ${saved.message}\n\nThe drawing will describe the change itself.`);
+        }
+      }
+
+      // Step 44d: same as Revise on the quotes list: open the layout editor.
+      // Boxes-only quotes have no editor, so they stay here (refreshed).
+      if (!json?.boxes_only) {
+        window.location.assign(`/quote/layout?quote_no=${encodeURIComponent(quoteNoValue)}`);
+        return;
       }
 
       setRevisionOkAt(new Date().toLocaleString());
@@ -2239,7 +2248,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
 
                     <button
                       type="button"
-                      onClick={() => setRevNoteOpen(true)}
+                      onClick={() => (layoutPkg ? setRevNoteOpen(true) : void handleReviseNow(null))}
                       disabled={revisionBusy}
                       style={{
                         padding: "2px 8px",
@@ -2252,7 +2261,7 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                         cursor: revisionBusy ? "not-allowed" : "pointer",
                         opacity: revisionBusy ? 0.6 : 1,
                       }}
-                      title="Unlock so this quote can be edited again"
+                      title={layoutPkg ? "Start a revision and open the layout editor" : "Unlock so this quote can be edited again"}
                     >
                       {revisionBusy ? "Revising..." : "Revise"}
                     </button>
