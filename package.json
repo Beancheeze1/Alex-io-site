@@ -36,6 +36,7 @@
   "test:cavity-merge": "npx --yes tsx scripts/test-cavity-merge.ts",
   "test:notes": "npx --yes tsx scripts/test-internal-notes.ts",
   "test:foam-drawing": "npx --yes tsx scripts/test-foam-drawing.ts",
+  "test:drawing-pdf": "npx --yes tsx scripts/test-drawing-pdf.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },

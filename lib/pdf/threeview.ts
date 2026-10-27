@@ -1,11 +1,31 @@
 // lib/pdf/threeview.ts
 //
-// CAD-style orthographic drawing: ONE PAGE PER LAYER.
-// Front View (L×H) | Top View (L×W) | Right View (W×H)
-// Notes & Material Callout | Title Block
+// CAD-style foam drawing: ONE SHEET PER PART (layer), plus an assembly sheet
+// when the set has more than one part.
+//
+// Step 44 (Chuck, Oct 27): restyled like a shop drawing.
+//   - Third-angle views at a true standard scale (1:1, 1:2, 1:4 …, printed
+//     on 11 × 8.5 at 100%): TOP view, FRONT view under it, RIGHT view beside
+//     the front view. Overall sizes are dimensioned once (L above the top
+//     view, W left of it, thickness left of the front view).
+//   - Pockets are numbered in the top view (balloons) and listed in a cavity
+//     schedule (shape, size, depth, X / Y of the center from the lower-left
+//     corner), instead of crowding a dimension next to every pocket.
+//   - Touching / overlapping pockets are drawn as one pocket, the same as the
+//     DXF (Step 39U: app/lib/layout/cavity-merge.ts): the merged outline, a
+//     floor step dashed blue, a through-cut magenta. The side views show the
+//     pockets' hidden depth profile, not one dashed box per pocket.
+//   - A shaded isometric view of the part.
+//   - Parts dimensioned in inches with sixteenths shown as fractions.
+//   - Multi-part sets: a last ASSEMBLY sheet with an exploded isometric view
+//     and a parts list.
+// Public API (generate3ViewPDF and the input types) is unchanged; shopName is
+// a new optional field for the title block.
 
-import { PDFDocument, PDFPage, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, PDFPage, PDFFont, rgb, degrees, StandardFonts, type RGB } from "pdf-lib";
 import { partName } from "@/app/lib/foam-terms";
+import { joinTouchingCavities, mergeCavityOutlines, type CavityRegion, type OutlinePiece } from "@/app/lib/layout/cavity-merge";
+import { cavityRegion, type FlatCavity } from "@/app/lib/layout/layer-dxf";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -48,6 +68,7 @@ export type Layer3D = {
 export type Drawing3DInput = {
   quoteNo:        string;
   customerName?:  string;
+  shopName?:      string; // Step 44: the shop's name in the title block
   block:          Block3D;
   layers:         Layer3D[];
   revision?:      string;
@@ -55,672 +76,953 @@ export type Drawing3DInput = {
   notes?:         string[];
 };
 
-// ─── Colours ──────────────────────────────────────────────────────────────────
+// ─── Look ─────────────────────────────────────────────────────────────────────
 
 const C = {
-  black:      rgb(0,    0,    0),
-  white:      rgb(1,    1,    1),
-  dimLine:    rgb(0.20, 0.20, 0.20),
-  foam:       rgb(0.93, 0.93, 0.93),
-  cavityLine: rgb(0.70, 0,    0),
-  titleBg:    rgb(0.10, 0.10, 0.10),
-  titleFg:    rgb(1,    1,    1),
-  headerBg:   rgb(0.84, 0.84, 0.84),
-  gridLight:  rgb(0.75, 0.75, 0.75),
+  black:    rgb(0, 0, 0),
+  white:    rgb(1, 1, 1),
+  ink:      rgb(0.12, 0.12, 0.12),
+  dim:      rgb(0.25, 0.25, 0.25),
+  hidden:   rgb(0.35, 0.35, 0.35),
+  muted:    rgb(0.45, 0.45, 0.45),
+  foam:     rgb(0.90, 0.90, 0.90),
+  rule:     rgb(0.70, 0.70, 0.70),
+  header:   rgb(0.88, 0.88, 0.88),
+  band:     rgb(0.13, 0.13, 0.13),
+  depth:    rgb(0.15, 0.39, 0.92), // floor step (same as the DXF's DEPTH layer)
+  through:  rgb(0.75, 0.15, 0.83), // through-cut (THROUGH layer)
+  isoTop:   rgb(0.80, 0.80, 0.80),
+  isoFront: rgb(0.55, 0.55, 0.55),
+  isoRight: rgb(0.42, 0.42, 0.42),
+  isoWall:  rgb(0.30, 0.30, 0.30),
+  isoFloor: rgb(0.62, 0.62, 0.62),
 };
 
-// ─── Layout constants ─────────────────────────────────────────────────────────
+// Page (11 × 8.5 landscape, points)
+const PW = 792;
+const PH = 612;
+const M = 18;               // border margin
+const TB_H = 80;            // title block height
+const RC_W = 248;           // right column width
+const MAIN_X = M;
+const MAIN_Y = M + TB_H;
+const MAIN_W = PW - 2 * M - RC_W;
+const MAIN_H = PH - 2 * M - TB_H;
+const RC_X = MAIN_X + MAIN_W;
 
-const PW      = 792;   // page width  (11" landscape)
-const PH      = 612;   // page height (8.5" landscape)
-const MARGIN  = 24;
-const TITLE_H = 68;    // title block — smaller to free up notes space
-const NOTES_H = 155;   // notes panel — taller to fit cavity schedule
-const HDR_H   = 18;    // column header bar
+// Standard drawing scales (1 : n), smallest n that fits wins
+const SCALES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 30, 40, 50, 60, 80, 100];
 
-// Derived
-const FRAME_X = MARGIN;
-const FRAME_Y = MARGIN + TITLE_H;
-const FRAME_W = PW - 2 * MARGIN;
-const FRAME_H = PH - 2 * MARGIN - TITLE_H;
-const COL_W   = FRAME_W / 3;
-const VIEWS_H = FRAME_H - NOTES_H;          // height of the 3-view zone
-const VIEWS_Y = FRAME_Y + NOTES_H;          // bottom-left Y of views zone
-const DRAW_H  = VIEWS_H - HDR_H;            // drawable height inside a view cell
-
-// Inside each view cell, reserve this space for overall dimension lines
-// OUTSIDE the shape: horiz dim below, vert dim to right.
-// Cavity dims go INSIDE the view, adjacent to the cavity.
-const DIM_OUT = 22;   // overall dim offset from shape edge
-const DIM_IN  = 14;   // cavity dim offset from cavity edge (inside the cell)
+type Pt = { x: number; y: number };
+type Fonts = { r: PDFFont; b: PDFFont };
 
 // ─── Main entry ───────────────────────────────────────────────────────────────
 
 export async function generate3ViewPDF(input: Drawing3DInput): Promise<Buffer> {
-  const pdfDoc   = await PDFDocument.create();
-  const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const { block, layers } = input;
-  const numPages = layers.length;
+  const pdfDoc = await PDFDocument.create();
+  const f: Fonts = {
+    r: await pdfDoc.embedFont(StandardFonts.Helvetica),
+    b: await pdfDoc.embedFont(StandardFonts.HelveticaBold),
+  };
+  const { layers } = input;
+  const assembly = layers.length > 1;
+  const sheets = layers.length + (assembly ? 1 : 0);
+  const date = input.date || new Date().toISOString().split("T")[0];
+  const rev = input.revision || "AS";
 
   for (let li = 0; li < layers.length; li++) {
-    const layer = layers[li];
-    const page  = pdfDoc.addPage([PW, PH]);
+    const page = pdfDoc.addPage([PW, PH]);
+    const part = partData(input.block, layers[li]);
+    frame(page);
+    const scale = orthoViews(page, f, part);
+    partPanel(page, f, input, layers[li], li, layers.length);
+    isoPanel(page, f, part);
+    schedulePanel(page, f, part);
+    titleBlock(page, f, {
+      input,
+      title: assembly ? `${partName(layers[li].label, li).toUpperCase()}` : "FOAM INSERT",
+      description: `${fmtIn(input.block.lengthIn)} \xD7 ${fmtIn(input.block.widthIn)} \xD7 ${fmtIn(layers[li].thicknessIn)} ${partName(layers[li].label, li)}`,
+      material: layers[li].materialName || "—",
+      notes: generalNotes(input, [part]),
+      rev,
+      date,
+      scale: `1:${scale}`,
+      sheet: `${li + 1} OF ${sheets}`,
+    });
+  }
 
-    // ── Outer border ──
-    page.drawRectangle({ x: MARGIN, y: MARGIN, width: PW-2*MARGIN, height: PH-2*MARGIN,
-      borderColor: C.black, borderWidth: 2 });
-
-    // ── Column header bar (top of views zone) ──
-    const hdrY = VIEWS_Y + DRAW_H;
-    for (let ci = 0; ci < 3; ci++) {
-      const lbl = ["FRONT VIEW  (L \xD7 H)", "TOP VIEW  (L \xD7 W)", "RIGHT VIEW  (W \xD7 H)"][ci];
-      page.drawRectangle({ x: FRAME_X+ci*COL_W, y: hdrY, width: COL_W, height: HDR_H,
-        color: C.headerBg, borderColor: C.black, borderWidth: 0.5 });
-      page.drawText(lbl, {
-        x: FRAME_X+ci*COL_W + (COL_W - lbl.length*5.1)/2, y: hdrY+5,
-        size: 7.5, font: fontBold, color: C.black,
-      });
-    }
-
-    // ── Vertical column dividers ──
-    page.drawLine({ start:{x:FRAME_X+COL_W,   y:FRAME_Y+NOTES_H}, end:{x:FRAME_X+COL_W,   y:hdrY+HDR_H}, thickness:0.75, color:C.black });
-    page.drawLine({ start:{x:FRAME_X+2*COL_W, y:FRAME_Y+NOTES_H}, end:{x:FRAME_X+2*COL_W, y:hdrY+HDR_H}, thickness:0.75, color:C.black });
-
-    // ── Divider between views and notes ──
-    page.drawLine({ start:{x:FRAME_X, y:FRAME_Y+NOTES_H}, end:{x:FRAME_X+FRAME_W, y:FRAME_Y+NOTES_H},
-      thickness:0.75, color:C.black });
-
-    // ── Three views ──
-    drawFrontView (page, FRAME_X,           VIEWS_Y, COL_W, DRAW_H, block, layer, font);
-    drawTopView   (page, FRAME_X + COL_W,   VIEWS_Y, COL_W, DRAW_H, block, layer, font);
-    drawRightView (page, FRAME_X + 2*COL_W, VIEWS_Y, COL_W, DRAW_H, block, layer, font);
-
-    // ── Notes panel ──
-    notesPanel(page, FRAME_X, FRAME_Y, FRAME_W, NOTES_H, input, layer, li, numPages, font, fontBold);
-
-    // ── Title block ──
-    titleBlock(page, FRAME_X, MARGIN, FRAME_W, TITLE_H, font, fontBold,
-      input.quoteNo, input.customerName,
-      input.revision || "AS",
-      input.date || new Date().toISOString().split("T")[0],
-      "FOAM INSERT \u2013 TECHNICAL DRAWING",
-      `${li+1} OF ${numPages}`);
+  if (assembly) {
+    const page = pdfDoc.addPage([PW, PH]);
+    frame(page);
+    const parts = layers.map((l) => partData(input.block, l));
+    assemblyView(page, f, parts);
+    bomPanel(page, f, input, parts);
+    titleBlock(page, f, {
+      input,
+      title: "FOAM INSERT ASSEMBLY",
+      description: `${layers.length} parts per set, ${fmtIn(input.block.lengthIn)} \xD7 ${fmtIn(input.block.widthIn)} \xD7 ${fmtIn(layers.reduce((s, l) => s + l.thicknessIn, 0))} overall`,
+      material: Array.from(new Set(layers.map((l) => l.materialName).filter(Boolean))).join(", ") || "—",
+      notes: generalNotes(input, parts),
+      rev,
+      date,
+      scale: "NTS",
+      sheet: `${sheets} OF ${sheets}`,
+    });
   }
 
   return Buffer.from(await pdfDoc.save());
 }
 
-// ─── FRONT VIEW  (L × H of this layer) ───────────────────────────────────────
-// Overall dims outside the shape.
-// Cavity dims: width dim just ABOVE the cavity top edge; depth dim just RIGHT of cavity.
+// ─── Part geometry (inches, plan y up with 0 at the front edge) ───────────────
 
-function drawFrontView(
-  page: PDFPage, cx:number, cy:number, cw:number, ch:number,
-  block: Block3D, layer: Layer3D, font: any,
-) {
-  // Space budget:
-  //   left:   LPAD for layer labels that spill left (we don't draw them now, but keep margin)
-  //   bottom: DIM_OUT for overall length dim
-  //   right:  DIM_OUT for overall thickness dim
-  const LPAD = 8;
-  const avW  = cw - LPAD - DIM_OUT - 6;
-  const avH  = ch - DIM_OUT - 6;
+type CavRow = {
+  n: number;
+  shape: string;
+  size: string;
+  depth: number;
+  through: boolean;
+  cx: number;  // center from the lower-left corner (inches)
+  cy: number;
+  region: CavityRegion;
+};
 
-  const scale = Math.min(avW / block.lengthIn, avH / layer.thicknessIn) * 0.82;
-  const sW    = block.lengthIn * scale;
-  const sH    = layer.thicknessIn * scale;
+type PartData = {
+  L: number;
+  W: number;
+  T: number;
+  outline: Pt[];          // plan outline, counter-clockwise
+  regions: CavityRegion[]; // joined, for drawing
+  pieces: OutlinePiece[];  // merged pocket edges (top face)
+  rows: CavRow[];          // one per cavity, numbered as in the layout
+};
 
-  // Centre within available area; push right by LPAD so overall vert dim doesn't clip left edge
-  const sx = cx + LPAD + (avW - sW) / 2;
-  const sy = cy + DIM_OUT + (avH - sH) / 2;
+function partData(block: Block3D, layer: Layer3D): PartData {
+  const L = block.lengthIn;
+  const W = block.widthIn;
+  const T = layer.thicknessIn;
+  const depthOf = (c: { depthIn?: number }) => (Number(c.depthIn) > 0 ? Math.min(Number(c.depthIn), T) : T);
 
-  // Block fill + outline
-  page.drawRectangle({ x:sx, y:sy, width:sW, height:sH, color:C.foam, borderColor:C.black, borderWidth:1.5 });
+  const toFlat = (c: Cavity3D): FlatCavity =>
+    ({
+      shape: c.shape,
+      x: c.x,
+      y: c.y,
+      lengthIn: c.lengthIn,
+      widthIn: c.widthIn,
+      depthIn: c.depthIn,
+      diameterIn: c.diameterIn,
+      cornerRadiusIn: c.shape === "roundedRect" ? c.cornerRadiusIn : undefined,
+      points: c.points,
+    }) as unknown as FlatCavity;
 
-  // Cavities + their dims
-  for (const cav of layer.cavities) {
-    const { cavX, cavY, cavW, cavH } = drawCavityFrontView(
-      page, cav, sx, sy, sW, sH, block.lengthIn, layer.thicknessIn);
+  const joined = joinTouchingCavities(layer.cavities.map((c) => ({ ...c })), L, W, T) as Cavity3D[];
+  const regions = joined
+    .map((c) => cavityRegion(toFlat(c), L, W, depthOf(c)))
+    .filter((r): r is CavityRegion => !!r);
+  const pieces = regions.length ? mergeCavityOutlines(regions, { throughAt: T }) : [];
 
-    // Cavity LENGTH dim: just above the cavity top edge (inside the view)
-    if (cavW > 16) {
-      const dimY = cavY + cavH + DIM_IN;   // above cavity top = cavY+cavH (PDF y-up)
-      horizDim(page, cavX, cavX+cavW, cavY+cavH, dimY, cav.lengthIn, font, 6);
-    }
-    // Cavity DEPTH dim: just right of the cavity (inside the view, won't exceed right edge)
-    const rightOfCav = cavX + cavW + DIM_IN;
-    if (cavH > 10 && rightOfCav + 24 <= cx + cw - 2) {
-      vertDim(page, cavY, cavY+cavH, cavX+cavW, rightOfCav, cav.depthIn, font, 6);
-    }
-  }
+  const rows: CavRow[] = [];
+  layer.cavities.forEach((c, i) => {
+    const region = cavityRegion(toFlat(c), L, W, depthOf(c));
+    if (!region) return;
+    const b = regionBox(region);
+    const shape =
+      c.shape === "circle" ? "ROUND" : c.shape === "roundedRect" ? "RND RECT" : c.shape === "poly" ? "SHAPE" : "RECT";
+    const size =
+      c.shape === "circle"
+        ? `\xD8${fmtIn(c.diameterIn || Math.min(c.lengthIn, c.widthIn))}`
+        : `${fmtIn(c.lengthIn)} \xD7 ${fmtIn(c.widthIn)}${c.shape === "roundedRect" && c.cornerRadiusIn ? ` R${fmtIn(c.cornerRadiusIn)}` : ""}`;
+    rows.push({
+      n: i + 1,
+      shape,
+      size,
+      depth: depthOf(c),
+      through: depthOf(c) >= T - 1e-6,
+      cx: (b.x0 + b.x1) / 2,
+      cy: (b.y0 + b.y1) / 2,
+      region,
+    });
+  });
 
-  // Overall dims — outside the shape
-  horizDim(page, sx, sx+sW, sy, sy - DIM_OUT + 4, block.lengthIn, font, 7.5);
-  vertDim (page, sy, sy+sH, sx+sW, sx+sW+DIM_OUT-4, layer.thicknessIn, font, 7.5);
+  return { L, W, T, outline: planOutline(block, layer), regions, pieces, rows };
 }
 
-// ─── TOP VIEW  (L × W plan) ───────────────────────────────────────────────────
-// Overall dims: length below shape, width LEFT of shape (but within the column).
-// Cavity dims: width dim above cavity top, height dim right of cavity.
-
-function drawTopView(
-  page: PDFPage, cx:number, cy:number, cw:number, ch:number,
-  block: Block3D, layer: Layer3D, font: any,
-) {
-  // Reserve space:
-  //   left:   DIM_OUT for overall width (vertical) dim — kept INSIDE the column
-  //   right:  a little padding
-  //   bottom: DIM_OUT for overall length (horiz) dim
-  const LPAD = DIM_OUT + 4;   // left margin inside the column for the vert overall dim
-  const RPAD = 6;
-  const avW  = cw - LPAD - RPAD;
-  const avH  = ch - DIM_OUT - 6;
-
-  const scale = Math.min(avW / block.lengthIn, avH / block.widthIn) * 0.82;
-  const sW    = block.lengthIn * scale;
-  const sH    = block.widthIn * scale;
-
-  // Place shape: offset right by LPAD so the vert dim fits to its left
-  const sx = cx + LPAD + (avW - sW) / 2;
-  const sy = cy + DIM_OUT + (avH - sH) / 2;
-
-  drawBlockOutline(page, sx, sy, sW, sH, block, layer, true);
-
-  // Cavities
-  for (const cav of layer.cavities) {
-    drawCavityTopView(page, cav, sx, sy, sW, sH, block.lengthIn, block.widthIn);
-
-    if (cav.shape === "poly") continue; // no auto-dims for poly
-
-    const scaleX = sW / block.lengthIn; // px per inch (L)
-    const scaleY = sH / block.widthIn;  // px per inch (W)
-
-    // cav.x / cav.y are NORMALIZED (0..1). Convert to inches on the block face.
-    const cavLeftIn = cav.x * block.lengthIn;
-    const cavTopIn  = cav.y * block.widthIn;
-
-    if (cav.shape === "circle") {
-      const diamIn = cav.diameterIn || Math.min(cav.lengthIn, cav.widthIn);
-      const rPx    = (diamIn / 2) * Math.min(scaleX, scaleY);
-
-      const ccx = sx + (cavLeftIn + diamIn / 2) * scaleX;
-      const ccy = sy + sH - (cavTopIn + diamIn / 2) * scaleY;
-
-      if (rPx * 2 > 12) {
-        // Dim above circle
-        horizDim(page, ccx - rPx, ccx + rPx, ccy + rPx, ccy + rPx + DIM_IN, diamIn, font, 6);
+/** Plan outline (CCW): square, the layer's crop corners (front-right and back-left), or rounded. */
+function planOutline(block: Block3D, layer: Layer3D): Pt[] {
+  const L = block.lengthIn;
+  const W = block.widthIn;
+  if (layer.roundCorners && layer.roundRadiusIn && layer.roundRadiusIn > 0) {
+    const r = Math.min(layer.roundRadiusIn, L / 2, W / 2);
+    const pts: Pt[] = [];
+    const corners: [number, number, number][] = [
+      [L - r, r, -Math.PI / 2],
+      [L - r, W - r, 0],
+      [r, W - r, Math.PI / 2],
+      [r, r, Math.PI],
+    ];
+    for (const [cx, cy, a0] of corners) {
+      for (let s = 0; s <= 8; s++) {
+        const a = a0 + (s / 8) * (Math.PI / 2);
+        pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
       }
-    } else {
-      const cavX = sx + cavLeftIn * scaleX;
-      const cavY = sy + sH - (cavTopIn + cav.widthIn) * scaleY;
-      const cavW = cav.lengthIn * scaleX;
-      const cavH = cav.widthIn  * scaleY;
-
-      // Width (L) dim just above cavity top edge
-      if (cavW > 16) {
-        horizDim(page, cavX, cavX+cavW, cavY+cavH, cavY+cavH+DIM_IN, cav.lengthIn, font, 6);
-      }
-      // Height (W) dim just right of cavity (stays within column)
-      const rightOfCav = cavX + cavW + DIM_IN;
-      if (cavH > 10 && rightOfCav + 24 <= cx + cw - 2) {
-        vertDim(page, cavY, cavY+cavH, cavX+cavW, rightOfCav, cav.widthIn, font, 6);
-      }
+    }
+    return pts;
+  }
+  if (!layer.roundCorners && layer.cropCorners) {
+    const c = Math.min(block.chamferIn ?? 1, L / 2, W / 2);
+    if (c > 0) {
+      // the editor crops the plan's top-left and bottom-right corners
+      return [
+        { x: 0, y: 0 },
+        { x: L - c, y: 0 },
+        { x: L, y: c },
+        { x: L, y: W },
+        { x: c, y: W },
+        { x: 0, y: W - c },
+      ];
     }
   }
-
-  // Overall dims
-  // Length: below shape
-  horizDim(page, sx, sx+sW, sy, sy - DIM_OUT + 4, block.lengthIn, font, 7.5);
-  // Width: left of shape, dim line at cx + LPAD/2 (well inside the column)
-  const vDimX = cx + LPAD - 4;
-  vertDim(page, sy, sy+sH, sx, vDimX, block.widthIn, font, 7.5);
-}
-
-// ─── RIGHT VIEW  (W × H of this layer) ───────────────────────────────────────
-
-function drawRightView(
-  page: PDFPage, cx:number, cy:number, cw:number, ch:number,
-  block: Block3D, layer: Layer3D, font: any,
-) {
-  const RPAD = 6;
-  const avW  = cw - DIM_OUT - RPAD - 6;
-  const avH  = ch - DIM_OUT - 6;
-
-  const scale = Math.min(avW / block.widthIn, avH / layer.thicknessIn) * 0.82;
-  const sW    = block.widthIn * scale;
-  const sH    = layer.thicknessIn * scale;
-
-  const sx = cx + (avW - sW) / 2;
-  const sy = cy + DIM_OUT + (avH - sH) / 2;
-
-  page.drawRectangle({ x:sx, y:sy, width:sW, height:sH, color:C.foam, borderColor:C.black, borderWidth:1.5 });
-
-  for (const cav of layer.cavities) {
-    const { cavX, cavY, cavW, cavH } = drawCavityRightView(
-      page, cav, sx, sy, sW, sH, block.widthIn, layer.thicknessIn);
-
-    if (cavW > 16) {
-      horizDim(page, cavX, cavX+cavW, cavY+cavH, cavY+cavH+DIM_IN, cav.widthIn, font, 6);
-    }
-    const rightOfCav = cavX + cavW + DIM_IN;
-    if (cavH > 10 && rightOfCav + 24 <= cx + cw - 2) {
-      vertDim(page, cavY, cavY+cavH, cavX+cavW, rightOfCav, cav.depthIn, font, 6);
-    }
-  }
-
-  horizDim(page, sx, sx+sW, sy, sy - DIM_OUT + 4, block.widthIn, font, 7.5);
-  vertDim (page, sy, sy+sH, sx+sW, sx+sW+DIM_OUT-4, layer.thicknessIn, font, 7.5);
-}
-
-// ─── Shape drawing helpers ────────────────────────────────────────────────────
-
-type Pt = { x: number; y: number };
-
-function roundedRectPts(x:number, y:number, w:number, h:number, r:number, segs:number): Pt[] {
-  const pts: Pt[] = [];
-  const corners: [number,number,number][] = [
-    [x+r,   y+r,   Math.PI      ],
-    [x+w-r, y+r,   Math.PI*1.5  ],
-    [x+w-r, y+h-r, 0            ],
-    [x+r,   y+h-r, Math.PI*0.5  ],
+  return [
+    { x: 0, y: 0 },
+    { x: L, y: 0 },
+    { x: L, y: W },
+    { x: 0, y: W },
   ];
-  for (const [cx,cy,startAng] of corners) {
-    for (let s = 0; s <= segs; s++) {
-      const ang = startAng + (s/segs) * (Math.PI/2);
-      pts.push({ x: cx + r*Math.cos(ang), y: cy + r*Math.sin(ang) });
-    }
-  }
-  return pts;
 }
 
-function drawPolyLine(page:PDFPage, pts:Pt[], close:boolean, color:ReturnType<typeof rgb>, lw:number, dashed:boolean=false) {
-  if (pts.length < 2) return;
-  const all = close ? [...pts, pts[0]] : pts;
-  const da  = dashed ? [3,2] as number[] : undefined;
-  for (let i = 0; i < all.length-1; i++) {
-    page.drawLine({ start:all[i], end:all[i+1], thickness:lw, color, ...(da ? {dashArray:da} : {}) });
+function regionBox(r: CavityRegion): { x0: number; y0: number; x1: number; y1: number } {
+  if (r.kind === "circle") return { x0: r.cx - r.r, y0: r.cy - r.r, x1: r.cx + r.r, y1: r.cy + r.r };
+  if (r.kind === "poly") {
+    const xs = r.pts.map((p) => p.x);
+    const ys = r.pts.map((p) => p.y);
+    return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
   }
+  return { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
 }
 
-function fillPolyWithScanlines(page:PDFPage, pts:Pt[], color:ReturnType<typeof rgb>) {
-  if (pts.length < 3) return;
-  const ys   = pts.map(p=>p.y);
-  const yMin = Math.min(...ys), yMax = Math.max(...ys);
-  const steps = Math.ceil(yMax - yMin) + 2;
-  const n = pts.length;
-  for (let s = 0; s <= steps; s++) {
-    const scanY = yMin + (s/steps)*(yMax-yMin);
-    const xs: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const a=pts[i], b=pts[(i+1)%n];
-      if ((a.y<=scanY&&b.y>scanY)||(b.y<=scanY&&a.y>scanY)) {
-        xs.push(a.x + (scanY-a.y)/(b.y-a.y)*(b.x-a.x));
+/** A region's outline as points (inches, plan). */
+function regionPts(r: CavityRegion, segs = 40): Pt[] {
+  if (r.kind === "circle") {
+    return Array.from({ length: segs }, (_, i) => {
+      const a = (i / segs) * Math.PI * 2;
+      return { x: r.cx + r.r * Math.cos(a), y: r.cy + r.r * Math.sin(a) };
+    });
+  }
+  if (r.kind === "poly") return r.pts;
+  if (r.kind === "rrect") {
+    const rad = Math.max(0, Math.min(r.r, (r.x1 - r.x0) / 2, (r.y1 - r.y0) / 2));
+    if (rad <= 0) return rectPts(r.x0, r.y0, r.x1, r.y1);
+    const pts: Pt[] = [];
+    const corners: [number, number, number][] = [
+      [r.x1 - rad, r.y0 + rad, -Math.PI / 2],
+      [r.x1 - rad, r.y1 - rad, 0],
+      [r.x0 + rad, r.y1 - rad, Math.PI / 2],
+      [r.x0 + rad, r.y0 + rad, Math.PI],
+    ];
+    for (const [cx, cy, a0] of corners) {
+      for (let s = 0; s <= 6; s++) {
+        const a = a0 + (s / 6) * (Math.PI / 2);
+        pts.push({ x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) });
       }
     }
-    if (xs.length < 2) continue;
-    xs.sort((a,b)=>a-b);
-    const lw = xs[xs.length-1]-xs[0];
-    if (lw <= 0) continue;
-    page.drawLine({ start:{x:xs[0],y:scanY}, end:{x:xs[xs.length-1],y:scanY}, thickness:(yMax-yMin)/steps+1.5, color });
+    return pts;
+  }
+  return rectPts(r.x0, r.y0, r.x1, r.y1);
+}
+
+const rectPts = (x0: number, y0: number, x1: number, y1: number): Pt[] => [
+  { x: x0, y: y0 },
+  { x: x1, y: y0 },
+  { x: x1, y: y1 },
+  { x: x0, y: y1 },
+];
+
+// ─── Orthographic views (third angle, true scale) ─────────────────────────────
+
+function orthoViews(page: PDFPage, f: Fonts, p: PartData): number {
+  const DIM_L = 36; // room for the W and T dims on the left
+  const DIM_T = 30; // room for the L dim above the top view
+  const GAP_V = 40; // between the top and front views (holds the TOP VIEW label)
+  const GAP_H = 44; // between the front and right views
+  const LBL = 24;   // labels under the front / right views
+  const PAD = 14;
+
+  const availW = MAIN_W - 2 * PAD - DIM_L - GAP_H;
+  const availH = MAIN_H - 2 * PAD - DIM_T - GAP_V - LBL;
+  const fit = Math.min(availW / (p.L + p.W), availH / (p.W + p.T)); // points per inch
+  const n = SCALES.find((k) => 72 / k <= fit) ?? Math.ceil(72 / fit);
+  const s = 72 / n;
+
+  const groupW = DIM_L + (p.L + p.W) * s + GAP_H;
+  const groupH = DIM_T + (p.W + p.T) * s + GAP_V + LBL;
+  const gx = MAIN_X + PAD + Math.max(0, (MAIN_W - 2 * PAD - groupW) / 2);
+  const gTop = MAIN_Y + MAIN_H - PAD - Math.max(0, (MAIN_H - 2 * PAD - groupH) / 2);
+
+  // view origins (lower-left of each view's part, points)
+  const topO = { x: gx + DIM_L, y: gTop - DIM_T - p.W * s };
+  const frontO = { x: topO.x, y: topO.y - GAP_V - p.T * s };
+  const rightO = { x: frontO.x + p.L * s + GAP_H, y: frontO.y };
+
+  topView(page, f, p, topO, s);
+  frontView(page, f, p, frontO, s);
+  rightView(page, f, p, rightO, s);
+
+  // dims: L above the top view, W left of it, T left of the front view
+  hDim(page, f, topO.x, topO.x + p.L * s, topO.y + p.W * s, topO.y + p.W * s + 16, fmtIn(p.L));
+  vDim(page, f, topO.y, topO.y + p.W * s, topO.x, topO.x - 18, fmtIn(p.W));
+  vDim(page, f, frontO.y, frontO.y + p.T * s, frontO.x, frontO.x - 18, fmtIn(p.T));
+
+  // view labels
+  viewLabel(page, f, "TOP VIEW", topO.x + (p.L * s) / 2, topO.y - 16);
+  viewLabel(page, f, "FRONT VIEW", frontO.x + (p.L * s) / 2, frontO.y - 16);
+  viewLabel(page, f, "RIGHT VIEW", rightO.x + (p.W * s) / 2, rightO.y - 16);
+
+  // projection lines (light) tie the views together
+  const proj = { thickness: 0.3, color: C.rule, dashArray: [1, 2] };
+  page.drawLine({ start: { x: topO.x + p.L * s + 6, y: frontO.y + p.T * s }, end: { x: rightO.x - 6, y: frontO.y + p.T * s }, ...proj });
+  return n;
+}
+
+function topView(page: PDFPage, f: Fonts, p: PartData, o: Pt, s: number) {
+  const P = (q: Pt): Pt => ({ x: o.x + q.x * s, y: o.y + q.y * s });
+  poly(page, p.outline.map(P), { fill: C.foam });
+  // pockets: white, then the merged edges on top
+  for (const r of p.regions) poly(page, regionPts(r).map(P), { fill: C.white });
+  drawPieces(page, p.pieces, P, 0.9);
+  poly(page, p.outline.map(P), { stroke: C.black, width: 1.4 });
+
+  // datum at the lower-left corner (X / Y in the schedule are measured from here)
+  page.drawCircle({ x: o.x, y: o.y, size: 2.2, color: C.black });
+  page.drawText("0,0", { x: o.x - 15, y: o.y - 9, size: 5.5, font: f.r, color: C.muted });
+
+  // balloons: at the pocket's center; if that spot is taken (a step inside a pocket) or the
+  // pocket is small, try just inside its corners, else a leader out past its top-right corner
+  const placed: Pt[] = [];
+  const free = (q: Pt) => placed.every((u) => Math.hypot(u.x - q.x, u.y - q.y) >= 14);
+  // deepest first so a step's balloon sits on the step and its pocket's balloon moves aside
+  const rows = [...p.rows].sort((m, q) => q.region.depth - m.region.depth || m.n - q.n);
+  for (const row of rows) {
+    const b = regionBox(row.region);
+    const wPt = (b.x1 - b.x0) * s;
+    const hPt = (b.y1 - b.y0) * s;
+    const c = P({ x: row.cx, y: row.cy });
+    let at: Pt | null = null;
+    if (wPt >= 16 && hPt >= 16) {
+      const lo = P({ x: b.x0, y: b.y0 });
+      const hi = P({ x: b.x1, y: b.y1 });
+      const tries = [c, { x: lo.x + 9, y: hi.y - 9 }, { x: hi.x - 9, y: hi.y - 9 }, { x: lo.x + 9, y: lo.y + 9 }, { x: hi.x - 9, y: lo.y + 9 }];
+      at = tries.find(free) ?? null;
+    }
+    if (at) {
+      balloon(page, f, at.x, at.y, row.n);
+      placed.push(at);
+      continue;
+    }
+    let to = { x: o.x + b.x1 * s + 13, y: o.y + b.y1 * s + 13 };
+    for (let k = 0; k < 6 && !free(to); k++) to = { x: to.x + 14, y: to.y };
+    page.drawLine({ start: c, end: to, thickness: 0.5, color: C.dim });
+    page.drawCircle({ x: c.x, y: c.y, size: 1.2, color: C.dim });
+    balloon(page, f, to.x, to.y, row.n);
+    placed.push(to);
   }
 }
 
-function drawRoundedRectOutline(page:PDFPage, x:number, y:number, w:number, h:number, r:number, color:ReturnType<typeof rgb>, lw:number, dashed:boolean=false) {
-  r = Math.max(0, Math.min(r, w/2, h/2));
-  if (r <= 0) {
-    page.drawRectangle({ x, y, width:w, height:h, borderColor:color, borderWidth:lw, ...(dashed?{borderDashArray:[3,2]}:{}) });
+/** Hidden depth profile of the pockets along one axis (inches): runs of the deepest pocket. */
+function depthProfile(p: PartData, axis: "x" | "y"): { a: number; b: number; d: number }[] {
+  const spans = p.regions.map((r) => {
+    const b = regionBox(r);
+    return axis === "x" ? { a: b.x0, b: b.x1, d: r.depth } : { a: b.y0, b: b.y1, d: r.depth };
+  });
+  const cuts = Array.from(new Set(spans.flatMap((sp) => [sp.a, sp.b]))).sort((m, n) => m - n);
+  const out: { a: number; b: number; d: number }[] = [];
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const a = cuts[i];
+    const b = cuts[i + 1];
+    if (b - a < 1e-6) continue;
+    const mid = (a + b) / 2;
+    const d = Math.max(0, ...spans.filter((sp) => sp.a <= mid && sp.b >= mid).map((sp) => sp.d));
+    const last = out[out.length - 1];
+    if (last && Math.abs(last.b - a) < 1e-6 && Math.abs(last.d - d) < 1e-6) last.b = b;
+    else out.push({ a, b, d });
+  }
+  return out.filter((r) => r.d > 0);
+}
+
+function sideView(page: PDFPage, o: Pt, s: number, len: number, T: number, prof: { a: number; b: number; d: number }[]) {
+  page.drawRectangle({ x: o.x, y: o.y, width: len * s, height: T * s, color: C.foam });
+  // hidden lines: walk each connected run of pockets
+  const top = o.y + T * s;
+  let run: Pt[] = [];
+  const flush = () => {
+    if (run.length > 1) polyline(page, run, C.hidden, 0.7, [3, 2]);
+    run = [];
+  };
+  prof.forEach((seg, i) => {
+    const prev = prof[i - 1];
+    const joins = prev && Math.abs(prev.b - seg.a) < 1e-6;
+    const x0 = o.x + seg.a * s;
+    const x1 = o.x + seg.b * s;
+    const yFloor = top - seg.d * s;
+    if (!joins) {
+      flush();
+      run.push({ x: x0, y: top }, { x: x0, y: yFloor });
+    } else {
+      run.push({ x: x0, y: yFloor });
+    }
+    run.push({ x: x1, y: yFloor });
+    const next = prof[i + 1];
+    if (!next || Math.abs(next.a - seg.b) > 1e-6) {
+      run.push({ x: x1, y: top });
+      flush();
+    }
+  });
+  flush();
+  page.drawRectangle({ x: o.x, y: o.y, width: len * s, height: T * s, borderColor: C.black, borderWidth: 1.4 });
+}
+
+function frontView(page: PDFPage, _f: Fonts, p: PartData, o: Pt, s: number) {
+  sideView(page, o, s, p.L, p.T, depthProfile(p, "x"));
+}
+
+function rightView(page: PDFPage, _f: Fonts, p: PartData, o: Pt, s: number) {
+  // looking at the right end: the front of the part is on the left
+  sideView(page, o, s, p.W, p.T, depthProfile(p, "y"));
+}
+
+// ─── Isometric view ───────────────────────────────────────────────────────────
+
+const COS30 = Math.cos(Math.PI / 6);
+const SIN30 = 0.5;
+// viewed from the front-right: the front (y = 0) face on the left, the right (x = L) face on the right
+const iso = (x: number, y: number, z: number): Pt => ({ x: (x + y) * COS30, y: (y - x) * SIN30 + z });
+
+function isoBounds(L: number, W: number, H: number) {
+  const pts = [iso(0, 0, 0), iso(L, 0, 0), iso(0, W, 0), iso(L, W, 0), iso(0, 0, H), iso(L, W, H), iso(L, 0, H), iso(0, W, H)];
+  const xs = pts.map((q) => q.x);
+  const ys = pts.map((q) => q.y);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+}
+
+/** One part as a shaded solid: base z0, origin (ox, oy) points, k points per inch. */
+function isoPart(page: PDFPage, p: PartData, z0: number, ox: number, oy: number, k: number, lineW = 0.6) {
+  const at = (x: number, y: number, z: number): Pt => {
+    const q = iso(x, y, z);
+    return { x: ox + q.x * k, y: oy + q.y * k };
+  };
+  const zt = z0 + p.T;
+  // side faces facing the viewer (outward normal toward front / right)
+  // (filled with their own shade so a rounded corner's many facets don't read as a black band;
+  // then ink on the bottom edges and on the vertical edges where the shade changes)
+  const n = p.outline.length;
+  const faces: (RGB | null)[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = p.outline[i];
+    const b = p.outline[(i + 1) % n];
+    const nx = b.y - a.y;
+    const ny = -(b.x - a.x);
+    if (nx - ny <= 1e-9) {
+      faces.push(null);
+      continue;
+    }
+    const shade = Math.abs(ny) >= Math.abs(nx) ? C.isoFront : C.isoRight;
+    faces.push(shade);
+    poly(page, [at(a.x, a.y, z0), at(b.x, b.y, z0), at(b.x, b.y, zt), at(a.x, a.y, zt)], { fill: shade, stroke: shade, width: 0.4 });
+  }
+  for (let i = 0; i < n; i++) {
+    if (!faces[i]) continue;
+    const a = p.outline[i];
+    const b = p.outline[(i + 1) % n];
+    page.drawLine({ start: at(a.x, a.y, z0), end: at(b.x, b.y, z0), thickness: lineW, color: C.ink });
+    if (faces[(i + n - 1) % n] !== faces[i]) page.drawLine({ start: at(a.x, a.y, z0), end: at(a.x, a.y, zt), thickness: lineW, color: C.ink });
+    if (faces[(i + 1) % n] !== faces[i]) page.drawLine({ start: at(b.x, b.y, z0), end: at(b.x, b.y, zt), thickness: lineW, color: C.ink });
+  }
+  // top face
+  poly(page, p.outline.map((q) => at(q.x, q.y, zt)), { fill: C.isoTop, stroke: C.ink, width: lineW });
+  // pockets, shallow first: each opens at the top, or at the floor of a shallower pocket it sits in
+  // (a step-down); its walls fill the opening, then its floor shows where it is visible through it
+  const drawn = [...p.regions].sort((m, q) => m.depth - q.depth).map((r) => {
+    const b = regionBox(r);
+    const cx = (b.x0 + b.x1) / 2;
+    const cy = (b.y0 + b.y1) / 2;
+    const shelf = Math.max(
+      0,
+      ...p.regions
+        .filter((o) => o !== r && o.depth < r.depth - 1e-6)
+        .filter((o) => {
+          const ob = regionBox(o);
+          return ob.x0 <= b.x0 + 1e-6 && ob.x1 >= b.x1 - 1e-6 && ob.y0 <= b.y0 + 1e-6 && ob.y1 >= b.y1 - 1e-6 && ob.x0 <= cx && ob.y0 <= cy;
+        })
+        .map((o) => o.depth),
+    );
+    const pts = regionPts(r, 32);
+    const open = pts.map((q) => at(q.x, q.y, zt - shelf));
+    const floor = pts.map((q) => at(q.x, q.y, zt - r.depth));
+    const vis = r.kind === "poly" ? floor : clipConvex(floor, open);
+    return { r, shelf, open, vis, through: r.depth >= p.T - 1e-6 };
+  });
+  // pockets of the same depth that touch (a slot cut into a pocket's edge) are one opening:
+  // all their walls first, then all their floors, so one never paints over the other's floor
+  for (let i = 0; i < drawn.length; ) {
+    let j = i;
+    while (j < drawn.length && Math.abs(drawn[j].r.depth - drawn[i].r.depth) < 1e-6) j++;
+    const grp = drawn.slice(i, j);
+    for (const g of grp) poly(page, g.open, { fill: C.isoWall });
+    for (const g of grp) if (g.vis.length >= 3) poly(page, g.vis, { fill: g.through ? C.white : C.isoFloor });
+    for (const g of grp) if (g.shelf > 0) poly(page, g.open, { stroke: C.ink, width: 0.4 });
+    i = j;
+  }
+  drawPieces(page, p.pieces, (q) => at(q.x, q.y, zt), 0.5, true);
+  poly(page, p.outline.map((q) => at(q.x, q.y, zt)), { stroke: C.ink, width: lineW });
+}
+
+function isoPanel(page: PDFPage, f: Fonts, p: PartData) {
+  const box = { x: RC_X, y: MAIN_Y + 200, w: RC_W, h: 190 };
+  sectionHeader(page, f, box.x, box.y + box.h - 14, box.w, "ISOMETRIC VIEW");
+  const b = isoBounds(p.L, p.W, p.T);
+  const k = Math.min((box.w - 30) / (b.x1 - b.x0), (box.h - 40) / (b.y1 - b.y0));
+  const ox = box.x + (box.w - (b.x1 - b.x0) * k) / 2 - b.x0 * k;
+  const oy = box.y + 18 + (box.h - 40 - (b.y1 - b.y0) * k) / 2 - b.y0 * k;
+  isoPart(page, p, 0, ox, oy, k);
+  page.drawText("NOT TO SCALE", { x: box.x + box.w - 6 - f.r.widthOfTextAtSize("NOT TO SCALE", 5.5), y: box.y + 5, size: 5.5, font: f.r, color: C.muted });
+}
+
+function assemblyView(page: PDFPage, f: Fonts, parts: PartData[]) {
+  const L = parts[0].L;
+  const W = parts[0].W;
+  const gapIn = Math.max(1, (L + W) * 0.3); // exploded spacing: enough to see into the lower part's pockets
+  const total = parts.reduce((s, p) => s + p.T, 0) + gapIn * (parts.length - 1);
+  const b = isoBounds(L, W, total);
+  const area = { x: MAIN_X + 30, y: MAIN_Y + 40, w: MAIN_W - 60, h: MAIN_H - 70 };
+  const k = Math.min(area.w / (b.x1 - b.x0), area.h / (b.y1 - b.y0));
+  const ox = area.x + (area.w - (b.x1 - b.x0) * k) / 2 - b.x0 * k;
+  const oy = area.y + (area.h - (b.y1 - b.y0) * k) / 2 - b.y0 * k;
+  // bottom part first so upper parts overlap it
+  let z = 0;
+  const tags: { n: number; at: Pt }[] = [];
+  parts.forEach((p, i) => {
+    isoPart(page, p, z, ox, oy, k, 0.7);
+    const q = iso(L, W * 0.5, z + p.T / 2); // middle of the right face
+    tags.push({ n: i + 1, at: { x: ox + q.x * k, y: oy + q.y * k } });
+    z += p.T + gapIn;
+  });
+  const rightX = ox + b.x1 * k + 18; // balloons stand clear of the parts, to the right
+  for (const t of tags) {
+    const to = { x: Math.min(rightX, MAIN_X + MAIN_W - 14), y: t.at.y };
+    page.drawCircle({ x: t.at.x, y: t.at.y, size: 1.4, color: C.ink });
+    page.drawLine({ start: t.at, end: { x: to.x - 6, y: to.y }, thickness: 0.5, color: C.dim });
+    balloon(page, f, to.x, to.y, t.n);
+  }
+  viewLabel(page, f, "EXPLODED ASSEMBLY (NOT TO SCALE)", MAIN_X + MAIN_W / 2, MAIN_Y + 20);
+}
+
+/** Sutherland–Hodgman: subject clipped by a convex polygon (any winding). */
+function clipConvex(subject: Pt[], clip: Pt[]): Pt[] {
+  if (clip.length < 3) return subject;
+  let area = 0;
+  for (let i = 0; i < clip.length; i++) {
+    const a = clip[i];
+    const b = clip[(i + 1) % clip.length];
+    area += a.x * b.y - b.x * a.y;
+  }
+  const ccw = area > 0;
+  const inside = (p: Pt, a: Pt, b: Pt) => {
+    const c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    return ccw ? c >= -1e-9 : c <= 1e-9;
+  };
+  const cross = (p1: Pt, p2: Pt, a: Pt, b: Pt): Pt => {
+    const A1 = p2.y - p1.y, B1 = p1.x - p2.x, C1 = A1 * p1.x + B1 * p1.y;
+    const A2 = b.y - a.y, B2 = a.x - b.x, C2 = A2 * a.x + B2 * a.y;
+    const det = A1 * B2 - A2 * B1;
+    if (Math.abs(det) < 1e-12) return p2;
+    return { x: (B2 * C1 - B1 * C2) / det, y: (A1 * C2 - A2 * C1) / det };
+  };
+  let out = subject;
+  for (let i = 0; i < clip.length && out.length; i++) {
+    const a = clip[i];
+    const b = clip[(i + 1) % clip.length];
+    const input = out;
+    out = [];
+    for (let j = 0; j < input.length; j++) {
+      const cur = input[j];
+      const prev = input[(j + input.length - 1) % input.length];
+      const ci = inside(cur, a, b);
+      const pi = inside(prev, a, b);
+      if (ci) {
+        if (!pi) out.push(cross(prev, cur, a, b));
+        out.push(cur);
+      } else if (pi) out.push(cross(prev, cur, a, b));
+    }
+  }
+  return out;
+}
+
+// ─── Right column panels ──────────────────────────────────────────────────────
+
+function partPanel(page: PDFPage, f: Fonts, input: Drawing3DInput, layer: Layer3D, li: number, total: number) {
+  const x = RC_X;
+  const top = MAIN_Y + MAIN_H;
+  const h = 108;
+  const y = top - h;
+  sectionHeader(page, f, x, top - 14, RC_W, "PART DETAILS");
+  const mods: string[] = [];
+  if (layer.roundCorners && layer.roundRadiusIn) mods.push(`Rounded corners R${fmtIn(layer.roundRadiusIn)}`);
+  else if (layer.cropCorners) mods.push(`Cropped corners ${fmtIn(input.block.chamferIn ?? 1)}`);
+  const rows: [string, string][] = [
+    ["PART", `${partName(layer.label, li)}  (${li + 1} of ${total})`],
+    ["SIZE", `${fmtIn(input.block.lengthIn)} \xD7 ${fmtIn(input.block.widthIn)} \xD7 ${fmtIn(layer.thicknessIn)}`],
+    ["MATERIAL", layer.materialName || "—"],
+    ["POCKETS", layer.cavities.length ? String(layer.cavities.length) : "None"],
+    ["CORNERS", mods.length ? mods.join("; ") : "Square"],
+    ["QUOTE", input.quoteNo],
+  ];
+  let ry = top - 28;
+  for (const [k, v] of rows) {
+    page.drawText(k, { x: x + 8, y: ry, size: 6.5, font: f.b, color: C.muted });
+    page.drawText(fit(v, f.r, 7.5, RC_W - 70), { x: x + 62, y: ry, size: 7.5, font: f.r, color: C.ink });
+    ry -= 12.5;
+  }
+  page.drawLine({ start: { x, y }, end: { x: x + RC_W, y }, thickness: 0.75, color: C.black });
+}
+
+function schedulePanel(page: PDFPage, f: Fonts, p: PartData) {
+  const x = RC_X;
+  const top = MAIN_Y + 200;
+  sectionHeader(page, f, x, top - 14, RC_W, "CAVITY SCHEDULE");
+  if (!p.rows.length) {
+    page.drawText("No pockets in this part.", { x: x + 8, y: top - 30, size: 7, font: f.r, color: C.muted });
     return;
   }
-  drawPolyLine(page, roundedRectPts(x,y,w,h,r,8), true, color, lw, dashed);
-}
-
-function drawBlockOutline(page:PDFPage, x:number, y:number, w:number, h:number, block:Block3D, layer:Layer3D, isPlan:boolean) {
-  if (isPlan && layer.roundCorners && layer.roundRadiusIn && layer.roundRadiusIn > 0) {
-    const rPx = Math.min(layer.roundRadiusIn*(w/block.lengthIn), w/2-0.5, h/2-0.5);
-    fillPolyWithScanlines(page, roundedRectPts(x,y,w,h,rPx,12), C.foam);
-    drawRoundedRectOutline(page, x, y, w, h, rPx, C.black, 1.5);
-  } else if (
-    isPlan &&
-    !layer.roundCorners &&
-    layer.cropCorners                        // BUG FIX: only chamfer this layer if it explicitly sets cropCorners
-  ) {
-    // Chamfer size: use block.chamferIn directly (in inches); 1 = 1" chamfer.
-    const chamferIn = (block.chamferIn ?? 1);
-    if (Number.isFinite(chamferIn) && chamferIn > 0) {
-      // Use a single uniform scale (minimum of X and Y) so chamfer is always 45°.
-      const scale = Math.min(w / block.lengthIn, h / block.widthIn);
-      const c = Math.min(chamferIn * scale, w / 2 - 0.5, h / 2 - 0.5);
-      // 2-corner chamfer matching the SVG UI renderer: top-LEFT and bottom-RIGHT only.
-      // PDF y-up coords: y = bottom edge, y+h = top edge.
-      const pts: Pt[] = [
-        {x: x+c,   y: y+h  },  // start: right of top-left chamfer
-        {x: x+w,   y: y+h  },  // top-right corner (square)
-        {x: x+w,   y: y+c  },  // above bottom-right chamfer
-        {x: x+w-c, y: y    },  // bottom-right chamfer end
-        {x: x,     y: y    },  // bottom-left corner (square)
-        {x: x,     y: y+h-c},  // below top-left chamfer
-      ];
-      fillPolyWithScanlines(page, pts, C.foam);
-      drawPolyLine(page, pts, true, C.black, 1.5);
-    } else {
-      page.drawRectangle({ x, y, width:w, height:h, color:C.foam, borderColor:C.black, borderWidth:1.5 });
-    }
-  } else {
-    page.drawRectangle({ x, y, width:w, height:h, color:C.foam, borderColor:C.black, borderWidth:1.5 });
-  }
-}
-
-// ─── Cavity renderers ─────────────────────────────────────────────────────────
-
-function drawCavityTopView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:number, sH:number, bL:number, bW:number) {
-  const scX = sW/bL, scY = sH/bW;
-
-  if (cav.shape === "circle") {
-    const diamIn = cav.diameterIn || Math.min(cav.lengthIn, cav.widthIn);
-    const r  = (diamIn / 2) * Math.min(scX, scY);
-
-    const cavLeftIn = cav.x * bL;
-    const cavTopIn  = cav.y * bW;
-
-    const cx = sx + (cavLeftIn + diamIn / 2) * scX;
-    // cav.y is 0=top of block → PDF y=sy+sH; increasing y goes downward
-    const cy = sy + sH - (cavTopIn + diamIn / 2) * scY;
-    page.drawCircle({ x:cx, y:cy, size:r, borderColor:C.cavityLine, borderWidth:0.9 });
-
-  } else if (cav.shape === "roundedRect") {
-    const cavLeftIn = cav.x * bL;
-    const cavTopIn  = cav.y * bW;
-
-    const cx  = sx + cavLeftIn * scX;
-    // cavY computed from top-inches + height-inches (PDF y-up)
-    const cy  = sy + sH - (cavTopIn + cav.widthIn) * scY;
-    const cw  = cav.lengthIn*scX;
-    const ch  = cav.widthIn*scY;
-    // BUG FIX: if cornerRadiusIn is missing or 0 for a roundedRect, apply a
-    // proportional default (10% of the shorter pixel dimension) so it actually
-    // looks rounded rather than falling through to a plain square cavity.
-    const rawRadius = cav.cornerRadiusIn != null ? cav.cornerRadiusIn : 0;
-    const pxRadius  = rawRadius > 0
-      ? rawRadius * Math.min(scX, scY)
-      : Math.min(cw, ch) * 0.15;   // 15% default when no explicit radius
-    const rPx = Math.min(pxRadius, cw / 2 - 0.5, ch / 2 - 0.5);
-    drawRoundedRectOutline(page, cx, cy, cw, ch, rPx, C.cavityLine, 0.9, false);
-
-  } else if (cav.shape === "poly" && Array.isArray(cav.points) && cav.points.length >= 3) {
-    // points are normalised 0-1 over the block face (x=left→right, y=top→bottom)
-    const pts = cav.points.map(p => ({
-      x: sx + p.x * sW,
-      y: sy + sH - p.y * sH,   // flip y: 0=top→PDF top of block
-    }));
-    drawPolyLine(page, pts, true, C.cavityLine, 0.9, false);
-    if (cav.nestedCavities) {
-      for (const n of cav.nestedCavities) {
-        if (!n.points||n.points.length<3) continue;
-        drawPolyLine(page, n.points.map(p=>({x:sx+p.x*sW, y:sy+sH-p.y*sH})), true, C.cavityLine, 0.7, false);
-      }
-    }
-
-  } else {
-    // Plain rect
-    const cavLeftIn = cav.x * bL;
-    const cavTopIn  = cav.y * bW;
-
-    const cx = sx + cavLeftIn * scX;
-    const cy = sy + sH - (cavTopIn + cav.widthIn) * scY;
-    page.drawRectangle({ x:cx, y:cy, width:cav.lengthIn*scX, height:cav.widthIn*scY,
-      borderColor:C.cavityLine, borderWidth:0.9 });
-  }
-}
-
-function drawCavityFrontView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:number, sH:number, bL:number, thk:number) {
-  const scX = sW/bL, scZ = sH/thk;
-
-  let cavX: number, cavW: number;
-  if (cav.shape==="poly" && Array.isArray(cav.points) && cav.points.length>=3) {
-    const xs = cav.points.map(p=>p.x);
-    cavX = sx + Math.min(...xs)*sW;
-    cavW = (Math.max(...xs)-Math.min(...xs))*sW;
-  } else if (cav.shape==="circle") {
-    const diamIn = cav.diameterIn || Math.min(cav.lengthIn, cav.widthIn);
-    const r = (diamIn / 2) * scX;
-
-    // cav.x is normalized 0..1 (leftright). Convert to inches first.
-    const cavLeftIn = cav.x * bL;
-
-    cavX = sx + cavLeftIn * scX;
-    cavW = r * 2;
-  } else {
-    cavX = sx + cav.x*scX*bL;
-    cavW = cav.lengthIn*scX;
-  }
-
-  const cavH = Math.min(cav.depthIn, thk)*scZ;
-  // Cavity hangs from the top of the layer (top in PDF = sy+sH)
-  const cavY = sy + sH - cavH;
-
-  page.drawRectangle({ x:cavX, y:cavY, width:Math.max(cavW,1), height:Math.max(cavH,1),
-    borderColor:C.cavityLine, borderWidth:0.9, borderDashArray:[3,2] });
-  return { cavX, cavY, cavW, cavH };
-}
-
-function drawCavityRightView(page:PDFPage, cav:Cavity3D, sx:number, sy:number, sW:number, sH:number, bW:number, thk:number) {
-  const scY = sW/bW, scZ = sH/thk;
-
-  let cavX: number, cavW: number;
-  if (cav.shape==="poly" && Array.isArray(cav.points) && cav.points.length>=3) {
-    const ys = cav.points.map(p=>p.y);
-    cavX = sx + Math.min(...ys)*sW;
-    cavW = (Math.max(...ys)-Math.min(...ys))*sW;
-  } else {
-    cavX = sx + cav.y*scY*bW;
-    cavW = cav.widthIn*scY;
-  }
-
-  const cavH = Math.min(cav.depthIn, thk)*scZ;
-  const cavY = sy + sH - cavH;
-
-  page.drawRectangle({ x:cavX, y:cavY, width:Math.max(cavW,1), height:Math.max(cavH,1),
-    borderColor:C.cavityLine, borderWidth:0.9, borderDashArray:[3,2] });
-  return { cavX, cavY, cavW, cavH };
-}
-
-// ─── Notes & Material Callout Panel ──────────────────────────────────────────
-
-function notesPanel(
-  page:PDFPage, x:number, y:number, w:number, h:number,
-  input:Drawing3DInput, layer:Layer3D, layerIdx:number, totalLayers:number,
-  font:any, fontBold:any,
-) {
-  const LABEL_H = 16, PAD = 10;
-
-  // Header bar
-  page.drawRectangle({ x, y:y+h-LABEL_H, width:w, height:LABEL_H, color:C.headerBg, borderColor:C.black, borderWidth:0.5 });
-  const lbl = "NOTES & MATERIAL CALLOUT";
-  page.drawText(lbl, { x:x+(w-lbl.length*5.4)/2, y:y+h-LABEL_H+4, size:8, font:fontBold, color:C.black });
-
-  const midX  = x + w*0.50;
-  const colPad = PAD + 2;
-
-  // Vertical divider
-  page.drawLine({ start:{x:midX,y}, end:{x:midX,y:y+h-LABEL_H}, thickness:0.5, color:C.black });
-
-  // ── Left: general notes ───────────────────────────────────────────────────
-  let ly = y + h - LABEL_H - colPad - 6;
-  const defaultNotes = [
-    "ALL DIMENSIONS IN INCHES UNLESS OTHERWISE NOTED.",
-    `TOLERANCES: \xB11/8" OUTSIDE DIMS; \xB11/16" CAVITIES.`,
-    "DO NOT SCALE DRAWING.",
-    "FOAM ORIENTATION: RISE DIRECTION AS SHOWN.",
-    "DASHED LINES INDICATE CAVITIES / HIDDEN EDGES.",
+  const cols = [
+    { k: "#", w: 16 },
+    { k: "SHAPE", w: 40 },
+    { k: "SIZE", w: 74 },
+    { k: "DEPTH", w: 40 },
+    { k: "X", w: 38 },
+    { k: "Y", w: 38 },
   ];
-  const notes = (input.notes && input.notes.length>0) ? input.notes : defaultNotes;
-  page.drawText("GENERAL NOTES:", { x:x+colPad, y:ly, size:7, font:fontBold, color:C.black });
-  ly -= 11;
-  for (let i = 0; i < notes.length; i++) {
-    page.drawText(`${i+1}.  ${notes[i]}`, { x:x+colPad+4, y:ly, size:6.5, font, color:C.black });
-    ly -= 9.5;
+  let cx = x + 6;
+  let ry = top - 27;
+  for (const c of cols) {
+    page.drawText(c.k, { x: cx, y: ry, size: 6, font: f.b, color: C.ink });
+    cx += c.w;
   }
-
-  // ── Right: layer details ──────────────────────────────────────────────────
-  let ry = y + h - LABEL_H - colPad - 6;
-  const layerName = partName(layer.label, layerIdx); // Step 39N: "Part 2 Top Pad"
-
-  const modifiers: string[] = [];
-  if (layer.roundCorners && layer.roundRadiusIn) modifiers.push(`Rounded r=${layer.roundRadiusIn}"`);
-  if (layer.cropCorners) modifiers.push("Chamfered corners");
-  if (input.block.cornerStyle==="chamfer" && input.block.chamferIn) modifiers.push(`Block chamfer ${input.block.chamferIn}"`);
-
-  // Compact block dims on one line: L × W × H. The L/W footprint is shared
-  // across every sheet in a multi-layer stack (input.block is loop-
-  // invariant, passed unchanged to every page), so that part is correctly
-  // read from input.block. The H/Z component must NOT be — it has to be
-  // THIS sheet's own layer thickness (layer.thicknessIn, already proven
-  // correct just above as the "Thickness" row), never input.block.heightIn.
-  // That field is the top-level/overall block metadata from the layout
-  // JSON (see layoutToDrawingInput in the export routes) and is identical
-  // on every page regardless of which layer is being drawn, so reading it
-  // here made every sheet's Block Dims Z show the same (wrong, for any
-  // non-primary layer) value instead of each sheet calling out the piece
-  // actually shown on it — every other height reference in this file
-  // (drawFrontView/drawRightView geometry, dimension lines) already
-  // correctly uses layer.thicknessIn; this was the one place that didn't.
-  const blockDimsVal = `${input.block.lengthIn.toFixed(3)}" \xD7 ${input.block.widthIn.toFixed(3)}" \xD7 ${layer.thicknessIn.toFixed(3)}"`;
-
-  page.drawText("PART DETAILS:", { x:midX+colPad, y:ry, size:7, font:fontBold, color:C.black });
-  ry -= 11;
-
-  const details: Array<[string, string]> = [
-    ["Part",        `${layerName}  (${layerIdx+1} of ${totalLayers})`],
-    ["Thickness",   `${layer.thicknessIn.toFixed(3)}"`],
-    ["Material",    layer.materialName || "\u2014"],
-    ["Block Dims",  blockDimsVal],
-    ["Cavities",    layer.cavities.length > 0 ? `${layer.cavities.length}` : "None"],
-    ...(modifiers.length>0 ? [["Modifiers", modifiers.join("; ")] as [string,string]] : []),
-  ];
-
-  const labelColW = 56;
-  for (const [label, val] of details) {
-    page.drawText(`${label}:`, { x:midX+colPad, y:ry, size:6.5, font:fontBold, color:C.black });
-    page.drawText(val,         { x:midX+colPad+labelColW, y:ry, size:6.5, font, color:C.black });
-    ry -= 9.5;
+  ry -= 3;
+  page.drawLine({ start: { x: x + 6, y: ry }, end: { x: x + RC_W - 6, y: ry }, thickness: 0.4, color: C.rule });
+  ry -= 9;
+  // rows tighten (down to 7.4pt) before any spill to "+ N more"
+  const room = ry - (MAIN_Y + 22);
+  const rowH = Math.max(7.4, Math.min(10, room / Math.max(1, p.rows.length - 1)));
+  const fs = rowH < 9 ? 6 : 6.5;
+  const maxRows = Math.floor(room / rowH) + 1;
+  const shown = p.rows.length > maxRows ? p.rows.slice(0, maxRows - 1) : p.rows;
+  for (const r of shown) {
+    const vals = [String(r.n), r.shape, r.size, r.through ? "THRU" : fmtIn(r.depth), fmtIn(r.cx), fmtIn(r.cy)];
+    cx = x + 6;
+    vals.forEach((v, i) => {
+      page.drawText(fit(v, f.r, fs, cols[i].w - 3), { x: cx, y: ry, size: fs, font: f.r, color: C.ink });
+      cx += cols[i].w;
+    });
+    ry -= rowH;
   }
-
-  // ── Cavity schedule ───────────────────────────────────────────────────────
-  if (layer.cavities.length > 0) {
-    ry -= 3;
-    page.drawText("CAVITY SCHEDULE:", { x:midX+colPad, y:ry, size:7, font:fontBold, color:C.black });
-    ry -= 10;
-
-    // Columns — tightened to fit more info
-    const cols = [
-      { label:"#",     ox:0   , w:12  },
-      { label:"SHAPE", ox:13  , w:44  },
-      { label:`L"`,    ox:58  , w:32  },
-      { label:`W"`,    ox:91  , w:32  },
-      { label:`D"`,    ox:124 , w:32  },
-      { label:"R\"",   ox:157 , w:32  },
-    ];
-    for (const col of cols) {
-      page.drawText(col.label, { x:midX+colPad+col.ox, y:ry, size:6, font:fontBold, color:C.black });
-    }
-    ry -= 1;
-    page.drawLine({ start:{x:midX+colPad,y:ry}, end:{x:midX+colPad+190,y:ry}, thickness:0.4, color:C.dimLine });
-    ry -= 8;
-
-    for (let ci = 0; ci < layer.cavities.length; ci++) {
-      const cav = layer.cavities[ci];
-      const shapeLabel =
-        cav.shape==="roundedRect" ? "RND RECT"
-        : cav.shape==="poly"      ? "POLYGON"
-        : cav.shape.toUpperCase();
-      // Show actual stored radius, or "AUTO" if shape is roundedRect but radius is 0/missing
-      const rLabel = cav.shape === "roundedRect"
-        ? (cav.cornerRadiusIn && cav.cornerRadiusIn > 0
-            ? cav.cornerRadiusIn.toFixed(3)
-            : "AUTO")
-        : "\u2014";
-
-      const row = [String(ci+1), shapeLabel, cav.lengthIn.toFixed(3), cav.widthIn.toFixed(3), cav.depthIn.toFixed(3), rLabel];
-      for (let ri = 0; ri < cols.length; ri++) {
-        page.drawText(row[ri], { x:midX+colPad+cols[ri].ox, y:ry, size:6, font, color:C.black });
-      }
-      ry -= 8.5;
-      if (ry < y+4) break;
-    }
+  if (shown.length < p.rows.length) {
+    page.drawText(`+ ${p.rows.length - shown.length} more pockets (see the DXF)`, { x: x + 6, y: ry, size: 6.5, font: f.r, color: C.muted });
   }
+  page.drawText("X / Y = POCKET CENTER FROM THE LOWER-LEFT CORNER (0,0) IN THE TOP VIEW.", {
+    x: x + 6,
+    y: MAIN_Y + 6,
+    size: 5,
+    font: f.r,
+    color: C.muted,
+  });
 }
 
-// ─── Title block ──────────────────────────────────────────────────────────────
+function bomPanel(page: PDFPage, f: Fonts, input: Drawing3DInput, parts: PartData[]) {
+  const x = RC_X;
+  const top = MAIN_Y + MAIN_H;
+  sectionHeader(page, f, x, top - 14, RC_W, "PARTS LIST (PER SET)");
+  const cols = [
+    { k: "ITEM", w: 26 },
+    { k: "PART", w: 82 },
+    { k: "SIZE", w: 86 },
+    { k: "QTY", w: 24 },
+  ];
+  let cx = x + 6;
+  let ry = top - 27;
+  for (const c of cols) {
+    page.drawText(c.k, { x: cx, y: ry, size: 6, font: f.b, color: C.ink });
+    cx += c.w;
+  }
+  ry -= 3;
+  page.drawLine({ start: { x: x + 6, y: ry }, end: { x: x + RC_W - 6, y: ry }, thickness: 0.4, color: C.rule });
+  ry -= 10;
+  input.layers.forEach((l, i) => {
+    const vals = [String(i + 1), partName(l.label, i), `${fmtIn(parts[i].L)} \xD7 ${fmtIn(parts[i].W)} \xD7 ${fmtIn(parts[i].T)}`, "1"];
+    cx = x + 6;
+    vals.forEach((v, j) => {
+      page.drawText(fit(v, f.r, 6.8, cols[j].w - 3), { x: cx, y: ry, size: 6.8, font: f.r, color: C.ink });
+      cx += cols[j].w;
+    });
+    ry -= 9;
+    if (l.materialName) {
+      page.drawText(fit(l.materialName, f.r, 6, cols[1].w + cols[2].w), { x: x + 6 + cols[0].w, y: ry, size: 6, font: f.r, color: C.muted });
+      ry -= 11;
+    }
+  });
+  page.drawText("Item 1 is the bottom of the set; each sheet shows one part.", { x: x + 6, y: ry - 4, size: 6, font: f.r, color: C.muted });
+}
+
+function sectionHeader(page: PDFPage, f: Fonts, x: number, y: number, w: number, label: string) {
+  page.drawRectangle({ x, y, width: w, height: 14, color: C.header, borderColor: C.black, borderWidth: 0.5 });
+  page.drawText(label, { x: x + 6, y: y + 4, size: 7, font: f.b, color: C.ink });
+}
+
+// ─── Frame and title block ────────────────────────────────────────────────────
+
+function frame(page: PDFPage) {
+  page.drawRectangle({ x: M, y: M, width: PW - 2 * M, height: PH - 2 * M, borderColor: C.black, borderWidth: 1.5 });
+  // right column and title block rules
+  page.drawLine({ start: { x: RC_X, y: MAIN_Y }, end: { x: RC_X, y: PH - M }, thickness: 0.75, color: C.black });
+  page.drawLine({ start: { x: M, y: MAIN_Y }, end: { x: PW - M, y: MAIN_Y }, thickness: 1.2, color: C.black });
+  // zone ticks along the border (drawing-sheet look)
+  for (let i = 1; i < 8; i++) {
+    const x = M + ((PW - 2 * M) * i) / 8;
+    page.drawLine({ start: { x, y: PH - M }, end: { x, y: PH - M - 5 }, thickness: 0.5, color: C.black });
+  }
+  for (let i = 1; i < 6; i++) {
+    const y = MAIN_Y + ((PH - M - MAIN_Y) * i) / 6;
+    page.drawLine({ start: { x: M, y }, end: { x: M + 5, y }, thickness: 0.5, color: C.black });
+  }
+}
 
 function titleBlock(
-  page:PDFPage, x:number, y:number, w:number, h:number,
-  font:any, fontBold:any,
-  quoteNo:string, customerName:string|undefined,
-  revision:string, date:string, title:string, sheet:string,
+  page: PDFPage,
+  f: Fonts,
+  t: {
+    input: Drawing3DInput;
+    title: string;
+    description: string;
+    material: string;
+    notes: string[];
+    rev: string;
+    date: string;
+    scale: string;
+    sheet: string;
+  },
 ) {
-  page.drawRectangle({ x, y, width:w, height:h, color:C.white, borderColor:C.black, borderWidth:1.5 });
+  const x = M;
+  const y = M;
+  const w = PW - 2 * M;
+  const h = TB_H;
+  const notesW = w * 0.40;
+  const midW = w * 0.28;
+  const rightX = x + notesW + midW;
+  const rightW = w - notesW - midW;
 
-  const leftW = w*0.60;
-  page.drawRectangle({ x, y, width:leftW, height:h, color:C.titleBg });
-  page.drawText(title, { x:x+12, y:y+h-20, size:12, font:fontBold, color:C.titleFg });
-  page.drawLine({ start:{x,y:y+h-26}, end:{x:x+leftW,y:y+h-26}, thickness:0.5, color:C.gridLight });
-  page.drawText(`Quote: ${quoteNo}`, { x:x+12, y:y+h-40, size:9, font, color:C.titleFg });
-  if (customerName) {
-    page.drawText(`Customer: ${customerName}`, { x:x+12, y:y+h-52, size:9, font, color:C.titleFg });
+  // notes
+  page.drawText("NOTES", { x: x + 8, y: y + h - 13, size: 7, font: f.b, color: C.ink });
+  let ny = y + h - 24;
+  t.notes.slice(0, 6).forEach((n, i) => {
+    page.drawText(fit(`${i + 1}. ${n}`, f.r, 6.2, notesW - 16), { x: x + 8, y: ny, size: 6.2, font: f.r, color: C.ink });
+    ny -= 8.6;
+  });
+  page.drawLine({ start: { x: x + notesW, y }, end: { x: x + notesW, y: y + h }, thickness: 0.75, color: C.black });
+
+  // description / material / quote / customer
+  const mx = x + notesW;
+  const fields: [string, string][] = [
+    ["DESCRIPTION", t.description],
+    ["MATERIAL", t.material],
+    ["QUOTE", t.input.quoteNo],
+    ["CUSTOMER", t.input.customerName || "—"],
+  ];
+  const rowH = h / fields.length;
+  fields.forEach(([k, v], i) => {
+    const ry = y + h - (i + 1) * rowH;
+    if (i > 0) page.drawLine({ start: { x: mx, y: ry + rowH }, end: { x: mx + midW, y: ry + rowH }, thickness: 0.4, color: C.rule });
+    page.drawText(k, { x: mx + 6, y: ry + rowH - 8, size: 5.2, font: f.b, color: C.muted });
+    page.drawText(fit(v, f.r, 7.2, midW - 12), { x: mx + 6, y: ry + 4, size: 7.2, font: f.r, color: C.ink });
+  });
+  page.drawLine({ start: { x: rightX, y }, end: { x: rightX, y: y + h }, thickness: 0.75, color: C.black });
+
+  // shop band + rev / date / scale / sheet
+  const bandH = 34;
+  page.drawRectangle({ x: rightX, y: y + h - bandH, width: rightW, height: bandH, color: C.band });
+  const shop = (t.input.shopName || "").trim();
+  page.drawText(fit(shop ? shop.toUpperCase() : "FOAM INSERT DRAWING", f.b, 11, rightW - 16), {
+    x: rightX + 8,
+    y: y + h - 15,
+    size: 11,
+    font: f.b,
+    color: C.white,
+  });
+  page.drawText(fit(t.title, f.r, 7.5, rightW - 16), { x: rightX + 8, y: y + h - 28, size: 7.5, font: f.r, color: rgb(0.85, 0.85, 0.85) });
+  const cells: [string, string][] = [
+    ["REV", t.rev],
+    ["DATE", t.date],
+    ["SCALE", t.scale],
+    ["SHEET", t.sheet],
+  ];
+  const cw = rightW / cells.length;
+  const ch = h - bandH;
+  cells.forEach(([k, v], i) => {
+    const cx = rightX + i * cw;
+    if (i > 0) page.drawLine({ start: { x: cx, y }, end: { x: cx, y: y + ch }, thickness: 0.4, color: C.rule });
+    page.drawText(k, { x: cx + 5, y: y + ch - 10, size: 5.2, font: f.b, color: C.muted });
+    page.drawText(fit(v, f.b, 9, cw - 8), { x: cx + 5, y: y + 9, size: 9, font: f.b, color: C.ink });
+  });
+  page.drawText("FOR MANUFACTURING USE – CONFIDENTIAL", {
+    x: x + w - 6 - f.r.widthOfTextAtSize("FOR MANUFACTURING USE – CONFIDENTIAL", 4.8),
+    y: y - 8,
+    size: 4.8,
+    font: f.r,
+    color: C.muted,
+  });
+}
+
+function generalNotes(input: Drawing3DInput, parts: PartData[]): string[] {
+  if (input.notes && input.notes.length) return input.notes;
+  const anyDepth = parts.some((p) => p.pieces.some((q) => q.layer === "depth"));
+  const anyThrough = parts.some((p) => p.pieces.some((q) => q.layer === "through"));
+  return [
+    "ALL DIMENSIONS IN INCHES. DO NOT SCALE DRAWING.",
+    `TOLERANCES: OUTSIDE \xB11/8"; POCKETS \xB11/16"; THICKNESS \xB11/16".`,
+    "POCKET SIZES, DEPTHS AND LOCATIONS: SEE THE CAVITY SCHEDULE.",
+    "TOUCHING / OVERLAPPING POCKETS ARE CUT AS ONE POCKET.",
+    ...(anyDepth ? ["DASHED BLUE: FLOOR STEP INSIDE A POCKET."] : []),
+    ...(anyThrough ? ["MAGENTA: CUT THROUGH THE PART."] : []),
+    ...(parts.length > 1 ? ["SET PARTS ARE LAMINATED / PACKED PER THE QUOTE."] : []),
+  ];
+}
+
+// ─── Drawing helpers ──────────────────────────────────────────────────────────
+
+/** Fill and / or stroke a polygon (points in page coordinates). */
+function poly(page: PDFPage, pts: Pt[], o: { fill?: RGB; stroke?: RGB; width?: number; dash?: number[] }) {
+  if (pts.length < 3) return;
+  const d = "M " + pts.map((q) => `${q.x.toFixed(2)} ${(-q.y).toFixed(2)}`).join(" L ") + " Z";
+  page.drawSvgPath(d, {
+    x: 0,
+    y: 0,
+    ...(o.fill ? { color: o.fill } : {}),
+    ...(o.stroke ? { borderColor: o.stroke, borderWidth: o.width ?? 1 } : { borderWidth: 0 }),
+    ...(o.dash ? { borderDashArray: o.dash } : {}),
+  });
+}
+
+function polyline(page: PDFPage, pts: Pt[], color: RGB, width: number, dash?: number[]) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    page.drawLine({ start: pts[i], end: pts[i + 1], thickness: width, color, ...(dash ? { dashArray: dash } : {}) });
   }
-  page.drawText("FOR MANUFACTURING USE ONLY \u2013 INTERNAL DOCUMENT",
-    { x:x+12, y:y+8, size:7, font, color:rgb(0.55,0.55,0.55) });
+}
 
-  const boxW = (w-leftW)/2, boxH = h/2;
-  for (const box of [
-    { label:"REVISION", value:revision, bx:x+leftW,      by:y+boxH },
-    { label:"DATE",     value:date,     bx:x+leftW+boxW, by:y+boxH },
-    { label:"SCALE",    value:"NTS",    bx:x+leftW,      by:y      },
-    { label:"SHEET",    value:sheet,    bx:x+leftW+boxW, by:y      },
-  ]) {
-    page.drawRectangle({ x:box.bx, y:box.by, width:boxW, height:boxH, borderColor:C.black, borderWidth:0.5 });
-    page.drawRectangle({ x:box.bx, y:box.by+boxH-13, width:boxW, height:13, color:C.headerBg });
-    page.drawText(box.label, { x:box.bx+4, y:box.by+boxH-10, size:6,  font:fontBold, color:C.black });
-    page.drawText(box.value, { x:box.bx+4, y:box.by+6,       size:10, font:fontBold, color:C.black });
+/** Merged pocket edges (inches) through a projection: cut solid, floor step dashed blue, through magenta. */
+function drawPieces(page: PDFPage, pieces: OutlinePiece[], P: (q: Pt) => Pt, w: number, iso = false) {
+  for (const pc of pieces) {
+    if (iso && pc.layer === "depth") continue; // the iso shows the step itself
+    const color = iso ? C.ink : pc.layer === "depth" ? C.depth : pc.layer === "through" ? C.through : C.black;
+    const dash = pc.layer === "depth" ? [3, 2] : undefined;
+    if (pc.t === "line") {
+      polyline(page, [P({ x: pc.x1, y: pc.y1 }), P({ x: pc.x2, y: pc.y2 })], color, w, dash);
+    } else {
+      const span = pc.a1 - pc.a0;
+      const steps = Math.max(6, Math.ceil((Math.abs(span) / (Math.PI * 2)) * 48));
+      const pts = Array.from({ length: steps + 1 }, (_, i) => {
+        const a = pc.a0 + (span * i) / steps;
+        return P({ x: pc.cx + pc.r * Math.cos(a), y: pc.cy + pc.r * Math.sin(a) });
+      });
+      polyline(page, pts, color, w, dash);
+    }
   }
 }
 
-// ─── Dimension helpers ────────────────────────────────────────────────────────
-// horizDim: dim line AT dimY; extension lines rise from shapeEdgeY.
-// "shapeEdgeY" is the Y of the shape edge the extensions start from.
-
-function horizDim(page:PDFPage, x1:number, x2:number, shapeEdgeY:number, dimY:number, val:number, font:any, textSize:number=7.5) {
-  if (Math.abs(x2-x1) < 6) return;
-  const col=C.dimLine, asz=3.5;
-  // Extension lines from shape edge to dim line
-  page.drawLine({ start:{x:x1,y:shapeEdgeY+2}, end:{x:x1,y:dimY-3}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:x2,y:shapeEdgeY+2}, end:{x:x2,y:dimY-3}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:x1,y:dimY}, end:{x:x2,y:dimY}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:x1,y:dimY}, end:{x:x1+asz,y:dimY+asz}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:x1,y:dimY}, end:{x:x1+asz,y:dimY-asz}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:x2,y:dimY}, end:{x:x2-asz,y:dimY+asz}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:x2,y:dimY}, end:{x:x2-asz,y:dimY-asz}, thickness:0.5, color:col });
-  const txt=`${val.toFixed(2)}"`, tw=txt.length*(textSize*0.60), mx=(x1+x2)/2;
-  page.drawRectangle({ x:mx-tw/2-2, y:dimY-5, width:tw+4, height:10, color:C.white });
-  page.drawText(txt, { x:mx-tw/2, y:dimY-3, size:textSize, font, color:C.black });
+function balloon(page: PDFPage, f: Fonts, x: number, y: number, n: number) {
+  const r = 6;
+  page.drawCircle({ x, y, size: r, color: C.white, borderColor: C.black, borderWidth: 0.7 });
+  const t = String(n);
+  const tw = f.b.widthOfTextAtSize(t, 7);
+  page.drawText(t, { x: x - tw / 2, y: y - 2.5, size: 7, font: f.b, color: C.black });
 }
 
-// vertDim: dim line AT dimX; extension lines go from shapeEdgeX to dimX.
-// y1=bottom, y2=top of dimensioned span.
-
-function vertDim(page:PDFPage, y1:number, y2:number, shapeEdgeX:number, dimX:number, val:number, font:any, textSize:number=7.5) {
-  if (Math.abs(y2-y1) < 6) return;
-  const col=C.dimLine, asz=3.5;
-  const dir = dimX > shapeEdgeX ? 1 : -1;   // +1 = dim is to the right, -1 = to the left
-  page.drawLine({ start:{x:shapeEdgeX+dir*2,y:y1}, end:{x:dimX-dir*3,y:y1}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:shapeEdgeX+dir*2,y:y2}, end:{x:dimX-dir*3,y:y2}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:dimX,y:y1}, end:{x:dimX,y:y2}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:dimX,y:y1}, end:{x:dimX-asz,y:y1+asz}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:dimX,y:y1}, end:{x:dimX+asz,y:y1+asz}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:dimX,y:y2}, end:{x:dimX-asz,y:y2-asz}, thickness:0.5, color:col });
-  page.drawLine({ start:{x:dimX,y:y2}, end:{x:dimX+asz,y:y2-asz}, thickness:0.5, color:col });
-  const txt=`${val.toFixed(2)}"`, my=(y1+y2)/2, tw=txt.length*(textSize*0.60);
-  page.drawRectangle({ x:dimX-tw/2-2, y:my-5, width:tw+4, height:10, color:C.white });
-  page.drawText(txt, { x:dimX-tw/2, y:my-3, size:textSize, font, color:C.black });
+function viewLabel(page: PDFPage, f: Fonts, label: string, cx: number, y: number) {
+  const tw = f.b.widthOfTextAtSize(label, 7.5);
+  page.drawText(label, { x: cx - tw / 2, y, size: 7.5, font: f.b, color: C.ink });
+  page.drawLine({ start: { x: cx - tw / 2, y: y - 2 }, end: { x: cx + tw / 2, y: y - 2 }, thickness: 0.5, color: C.ink });
 }
+
+function arrow(page: PDFPage, tip: Pt, dx: number, dy: number) {
+  // filled arrowhead pointing along (dx, dy)
+  const len = 5;
+  const half = 1.6;
+  const n = Math.hypot(dx, dy) || 1;
+  const ux = dx / n;
+  const uy = dy / n;
+  const base = { x: tip.x - ux * len, y: tip.y - uy * len };
+  poly(page, [tip, { x: base.x - uy * half, y: base.y + ux * half }, { x: base.x + uy * half, y: base.y - ux * half }], { fill: C.dim });
+}
+
+function hDim(page: PDFPage, f: Fonts, x1: number, x2: number, edgeY: number, dimY: number, text: string) {
+  const up = dimY > edgeY ? 1 : -1;
+  page.drawLine({ start: { x: x1, y: edgeY + up * 2 }, end: { x: x1, y: dimY + up * 3 }, thickness: 0.4, color: C.dim });
+  page.drawLine({ start: { x: x2, y: edgeY + up * 2 }, end: { x: x2, y: dimY + up * 3 }, thickness: 0.4, color: C.dim });
+  page.drawLine({ start: { x: x1, y: dimY }, end: { x: x2, y: dimY }, thickness: 0.4, color: C.dim });
+  arrow(page, { x: x1, y: dimY }, -1, 0);
+  arrow(page, { x: x2, y: dimY }, 1, 0);
+  const tw = f.r.widthOfTextAtSize(text, 7.5);
+  const mx = (x1 + x2) / 2;
+  page.drawRectangle({ x: mx - tw / 2 - 2, y: dimY - 4, width: tw + 4, height: 9, color: C.white });
+  page.drawText(text, { x: mx - tw / 2, y: dimY - 2.6, size: 7.5, font: f.r, color: C.ink });
+}
+
+function vDim(page: PDFPage, f: Fonts, y1: number, y2: number, edgeX: number, dimX: number, text: string) {
+  const dir = dimX > edgeX ? 1 : -1;
+  page.drawLine({ start: { x: edgeX + dir * 2, y: y1 }, end: { x: dimX + dir * 3, y: y1 }, thickness: 0.4, color: C.dim });
+  page.drawLine({ start: { x: edgeX + dir * 2, y: y2 }, end: { x: dimX + dir * 3, y: y2 }, thickness: 0.4, color: C.dim });
+  page.drawLine({ start: { x: dimX, y: y1 }, end: { x: dimX, y: y2 }, thickness: 0.4, color: C.dim });
+  arrow(page, { x: dimX, y: y1 }, 0, -1);
+  arrow(page, { x: dimX, y: y2 }, 0, 1);
+  // text reads along the dim line (rotated), centered
+  const size = 7.5;
+  const tw = f.r.widthOfTextAtSize(text, size);
+  const my = (y1 + y2) / 2;
+  if (Math.abs(y2 - y1) > tw + 6) {
+    page.drawRectangle({ x: dimX - 4.5, y: my - tw / 2 - 2, width: 9, height: tw + 4, color: C.white });
+    page.drawText(text, { x: dimX + 2.6, y: my - tw / 2, size, font: f.r, color: C.ink, rotate: degrees(90) });
+  } else {
+    // short span: text beside the dim line
+    page.drawText(text, { x: dimX - tw - 4, y: my - 2.6, size, font: f.r, color: C.ink });
+  }
+}
+
+/** Trim a string to a width (adds "…"). */
+function fit(text: string, font: PDFFont, size: number, maxW: number): string {
+  const clean = String(text ?? "").replace(/[^\x20-\x7E\xA0-\xFF–—…]/g, "");
+  if (font.widthOfTextAtSize(clean, size) <= maxW) return clean;
+  let s = clean;
+  while (s.length > 1 && font.widthOfTextAtSize(s + "…", size) > maxW) s = s.slice(0, -1);
+  return s + "…";
+}
+
+/**
+ * Inches for a drawing: whole sixteenths as fractions (9 7/8"), anything else
+ * to three decimals (2.531"). Pure; exported for the tests.
+ */
+export function fmtIn(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  const neg = v < 0;
+  const a = Math.abs(v);
+  const n16 = Math.round(a * 16);
+  if (Math.abs(a - n16 / 16) > 0.004) return `${neg ? "-" : ""}${a.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}"`;
+  const whole = Math.floor(n16 / 16);
+  let num = n16 % 16;
+  let den = 16;
+  while (num && num % 2 === 0) {
+    num /= 2;
+    den /= 2;
+  }
+  const frac = num ? `${num}/${den}` : "";
+  const body = whole && frac ? `${whole} ${frac}` : whole ? `${whole}` : frac || "0";
+  return `${neg ? "-" : ""}${body}"`;
+}
+
+/** For scripts/test-drawing-pdf.ts only. */
+export const threeviewInternals = { partData, depthProfile };
