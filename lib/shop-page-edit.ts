@@ -4,10 +4,14 @@
 // (Shop settings → Shop page). These are the theme_json fields they may
 // change, with the same limits the page itself applies when it reads them
 // (lib/tenant-page.ts). The shop's name, address (slug), plan, active status
-// and quote types stay with the platform owner (Admin → Tenants).
+// stay with the platform owner (Admin → Tenants).
+// Step 47: shops also pick what buyers can quote online (their quote types:
+// Foam insert, Complete Pack, Boxes and Displays). That switches the quoting
+// tools on and off, and the page's product tiles follow it. The old separate
+// tile list (theme_json.products) is no longer edited or used.
 // Pure (tested in scripts/test-shop-page-edit.ts).
 
-import { PRODUCT_KEYS } from "@/lib/tenant-products";
+import { QUOTE_TYPE_KEYS, quoteTypesFromTheme, type QuoteTypeKey } from "@/lib/quote-types";
 
 type TextSpec = { kind: "text"; max: number; label: string };
 type UrlSpec = { kind: "url"; label: string };
@@ -41,13 +45,11 @@ export type ShopPageTextKey = {
 }[keyof typeof SHOP_PAGE_FIELDS];
 export type ShopPageBoolKey = Exclude<keyof typeof SHOP_PAGE_FIELDS, ShopPageTextKey>;
 
-/** Product tiles a shop can pick ("display" is added on its own for shops that quote displays). */
-export const SHOP_PAGE_PRODUCTS = PRODUCT_KEYS.filter((k) => k !== "display");
 
 export type ShopStat = { label: string; value: string };
 
 export type ShopPageValues = { [K in ShopPageTextKey]: string } & { [K in ShopPageBoolKey]: boolean } & {
-  products: string[];
+  quoteTypes: QuoteTypeKey[]; // Step 47
   stats: ShopStat[];
 };
 
@@ -60,9 +62,7 @@ export function shopPageValues(theme: unknown): ShopPageValues {
   for (const [k, spec] of Object.entries(SHOP_PAGE_FIELDS)) {
     out[k] = spec.kind === "bool" ? th[k] === true : typeof th[k] === "string" ? (th[k] as string) : "";
   }
-  out.products = Array.isArray(th.products)
-    ? (th.products as unknown[]).filter((p): p is string => typeof p === "string" && (SHOP_PAGE_PRODUCTS as readonly string[]).includes(p))
-    : [];
+  out.quoteTypes = quoteTypesFromTheme(th); // Step 47 (missing = every type)
   out.stats = Array.isArray(th.stats)
     ? (th.stats as unknown[])
         .map((s) => {
@@ -104,11 +104,14 @@ export function cleanShopPagePatch(raw: unknown): CleanResult {
   const ignored: string[] = [];
 
   for (const [k, v] of Object.entries(src)) {
-    if (k === "products") {
-      if (!Array.isArray(v) || v.some((p) => typeof p !== "string" || !(SHOP_PAGE_PRODUCTS as readonly string[]).includes(p))) {
-        errors.products = "Pick products from the list.";
+    if (k === "quoteTypes") {
+      // Step 47: at least one, from the three types, saved in the standard order
+      if (!Array.isArray(v) || v.some((t) => typeof t !== "string" || !(QUOTE_TYPE_KEYS as string[]).includes(t))) {
+        errors.quoteTypes = "Pick from the quote types listed.";
+      } else if (v.length === 0) {
+        errors.quoteTypes = "Pick at least one thing buyers can quote online.";
       } else {
-        patch.products = Array.from(new Set(v as string[]));
+        patch.quoteTypes = QUOTE_TYPE_KEYS.filter((t) => (v as string[]).includes(t));
       }
       continue;
     }
@@ -194,8 +197,35 @@ export function shopPageChanges(form: ShopPageValues, loaded: ShopPageValues): R
       out[k] = String(a ?? "");
     }
   }
-  if (JSON.stringify(form.products) !== JSON.stringify(loaded.products)) out.products = form.products;
+  const ft = QUOTE_TYPE_KEYS.filter((t) => form.quoteTypes.includes(t));
+  if (JSON.stringify(ft) !== JSON.stringify(QUOTE_TYPE_KEYS.filter((t) => loaded.quoteTypes.includes(t)))) out.quoteTypes = ft;
   const fs = normStats(form.stats);
   if (JSON.stringify(fs) !== JSON.stringify(normStats(loaded.stats))) out.stats = fs;
+  return out;
+}
+
+/** Step 47: is each kind of pricing set up? (from app/lib/onboarding.ts pricingReady) */
+export type PricingReady = { materials: boolean; foam_rates: boolean; corrugated: boolean };
+
+export type PricingWarning = { text: string; href: string; link: string };
+
+/**
+ * Step 47: what still needs prices for the quote types picked. A type can be
+ * turned on before it's priced (quotes then use the catalog / default rates
+ * and are flagged for review); these notes say what to set up.
+ */
+export function pricingWarnings(types: QuoteTypeKey[], ready: PricingReady): PricingWarning[] {
+  const foam = types.includes("foam_insert") || types.includes("complete_pack");
+  const boxes = types.includes("boxes_only") || types.includes("complete_pack");
+  const out: PricingWarning[] = [];
+  if (foam && !ready.materials) {
+    out.push({ text: "Foam quotes use the catalog material prices until you set your own.", href: "/admin/materials", link: "Pricing → Foam materials" });
+  }
+  if (foam && !ready.foam_rates) {
+    out.push({ text: "No foam cutting rates yet, so cutting isn't priced from your costs.", href: "/admin/settings/foam", link: "Pricing → Foam cutting rates" });
+  }
+  if (boxes && !ready.corrugated) {
+    out.push({ text: "No board prices or converting rate yet, so boxes can't be priced from your costs.", href: "/admin/corrugated", link: "Pricing → Corrugated boxes" });
+  }
   return out;
 }

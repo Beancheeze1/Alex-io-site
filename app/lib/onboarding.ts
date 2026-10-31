@@ -65,6 +65,25 @@ export async function loadChecklist(tenantId: number): Promise<{ checklist: Chec
   return { checklist: checklist(signals, new Set(marked.map((m) => m.step)), t.slug, scope), slug: t.slug };
 }
 
+/**
+ * Step 47: is each kind of pricing set up for the shop? (Same tests as the
+ * setup checklist's materials / foam rates / corrugated steps.) Never throws:
+ * anything it can't read counts as not set up.
+ */
+export async function pricingReady(tenantId: number): Promise<{ materials: boolean; foam_rates: boolean; corrugated: boolean }> {
+  const [settings, corr, mat] = await Promise.all([
+    getPricingSettings(tenantId).catch(() => null),
+    loadCorrugated(tenantId).catch(() => null),
+    one<{ n: number }>(`SELECT count(*)::int AS n FROM public.tenant_material_prices WHERE tenant_id = $1`, [tenantId]).catch(() => null),
+  ]);
+  const s = (settings || {}) as Record<string, unknown>;
+  return {
+    materials: (Number(mat?.n) || 0) > 0,
+    foam_rates: pos(s.cnc_cost_per_min) || pos(s.press_rate_per_hr) || pos(s.die_base_usd),
+    corrugated: !!corr && corr.grades.some((g) => pos(g.cost_per_msf)) && pos(corr.settings.converting_per_m),
+  };
+}
+
 export async function markStep(tenantId: number, step: string, done: boolean, by: string): Promise<void> {
   if (done) {
     await q(

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { QUOTE_TYPE_KEYS, QUOTE_TYPE_LABELS, quoteTypesFromTheme, type QuoteTypeKey } from "@/lib/quote-types";
 import { mergeChanged } from "@/lib/merge-edits"; // Step 44h
+import { PRODUCT_INFO, productsForQuoteTypes } from "@/lib/tenant-products"; // Step 47
 
 type Tenant = {
   id: number;
@@ -719,6 +720,7 @@ export default function TenantsPage() {
                         <div className="text-[11px] text-[var(--text-faint)]">
                           One list for buyers, reps and admins. Unchecked types disappear from Start Quote, the rep form
                           and &quot;Skip to blank editor&quot;, and the server refuses new quotes of that type. Existing quotes are not changed.
+                          The shop&apos;s product tiles follow this list, and the shop&apos;s admins can change it on Shop settings → Shop page.
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-x-5 gap-y-2">
@@ -779,28 +781,13 @@ export default function TenantsPage() {
                         </label>
                       ))}
 
-                      <div className="space-y-1">
+                      {/* Step 47: the tiles follow the quote types above (no separate list) */}
+                      <div className="space-y-1" data-tenant-tiles>
                         <div className="text-xs text-[var(--text-muted)]">
-                          Products shown under “What you can quote online” (Displays is added on its own when the shop offers
-                          Boxes and Displays quotes)
+                          Products shown under “What you can quote online” (they follow the quote types above):
                         </div>
-                        <div className="flex flex-wrap gap-x-5 gap-y-2">
-                          {PRODUCT_OPTIONS.map((p) => (
-                            <label key={p.key} className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                              <input
-                                type="checkbox"
-                                checked={s.products.includes(p.key)}
-                                onChange={(e) =>
-                                  updateEdit(t.id, {
-                                    products: e.target.checked
-                                      ? [...s.products.filter((x) => x !== p.key), p.key]
-                                      : s.products.filter((x) => x !== p.key),
-                                  })
-                                }
-                              />
-                              {p.label}
-                            </label>
-                          ))}
+                        <div className="text-xs text-[var(--text-secondary)]">
+                          {productsForQuoteTypes(s.quoteTypes).map((k) => PRODUCT_INFO[k].label).join(" · ") || "None"}
                         </div>
                       </div>
 

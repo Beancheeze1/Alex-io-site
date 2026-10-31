@@ -22,6 +22,21 @@ export const PRODUCT_INFO: Record<ProductKey, { label: string; desc: string }> =
 };
 
 /**
+ * Step 47: the product tiles follow what the shop actually quotes online, so a
+ * tile never promises something the shop's quote form can't do:
+ *   Foam insert -> Foam inserts; Complete Pack -> Foam-in-box kits;
+ *   Boxes and Displays -> Corrugated boxes, Printed packaging, Die-cut
+ *   mailers, Displays. In the page's tile order. Pure.
+ */
+export function productsForQuoteTypes(types: QuoteTypeKey[]): ProductKey[] {
+  const on = new Set<ProductKey>();
+  if (types.includes("boxes_only")) ["rsc", "printed", "mailer", "display"].forEach((k) => on.add(k as ProductKey));
+  if (types.includes("foam_insert")) on.add("foam");
+  if (types.includes("complete_pack")) on.add("kit");
+  return PRODUCT_KEYS.filter((k) => on.has(k));
+}
+
+/**
  * Step 42: the shop's products with "Displays" added when it offers Boxes and
  * Displays quotes (after its box tiles). A shop with no products listed keeps
  * the section hidden. Pure.

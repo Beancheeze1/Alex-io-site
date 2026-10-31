@@ -6,6 +6,9 @@
 // different field is never undone. Each field says where it shows on the page.
 // Step 46: "Upload a file" for the logo and banner photo (saved right away,
 // POST /api/admin/shop-page/upload).
+// Step 47: "What buyers can quote online" sets the shop's quote types (the
+// quoting tools and the page's product tiles), with notes on what still needs
+// prices.
 
 "use client";
 
@@ -13,19 +16,22 @@ import * as React from "react";
 import {
   REQUIRED_PAIR_NOTE,
   SHOP_PAGE_FIELDS,
-  SHOP_PAGE_PRODUCTS,
+  pricingWarnings,
+  type PricingReady,
   STAT_MAX,
   shopPageChanges,
   type ShopPageValues,
   type ShopStat,
 } from "@/lib/shop-page-edit";
-import { PRODUCT_INFO, type ProductKey } from "@/lib/tenant-products";
+import { PRODUCT_INFO, productsForQuoteTypes } from "@/lib/tenant-products";
+import { QUOTE_TYPE_KEYS, QUOTE_TYPE_LABELS } from "@/lib/quote-types";
+import { useRouter } from "next/navigation";
 
 type Loaded = {
   slug: string;
   brandName: string;
   page_url: string;
-  quote_displays: boolean;
+  pricing: PricingReady; // Step 47
   values: ShopPageValues;
 };
 
@@ -74,6 +80,7 @@ function Field({
 }
 
 export default function ShopPageEditor() {
+  const router = useRouter(); // Step 47
   const [loaded, setLoaded] = React.useState<Loaded | null>(null);
   const [form, setForm] = React.useState<ShopPageValues | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -272,6 +279,8 @@ export default function ShopPageEditor() {
       }
       apply(j as Loaded);
       setMsg({ ok: true, text: "Saved. Your page shows the changes now." });
+      // Step 47: the admin menus follow the quote types (e.g. foam pricing pages)
+      if ("quoteTypes" in changes) router.refresh();
     } catch {
       setMsg({ ok: false, text: "Couldn't save. Nothing was changed." });
     } finally {
@@ -279,9 +288,8 @@ export default function ShopPageEditor() {
     }
   };
 
-  const productsHint = loaded.quote_displays
-    ? "Displays is added on its own, because your shop quotes Boxes and Displays."
-    : "Pick none to hide this section.";
+  // Step 47: what still needs prices for the quote types picked
+  const warnings = pricingWarnings(form.quoteTypes, loaded.pricing);
 
   return (
     <div data-shop-page-editor>
@@ -326,24 +334,57 @@ export default function ShopPageEditor() {
         {text("quoteScope", { placeholder: "standard box styles and mailers", hint: "Used in the Quote online card: \"Build a quote for … yourself.\"" })}
       </Section>
 
-      <Section title="What you can quote online" where="A row of product tiles under the cards.">
-        <Field label="Product tiles" hint={productsHint} error={errors.products}>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {SHOP_PAGE_PRODUCTS.map((k) => (
-              <label key={k} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+      <Section
+        title="What buyers can quote online"
+        where="Turns your quoting tools on or off (the quote forms, the chat and the editor), and sets the product tiles under the cards on your page."
+      >
+        <Field label="Quote types" error={errors.quoteTypes}>
+          <div className="space-y-2">
+            {QUOTE_TYPE_KEYS.map((k) => (
+              <label key={k} className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
                 <input
                   type="checkbox"
-                  checked={form.products.includes(k)}
+                  checked={form.quoteTypes.includes(k)}
                   onChange={(e) =>
-                    set("products", e.target.checked ? [...form.products.filter((p) => p !== k), k] : form.products.filter((p) => p !== k))
+                    set(
+                      "quoteTypes",
+                      e.target.checked ? [...form.quoteTypes.filter((t) => t !== k), k] : form.quoteTypes.filter((t) => t !== k),
+                    )
                   }
-                  data-shop-page-product={k}
+                  className="mt-0.5"
+                  data-shop-page-quote-type={k}
                 />
-                {PRODUCT_INFO[k as ProductKey].label}
+                <span>
+                  <span className="font-medium text-[var(--text-primary)]">{QUOTE_TYPE_LABELS[k]}</span>
+                  <span className="block text-xs text-[var(--text-muted)]">
+                    Tiles: {productsForQuoteTypes([k]).map((p) => PRODUCT_INFO[p].label).join(", ")}
+                  </span>
+                </span>
               </label>
             ))}
           </div>
         </Field>
+        {form.quoteTypes.length === 0 ? (
+          <div className="text-xs font-medium text-[var(--attention)]" data-shop-page-types-none>
+            Pick at least one, or buyers can&apos;t quote anything online.
+          </div>
+        ) : null}
+        {warnings.length ? (
+          <ul className="space-y-1 rounded-lg border border-[var(--attention-border)] bg-[var(--attention-bg)] px-3 py-2 text-xs text-[var(--attention)]" data-shop-page-pricing-warnings>
+            {warnings.map((w) => (
+              <li key={w.href}>
+                {w.text}{" "}
+                <a href={w.href} className="font-medium underline">
+                  {w.link}
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="text-xs text-[var(--text-muted)]">
+          Turning a type off hides it from your quote forms and stops new quotes of that type. Quotes you already have
+          aren&apos;t changed.
+        </div>
       </Section>
 
       <Section title="About" where={`The About ${loaded.brandName} section: your text on the left, up to 4 stats in a box on the right.`}>

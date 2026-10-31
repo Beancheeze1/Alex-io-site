@@ -7,10 +7,10 @@
 
 import { one } from "@/lib/db";
 import { quoteTypesFromTheme } from "@/lib/quote-types";
-import { PRODUCT_KEYS, withDisplayProduct, type ProductKey } from "@/lib/tenant-products";
+import { productsForQuoteTypes, type ProductKey } from "@/lib/tenant-products";
 
 // Step 42: the product tiles live in lib/tenant-products.ts (pure, tested).
-export { PRODUCT_KEYS, PRODUCT_INFO, withDisplayProduct, type ProductKey } from "@/lib/tenant-products";
+export { PRODUCT_KEYS, PRODUCT_INFO, withDisplayProduct, productsForQuoteTypes, type ProductKey } from "@/lib/tenant-products";
 
 export type TenantStat = { label: string; value: string };
 
@@ -158,15 +158,8 @@ export async function loadTenantPage(slugRaw: string): Promise<TenantPage | null
   const websiteUrl = safeUrl(th.websiteUrl);
   const phone = str(th.phone, 40);
 
-  const products: ProductKey[] = Array.isArray(th.products)
-    ? Array.from(
-        new Set(
-          (th.products as unknown[]).filter(
-            (k): k is ProductKey => typeof k === "string" && (PRODUCT_KEYS as readonly string[]).includes(k),
-          ),
-        ),
-      )
-    : [];
+  // Step 47: the tiles follow the shop's quote types (theme_json.products is no longer used)
+  const products: ProductKey[] = productsForQuoteTypes(quoteTypesFromTheme(th));
 
   const stats: TenantStat[] = Array.isArray(th.stats)
     ? (th.stats as unknown[])
@@ -207,7 +200,7 @@ export async function loadTenantPage(slugRaw: string): Promise<TenantPage | null
       str(th.quoteIntro, 300) ||
       `Price ${quoteScope} online any time, or talk to our team about anything custom.`,
     quoteScope,
-    products: withDisplayProduct(products, quoteTypesFromTheme(th)), // Step 42
+    products, // Step 47
     aboutText: str(th.aboutText, 1200),
     stats,
   };

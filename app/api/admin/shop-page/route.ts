@@ -3,7 +3,9 @@
 // Step 45: Shop settings → Shop page. A shop's admins read and change their
 // own Quotes & ordering page (logo, colors, banner, intro, About, stats,
 // products, contact, chat widget) — the fields in lib/shop-page-edit.ts.
-//   GET  -> { ok, slug, name, brandName, page_url, quote_displays, values }
+//   GET  -> { ok, slug, name, brandName, page_url, pricing, values }
+//        (Step 47: values.quoteTypes = what buyers can quote online; pricing =
+//        which kinds of pricing are set up, for the notes on the screen)
 //   POST { changes } -> saves only the fields sent, merged into the shop's
 //        saved theme in one UPDATE (so two people saving different fields
 //        never undo each other), -> { ok, values, ignored }
@@ -14,7 +16,7 @@ import { one } from "@/lib/db";
 import { getCurrentUserFromRequest } from "@/lib/auth";
 import { enforceTenantMatch } from "@/lib/tenant-enforce";
 import { cleanShopPagePatch, shopPageUrl, shopPageValues } from "@/lib/shop-page-edit";
-import { quoteTypesFromTheme } from "@/lib/quote-types";
+import { pricingReady } from "@/app/lib/onboarding";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,15 +40,14 @@ async function guard(req: NextRequest) {
   return { tenantId };
 }
 
-function view(row: Row) {
+async function view(row: Row) {
   const th = row.theme_json && typeof row.theme_json === "object" ? (row.theme_json as Record<string, unknown>) : {};
   return {
     slug: row.slug,
     name: row.name || "",
     brandName: typeof th.brandName === "string" && th.brandName.trim() ? th.brandName.trim() : row.name || row.slug,
     page_url: shopPageUrl(row.slug),
-    // the Displays tile shows on its own for shops that quote Boxes and Displays
-    quote_displays: quoteTypesFromTheme(th).includes("boxes_only"),
+    pricing: await pricingReady(row.id).catch(() => ({ materials: false, foam_rates: false, corrugated: false })),
     values: shopPageValues(th),
   };
 }
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
   if ("res" in g) return g.res;
   const row = await one<Row>(`SELECT id, slug, name, theme_json FROM public.tenants WHERE id = $1`, [g.tenantId]);
   if (!row) return json({ ok: false, error: "NOT_FOUND" }, 404);
-  return json({ ok: true, ...view(row) });
+  return json({ ok: true, ...(await view(row)) });
 }
 
 export async function POST(req: NextRequest) {
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (Object.keys(cleaned.patch).length === 0) {
     const row = await one<Row>(`SELECT id, slug, name, theme_json FROM public.tenants WHERE id = $1`, [g.tenantId]);
     if (!row) return json({ ok: false, error: "NOT_FOUND" }, 404);
-    return json({ ok: true, ...view(row), ignored: cleaned.ignored, changed: [] });
+    return json({ ok: true, ...(await view(row)), ignored: cleaned.ignored, changed: [] });
   }
   const row = await one<Row>(
     `UPDATE public.tenants
@@ -80,5 +81,5 @@ export async function POST(req: NextRequest) {
     [g.tenantId, JSON.stringify(cleaned.patch)],
   );
   if (!row) return json({ ok: false, error: "NOT_FOUND" }, 404);
-  return json({ ok: true, ...view(row), ignored: cleaned.ignored, changed: Object.keys(cleaned.patch) });
+  return json({ ok: true, ...(await view(row)), ignored: cleaned.ignored, changed: Object.keys(cleaned.patch) });
 }
