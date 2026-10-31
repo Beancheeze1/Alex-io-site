@@ -44,7 +44,8 @@ const none: Signals = {
   check("checklist: 9 steps", c.total, 9);
   check("checklist: nothing done", c.done, 0);
   check("checklist: not complete", c.complete, false);
-  check("checklist: slug in shop page href", c.items[0].href, "/t/acme");
+  check("checklist: slug in test quote href", c.items.find((i) => i.key === "test_quote")?.href, "/t/acme");
+  check("checklist: shop page step opens Shop settings → Shop page (Step 45)", c.items.find((i) => i.key === "shop_page")?.href, "/admin/shop-page");
   check("checklist: admin href unchanged", c.items.find((i) => i.key === "materials")?.href, "/admin/materials");
   check("checklist: how null when open", c.items[0].how, null);
 }
@@ -90,9 +91,9 @@ const none: Signals = {
 }
 {
   const c = checklist(none, new Set(), "");
-  check("checklist: empty slug -> default", c.items[0].href, "/t/default");
+  check("checklist: empty slug -> default", c.items.find((i) => i.key === "test_quote")?.href, "/t/default");
   const c2 = checklist(none, new Set(), "a b");
-  check("checklist: slug encoded", c2.items[0].href, "/t/a%20b");
+  check("checklist: slug encoded", c2.items.find((i) => i.key === "test_quote")?.href, "/t/a%20b");
 }
 
 // ---- step keys

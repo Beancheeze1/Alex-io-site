@@ -33,8 +33,8 @@ export const STEPS: readonly StepDef[] = [
   {
     key: "shop_page",
     label: "Your shop page",
-    detail: "Logo, colors and contact details on your Quotes & ordering page. Alex-IO sets this up with you: send your logo, brand colors, phone and email.",
-    href: "/t/{slug}",
+    detail: "Logo, colors and contact details on your Quotes & ordering page (Shop settings → Shop page).",
+    href: "/admin/shop-page", // Step 45
     manual: null,
   },
   {

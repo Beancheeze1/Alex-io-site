@@ -117,6 +117,7 @@ export default async function AdminLayout({ children }: Props) {
           items: [
             { href: "/admin/team", label: "Team & users" },
             { href: "/admin/settings/terms", label: "Quote terms & buyer emails" },
+            { href: "/admin/shop-page", label: "Shop page" }, // Step 45
             { href: "/admin/website", label: "Website & chat widget" },
             { href: "/admin/get-started", label: "Setup checklist" },
             { href: "/admin/cleanup", label: "Data cleanup" },

@@ -105,7 +105,7 @@ export default function EmbedSnippetCard({
               type="button"
               onClick={() => landingChatEnabled && setMode("chat")}
               disabled={!landingChatEnabled}
-              title={landingChatEnabled ? undefined : "Enable landing chat for this tenant first (owner-managed, /admin/tenants)."}
+              title={landingChatEnabled ? undefined : "Turn on the chat widget first (Shop settings → Shop page)."}
               className={[
                 "rounded-full px-3 py-1 text-[11px] font-medium",
                 !landingChatEnabled
