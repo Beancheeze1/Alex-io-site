@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { QUOTE_TYPE_KEYS, QUOTE_TYPE_LABELS, quoteTypesFromTheme, type QuoteTypeKey } from "@/lib/quote-types";
+import { mergeChanged } from "@/lib/merge-edits"; // Step 44h
 
 type Tenant = {
   id: number;
@@ -13,7 +14,7 @@ type Tenant = {
   created_at?: string;
 };
 
-type EditState = {
+type EditState = Record<string, unknown> & {
   name: string;
   active: boolean;
   plan: string;
@@ -109,6 +110,36 @@ function getThemeStats(theme: any): { label: string; value: string }[] {
   return rows;
 }
 
+/** Step 44h: the form's values for one shop, read from its saved theme. */
+function editFromTenant(t: Tenant): EditState {
+  return {
+    name: t.name || "",
+    active: !!t.active,
+    plan: t.plan || "pro",
+    brandName: getThemeField(t.theme_json, "brandName"),
+    primaryColor: getThemeField(t.theme_json, "primaryColor"),
+    secondaryColor: getThemeField(t.theme_json, "secondaryColor"),
+    logoUrl: getThemeField(t.theme_json, "logoUrl"),
+    landingChatEnabled: getThemeBool(t.theme_json, "landingChatEnabled"),
+    heroUseLogo: getThemeBool(t.theme_json, "heroUseLogo"),
+    ...(Object.fromEntries(
+      PAGE_TEXT_FIELDS.map((k) => [k, getThemeField(t.theme_json, k)]),
+    ) as Record<PageTextField, string>),
+    products: getThemeProducts(t.theme_json),
+    stats: getThemeStats(t.theme_json),
+    quoteTypes: quoteTypesFromTheme(t.theme_json),
+    saving: false,
+    error: null,
+    ok: false,
+  };
+}
+
+// Step 44h: the fields the form edits (not its saving / error / ok flags)
+const FORM_KEYS = [
+  "name", "active", "plan", "brandName", "primaryColor", "secondaryColor", "logoUrl",
+  "landingChatEnabled", "heroUseLogo", ...PAGE_TEXT_FIELDS, "products", "stats", "quoteTypes",
+] as const satisfies readonly (keyof EditState)[];
+
 function pagePatch(k: PageTextField, v: string): Partial<EditState> {
   const p: Partial<EditState> = {};
   p[k] = v;
@@ -199,6 +230,8 @@ function canWriteTenantsEmail(email: string | null | undefined): boolean {
 export default function TenantsPage() {
   const [tenants, setTenants] = React.useState<Tenant[]>([]);
   const [edit, setEdit] = React.useState<Record<number, EditState>>({});
+  // Step 44h: each shop's values as loaded into the form (to save only what changed)
+  const loadedRef = React.useRef<Record<number, EditState>>({});
   const [authLoading, setAuthLoading] = React.useState(true);
   const [authedEmail, setAuthedEmail] = React.useState<string | null>(null);
 
@@ -248,29 +281,8 @@ export default function TenantsPage() {
         const next = { ...prev };
         for (const t of list) {
           if (!next[t.id]) {
-            next[t.id] = {
-              name: t.name || "",
-              active: !!t.active,
-              plan: t.plan || "pro",
-              brandName: getThemeField(t.theme_json, "brandName"),
-              primaryColor: getThemeField(t.theme_json, "primaryColor"),
-              secondaryColor: getThemeField(t.theme_json, "secondaryColor"),
-              logoUrl: getThemeField(t.theme_json, "logoUrl"),
-              landingChatEnabled: getThemeBool(
-                t.theme_json,
-                "landingChatEnabled",
-              ),
-              heroUseLogo: getThemeBool(t.theme_json, "heroUseLogo"),
-              ...(Object.fromEntries(
-                PAGE_TEXT_FIELDS.map((k) => [k, getThemeField(t.theme_json, k)]),
-              ) as Record<PageTextField, string>),
-              products: getThemeProducts(t.theme_json),
-              stats: getThemeStats(t.theme_json),
-              quoteTypes: quoteTypesFromTheme(t.theme_json),
-              saving: false,
-              error: null,
-              ok: false,
-            };
+            next[t.id] = editFromTenant(t);
+            loadedRef.current[t.id] = editFromTenant(t);
           }
         }
         return next;
@@ -340,26 +352,42 @@ export default function TenantsPage() {
       return;
     }
 
-    const existing = tenants.find((x) => x.id === id)?.theme_json;
+    // Step 44h: read the shop's latest saved values and keep every field this
+    // form didn't change (someone may have saved it since this page loaded).
+    let latestTenant: Tenant | undefined;
+    try {
+      const fresh = await fetch("/api/admin/tenants", { cache: "no-store" }).then((r) => r.json());
+      latestTenant = Array.isArray(fresh?.tenants) ? (fresh.tenants as Tenant[]).find((x) => x.id === id) : undefined;
+    } catch {
+      latestTenant = undefined;
+    }
+    if (!latestTenant) {
+      updateEdit(id, { saving: false, error: "Couldn't read this shop's latest settings. Nothing was saved; try again." });
+      return;
+    }
+    const loadedState = loadedRef.current[id] ?? editFromTenant(latestTenant);
+    const merged = mergeChanged(s, loadedState, editFromTenant(latestTenant), FORM_KEYS);
+
+    const existing = latestTenant.theme_json;
     const existingTheme =
       existing && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
 
     const pageFields = Object.fromEntries(
-      PAGE_TEXT_FIELDS.map((k) => [k, String(s[k] || "").trim()]),
+      PAGE_TEXT_FIELDS.map((k) => [k, String(merged[k] || "").trim()]),
     );
 
     const theme_json = {
       ...existingTheme,
-      brandName: s.brandName,
-      primaryColor: s.primaryColor,
-      secondaryColor: s.secondaryColor,
-      logoUrl: s.logoUrl,
-      landingChatEnabled: !!s.landingChatEnabled,
-      heroUseLogo: !!s.heroUseLogo,
+      brandName: merged.brandName,
+      primaryColor: merged.primaryColor,
+      secondaryColor: merged.secondaryColor,
+      logoUrl: merged.logoUrl,
+      landingChatEnabled: !!merged.landingChatEnabled,
+      heroUseLogo: !!merged.heroUseLogo,
       ...pageFields,
-      products: s.products,
-      quoteTypes: QUOTE_TYPE_KEYS.filter((k) => s.quoteTypes.includes(k)),
-      stats: s.stats
+      products: merged.products,
+      quoteTypes: QUOTE_TYPE_KEYS.filter((k) => merged.quoteTypes.includes(k)),
+      stats: merged.stats
         .map((st) => ({ label: st.label.trim(), value: st.value.trim() }))
         .filter((st) => st.label && st.value)
         .slice(0, 4),
@@ -369,9 +397,9 @@ export default function TenantsPage() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: s.name,
-        active: s.active,
-        plan: s.plan, // was never sent before — the plan dropdown silently didn't save
+        name: merged.name,
+        active: merged.active,
+        plan: merged.plan, // was never sent before — the plan dropdown silently didn't save
         theme_json,
       }),
     });
@@ -379,7 +407,10 @@ export default function TenantsPage() {
     const json = await res.json();
 
     if (json?.ok) {
-      updateEdit(id, { saving: false, ok: true, error: null });
+      // Step 44h: the form now shows exactly what was saved
+      const saved = (json?.tenant as Tenant | undefined) ?? { ...latestTenant, name: merged.name, active: merged.active, plan: merged.plan, theme_json };
+      loadedRef.current[id] = editFromTenant(saved);
+      updateEdit(id, { ...editFromTenant(saved), saving: false, ok: true, error: null });
       await load();
       return;
     }

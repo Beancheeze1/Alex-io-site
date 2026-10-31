@@ -38,6 +38,7 @@
   "test:foam-drawing": "npx --yes tsx scripts/test-foam-drawing.ts",
   "test:drawing-pdf": "npx --yes tsx scripts/test-drawing-pdf.ts",
   "test:editor-box": "npx --yes tsx scripts/test-editor-box.ts",
+  "test:merge-edits": "npx --yes tsx scripts/test-merge-edits.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },
