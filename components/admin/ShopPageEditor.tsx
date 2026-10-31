@@ -4,6 +4,8 @@
 // GET /api/admin/shop-page and saves only the fields changed here
 // (POST /api/admin/shop-page { changes }), so another admin's change to a
 // different field is never undone. Each field says where it shows on the page.
+// Step 46: "Upload a file" for the logo and banner photo (saved right away,
+// POST /api/admin/shop-page/upload).
 
 "use client";
 
@@ -78,6 +80,7 @@ export default function ShopPageEditor() {
   const [saving, setSaving] = React.useState(false);
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
+  const [uploading, setUploading] = React.useState<"logo" | "banner" | null>(null); // Step 46
 
   const apply = (j: Loaded) => {
     setLoaded(j);
@@ -196,6 +199,60 @@ export default function ShopPageEditor() {
     </label>
   );
 
+  // Step 46: upload a logo / banner file. It's saved right away and the field
+  // shows the file's address (not counted as an unsaved change).
+  const upload = async (kind: "logo" | "banner", file: File | null) => {
+    if (!file) return;
+    const field = kind === "logo" ? "logoUrl" : "heroImageUrl";
+    setUploading(kind);
+    setMsg(null);
+    setErrors((e) => ({ ...e, [field]: "" }));
+    try {
+      const fd = new FormData();
+      fd.set("kind", kind);
+      fd.set("file", file);
+      const res = await fetch("/api/admin/shop-page/upload", { method: "POST", body: fd });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        setErrors((e) => ({ ...e, [field]: j?.message || "Couldn't upload that file." }));
+        return;
+      }
+      const url = String(j.url);
+      setLoaded((l) => (l ? { ...l, values: { ...l.values, [field]: url } } : l));
+      setForm((f) => (f ? { ...f, [field]: url } : f));
+      setMsg({ ok: true, text: kind === "logo" ? "Logo uploaded and saved." : "Banner photo uploaded and saved." });
+    } catch {
+      setErrors((e) => ({ ...e, [field]: "Couldn't upload that file." }));
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const uploadButton = (kind: "logo" | "banner") => (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+      <label
+        className={`inline-flex cursor-pointer items-center rounded-md border border-[var(--border-strong)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)] ${uploading ? "pointer-events-none opacity-60" : ""}`}
+      >
+        {uploading === kind ? "Uploading…" : kind === "logo" ? "Upload a logo file" : "Upload a photo"}
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="sr-only"
+          disabled={!!uploading}
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null;
+            e.target.value = "";
+            void upload(kind, f);
+          }}
+          data-shop-page-upload={kind}
+        />
+      </label>
+      <span>
+        {kind === "logo" ? "PNG, JPG or WebP up to 1 MB. A square or wide logo with a transparent background looks best." : "PNG, JPG or WebP up to 6 MB, at least 1600 px wide."} Saved as soon as it uploads.
+      </span>
+    </div>
+  );
+
   const save = async () => {
     if (!dirty || saving) return;
     setSaving(true);
@@ -245,7 +302,8 @@ export default function ShopPageEditor() {
       </div>
 
       <Section title="Header and colors" where="The top of every section of your page: the bar, the header with your name or logo, the buttons and the footer.">
-        {text("logoUrl", { placeholder: "https://…/logo.png", hint: "A link to your logo image (PNG or SVG)." })}
+        {text("logoUrl", { placeholder: "https://…/logo.png", hint: "Upload your logo below, or paste a link to it." })}
+        {uploadButton("logo")}
         {form.logoUrl && /^https?:\/\//i.test(form.logoUrl) ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={form.logoUrl} alt="Logo preview" className="h-11 w-auto max-w-[220px] rounded border border-[var(--border)] bg-white object-contain p-1" />
@@ -257,7 +315,8 @@ export default function ShopPageEditor() {
       </Section>
 
       <Section title="Banner" where="The big area at the top with the Quotes & ordering headline.">
-        {text("heroImageUrl", { placeholder: "https://…/plant.jpg", hint: "A wide photo (your plant or shop floor). It's shown with a dark fade so the headline stays readable." })}
+        {text("heroImageUrl", { placeholder: "https://…/plant.jpg", hint: "A wide photo (your plant or shop floor), shown with a dark fade so the headline stays readable. Upload it below, or paste a link." })}
+        {uploadButton("banner")}
         {form.heroImageUrl && /^https?:\/\//i.test(form.heroImageUrl) ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={form.heroImageUrl} alt="Banner preview" className="h-24 w-full rounded border border-[var(--border)] object-cover" />
