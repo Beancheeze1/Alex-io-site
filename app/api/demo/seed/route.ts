@@ -14,7 +14,9 @@
 //
 // What it does NOT do:
 //   - No session/auth check (this is a public entry point)
-//   - No email sending
+//   - No email to the visitor. Step 48: one internal alert email to sales
+//     (DEMO_ALERT_TO, default chuck@alex-io.com) so demo quotes no longer
+//     arrive silently; skipped for signed-in staff.
 //   - No webhook calls
 //   - No pricing engine calls (editor does that on load)
 //
@@ -27,6 +29,8 @@ import { saveFacts } from "@/app/lib/memory";
 import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { resolveDemoMaterial } from "@/lib/demo-material";
 import { buildQuoteNo } from "@/lib/quote-no";
+import { buildDemoAlert } from "@/lib/demo-alert";
+import { sendSalesEmail } from "@/lib/sales-mail";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,6 +84,9 @@ type DemoSeedBody = {
   printed?: boolean | null;
   // Source tag (widget vs form)
   source?: string;
+  // Step 48: where the visitor came from (sent by the landing page)
+  referrer?: string;
+  utmSource?: string;
 };
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -270,6 +277,36 @@ export async function POST(req: NextRequest) {
     };
 
     await saveFacts(quoteNo, facts);
+
+    // ── Step 48: tell sales a demo quote was started ────────────────────────
+    // Fire-and-forget: the visitor's redirect never waits on (or fails
+    // because of) the email. Signed-in staff testing the demo are skipped.
+    if (!req.cookies.get("alexio_session")?.value) {
+      const alertTo = (process.env.DEMO_ALERT_TO || "chuck@alex-io.com").trim();
+      if (alertTo) {
+        const alert = buildDemoAlert({
+          quoteNo,
+          L,
+          W,
+          H,
+          qty,
+          shipMode,
+          materialName,
+          printed: body.printed === true,
+          customerName: String(body.customerName ?? "").trim().slice(0, 200),
+          customerEmail: String(body.customerEmail ?? "").trim().slice(0, 200),
+          company: String(body.company ?? "").trim().slice(0, 200),
+          notes: String(body.notes ?? "").trim().slice(0, 500),
+          source: String(body.source ?? "landing-demo").slice(0, 60),
+          referrer: String(body.utmSource || body.referrer || "").slice(0, 300),
+          adminBase: "https://api.alex-io.com",
+          when: new Date(),
+        });
+        void sendSalesEmail({ to: alertTo, ...alert }).catch((err: unknown) =>
+          console.error("[demo/seed] alert email failed:", err instanceof Error ? err.message : err),
+        );
+      }
+    }
 
     // ── Build editor URL — mirrors StartQuoteModal.onLaunchEditor() exactly ──
     //

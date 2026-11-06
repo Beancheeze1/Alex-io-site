@@ -126,6 +126,21 @@ function MiniCard({ title, body }: { title: string; body: string }) {
   );
 }
 
+// ── Entry source (Step 48) ────────────────────────────────────────────────────
+// Where this visitor came from, sent with the demo quote so the sales alert
+// can say "via chatgpt.com". document.referrer is the page that linked here
+// (it survives the alex-io.com redirect); utm_source wins when present.
+function entrySource(): { referrer: string; utmSource: string } {
+  if (typeof window === "undefined") return { referrer: "", utmSource: "" };
+  let utmSource = "";
+  try {
+    utmSource = new URLSearchParams(window.location.search).get("utm_source") || "";
+  } catch {
+    utmSource = "";
+  }
+  return { referrer: (document.referrer || "").slice(0, 300), utmSource: utmSource.slice(0, 60) };
+}
+
 // ── FAQ ───────────────────────────────────────────────────────────────────────
 
 const FAQ_ITEMS = [
@@ -152,6 +167,19 @@ const FAQ_ITEMS = [
   {
     q: "Do I have to sign a long-term contract?",
     a: "No. Plans are month-to-month. Cancel anytime.",
+  },
+  // Step 48: questions in the words a shop owner searches with
+  {
+    q: "How can my customers get a foam or box price without calling us?",
+    a: "Alex-IO gives your shop its own quote page under your name and colors. Buyers enter sizes and quantities, or describe the job in a chat, and get an instant price built from your costs and markup. Every online price is an estimate until your team confirms it.",
+  },
+  {
+    q: "Can buyers upload a DXF or PDF and get a price?",
+    a: "Yes. For corrugated, buyers or your staff upload a DXF or vector PDF die line; Alex-IO reads the cut and crease lines, splits multi-part displays into parts and prices each one. For foam, a DXF or PDF drawing opens in the layout editor with its cavities.",
+  },
+  {
+    q: "Does it quote corrugated boxes and displays, or only foam?",
+    a: "Both. Alex-IO quotes foam inserts, foam-in-box kits, corrugated boxes (RSC, HSC, FOL, die-cut mailers and trays, pads, partitions) and multi-part POP displays, using your board prices per MSF, print and die rates, and your choice of CAD cutting or a steel-rule die by quantity.",
   },
 ];
 
@@ -494,10 +522,24 @@ function OnboardingCalendar({ onClaim }: { onClaim: () => void }) {
 }
 
 function FaqSection() {
-  const [open, setOpen] = React.useState<number | null>(null);
+  // Step 48: native <details> so every answer is in the page HTML (search
+  // engines and AI search read it) while still opening on click.
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: FAQ_ITEMS.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: { "@type": "Answer", text: item.a },
+    })),
+  };
 
   return (
     <section className="relative z-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
+      />
       <div className="mx-auto max-w-7xl px-4 py-10 sm:py-12">
         <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-muted)]">
           Common questions
@@ -507,22 +549,16 @@ function FaqSection() {
         </h2>
         <div className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface-card)] overflow-hidden">
           {FAQ_ITEMS.map((item, i) => (
-            <div key={i}>
-              <button
-                onClick={() => setOpen(open === i ? null : i)}
-                className="flex w-full items-center justify-between px-6 py-5 text-left text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)] transition"
-              >
+            <details key={i} className="group">
+              <summary className="flex w-full cursor-pointer list-none items-center justify-between px-6 py-5 text-left text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)] transition [&::-webkit-details-marker]:hidden">
                 <span>{item.q}</span>
-                <span className="ml-4 shrink-0 text-[var(--text-muted)] text-lg leading-none">
-                  {open === i ? "−" : "+"}
-                </span>
-              </button>
-              {open === i && (
-                <div className="px-6 pb-5 text-sm leading-7 text-[var(--text-secondary)]">
-                  {item.a}
-                </div>
-              )}
-            </div>
+                <span className="ml-4 shrink-0 text-[var(--text-muted)] text-lg leading-none group-open:hidden">+</span>
+                <span className="ml-4 shrink-0 text-[var(--text-muted)] text-lg leading-none hidden group-open:inline">−</span>
+              </summary>
+              <div className="px-6 pb-5 text-sm leading-7 text-[var(--text-secondary)]">
+                {item.a}
+              </div>
+            </details>
           ))}
         </div>
       </div>
@@ -589,6 +625,7 @@ export default function LandingPage() {
           printed: false,
           customerName: "Sample Customer",
           source: "landing-sample",
+          ...entrySource(),
         }),
       })
       const data = await res.json()
@@ -627,6 +664,7 @@ export default function LandingPage() {
           pocketCount: "1",
           materialMode: "recommend",
           source: "landing-form",
+          ...entrySource(),
         }),
       });
       const data = await res.json().catch(() => ({ ok: false }));
