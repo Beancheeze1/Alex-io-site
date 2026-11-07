@@ -68,6 +68,7 @@ import { addEditGrant } from "@/lib/quote-edit";
 import { loadFacts, saveFacts } from "@/app/lib/memory";
 import { findOrCreateCustomer } from "@/app/lib/customers";
 import { fillAccountRep } from "@/app/lib/account-rep";
+import { setQuoteProjectName } from "@/app/lib/project-name"; // Step 50b
 import { parsePrintSpec, parseRunMethod, type PrintSpec } from "@/lib/corrugated-price";
 import { addAdminAlert } from "@/lib/admin-alerts";
 import { sendNewBoxQuoteEmail } from "@/app/lib/send-quote-email";
@@ -316,6 +317,11 @@ export async function POST(req: NextRequest) {
       );
       if (!quote) return bad("quote_exists", "That quote number is already in use. Please start again.", 409);
       createdQuoteHere = true;
+      // Step 50b: the buyer's project name (optional). The rep form saves its
+      // own through POST /api/quotes, so only a quote made here.
+      if (b.project_name != null && String(b.project_name).trim()) {
+        await setQuoteProjectName(Number(quote.id), tenantId, b.project_name);
+      }
     }
     cleanupQuoteId = quote.id;
 

@@ -79,6 +79,7 @@ export type TemplateLayoutLayer = {
 export type TemplateInput = {
   customerLine?: string | null;
   quoteNumber?: string | null;
+  projectName?: string | null; // Step 50b: "for {project}" in the opening line
   // Step 21: true = plain quote/layout links (previews shown to the caller),
   // not the buyer's private edit links.
   plainLinks?: boolean;
@@ -817,7 +818,7 @@ export function renderQuoteEmail(input: TemplateInput): string {
       <tr><td style="padding:24px">
         <h1 style="font-size:19px;line-height:1.3;margin:0 0 14px;color:#1c1c1a">Your quote is ready</h1>
         <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Hi ${name ? t(name) : "there"},</p>
-        <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Here is quote ${t(quoteNumber)}${rev ? ` (revision ${t(rev)})` : ""} from ${t(brand)}. Open it to see the full details, ${boxesOnly ? "compare quantities" : "change the layout"}, or accept it.</p>
+        <p style="font-size:14px;line-height:1.55;margin:0 0 12px;color:#33332f">Here is quote ${t(quoteNumber)}${rev ? ` (revision ${t(rev)})` : ""}${input.projectName ? ` for <strong data-quote-project>${t(input.projectName)}</strong>` : ""} from ${t(brand)}. Open it to see the full details, ${boxesOnly ? "compare quantities" : "change the layout"}, or accept it.</p>
         ${factRows ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 14px">${factRows}</table>` : ""}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px" data-quote-lines>
           ${rows.join("")}

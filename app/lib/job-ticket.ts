@@ -52,6 +52,7 @@ type QuoteRow = {
   po_number: string | null;
   is_rush: boolean | null;
   released_by: string | null;
+  project_name: string | null; // Step 50b
 };
 
 type ItemRow = {
@@ -101,7 +102,8 @@ async function loadQuote(quoteNo: string, tenantId: number): Promise<QuoteRow | 
   return one<QuoteRow>(
     `SELECT qq.id, qq.quote_no, qq.customer_name, qq.company, qq.email, qq.phone, qq.created_at,
             qq.locked, qq.locked_at, qq.po_number, qq.is_rush,
-            COALESCE(u.name, u.email) AS released_by
+            COALESCE(u.name, u.email) AS released_by,
+            to_jsonb(qq) ->> 'project_name' AS project_name
        FROM public.quotes qq
        LEFT JOIN public."users" u ON u.id = qq.updated_by_user_id
       WHERE qq.quote_no = $1 AND qq.tenant_id = $2
@@ -332,6 +334,7 @@ export async function buildJobTicket(quoteNo: string, tenantId: number): Promise
   const ticket: JobTicket = {
     shop: sender?.brand || "Alex-IO",
     quote_no: quote.quote_no,
+    project_name: quote.project_name || null,
     revision,
     created_at: iso(quote.created_at),
     released_at: iso(quote.locked_at),

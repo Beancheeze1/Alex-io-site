@@ -26,3 +26,12 @@ export function projectNameMatches(name: string | null | undefined, term: string
   const t = term.trim().toLowerCase();
   return !!t && !!name && name.toLowerCase().includes(t);
 }
+
+/**
+ * Step 50b: an email subject with the project name on the end:
+ * "Ashtonne: quote Q-A-123 – Spring endcap". No project name = unchanged.
+ */
+export function withProject(subject: string, name: string | null | undefined): string {
+  const p = cleanProjectName(name ?? null);
+  return p ? `${subject} – ${p}` : subject;
+}

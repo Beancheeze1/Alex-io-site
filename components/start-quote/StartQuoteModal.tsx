@@ -473,6 +473,8 @@ export default function StartQuoteModal({
   const [boEmail, setBoEmail] = React.useState<string>("");
   const [boCompany, setBoCompany] = React.useState<string>("");
   const [boPhone, setBoPhone] = React.useState<string>("");
+  // Step 50b: optional project name, saved on the quote (quotes.project_name).
+  const [boProject, setBoProject] = React.useState<string>("");
   const [boBusy, setBoBusy] = React.useState<boolean>(false);
   // Up to 3 more quantities to compare on the quote (Corrugated Step 5).
   const [boBreaks, setBoBreaks] = React.useState<string[]>(["", "", ""]);
@@ -610,6 +612,10 @@ export default function StartQuoteModal({
       }
       if (typeof prefillData.customerEmail === "string" && prefillData.customerEmail.trim()) {
         setBoEmail(prefillData.customerEmail.trim());
+      }
+      // Step 50b: the project name typed on the chat's summary card
+      if (typeof prefillData.projectName === "string" && prefillData.projectName.trim()) {
+        setBoProject(prefillData.projectName.trim().slice(0, 80));
       }
       // Step 37G: the chat's notes, and its board grade (matched once the shop's grades load).
       if (typeof prefillData.notes === "string" && prefillData.notes.trim()) {
@@ -1513,6 +1519,7 @@ export default function StartQuoteModal({
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isInteger(n) && n > 0);
       const boCustomer = { name, email, company: boCompany.trim() || null, phone: boPhone.trim() || null };
+      const boProjectOut = boProject.trim() || null; // Step 50b
       // Step 39E: a die line quote sends the file with the same details.
       const dielineForm = () => {
         const fd = new FormData();
@@ -1524,6 +1531,7 @@ export default function StartQuoteModal({
             quote_source: quoteSource || null,
             sales_rep_slug: salesSlug || null,
             customer: boCustomer,
+            project_name: boProjectOut,
             qty: qtyNum,
             box: { grade_id: /^\d+$/.test(boxGradeId) ? Number(boxGradeId) : null },
             parts: dlDisplay
@@ -1556,6 +1564,7 @@ export default function StartQuoteModal({
                 quote_source: quoteSource || null,
                 sales_rep_slug: salesSlug || null,
                 customer: boCustomer,
+                project_name: boProjectOut,
                 notes: notesOut(),
                 boxes: [
                   {
@@ -1577,6 +1586,7 @@ export default function StartQuoteModal({
                 quote_source: quoteSource || null,
                 sales_rep_slug: salesSlug || null,
                 customer: boCustomer,
+                project_name: boProjectOut,
                 qty: qtyNum,
                 box: size1Box,
                 print_spec: printSpecOut(),
@@ -2953,6 +2963,20 @@ export default function StartQuoteModal({
                                 onChange={(e) => setBoPhone(e.target.value)}
                                 className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)]"
                               />
+                            </label>
+                            {/* Step 50b: optional project name, shown on the quote, emails and order list */}
+                            <label className="block sm:col-span-2">
+                              <div className="mb-1 text-xs font-medium tracking-widest text-[var(--text-muted)]">PROJECT NAME</div>
+                              <input
+                                value={boProject}
+                                maxLength={80}
+                                onChange={(e) => setBoProject(e.target.value)}
+                                placeholder="Optional, e.g. Spring endcap display"
+                                aria-label="Project name"
+                                data-bo-project
+                                className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none focus:border-[var(--action-primary)]"
+                              />
+                              <div className="mt-1 text-xs text-[var(--text-muted)]">Helps you and the shop find this quote later.</div>
                             </label>
                           </div>
                         </div>

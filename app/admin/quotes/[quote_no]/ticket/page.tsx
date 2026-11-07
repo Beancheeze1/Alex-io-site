@@ -97,6 +97,11 @@ export default function JobTicketPage() {
             {ticket.revision ? <span className="ml-2 text-base font-semibold text-[var(--text-muted)]">Rev {ticket.revision}</span> : null}
             {ticket.rush ? <span className="ml-3 rounded bg-[var(--attention)] px-2 py-0.5 text-xs font-bold text-white">RUSH</span> : null}
           </h1>
+          {ticket.project_name ? (
+            <div className="mt-0.5 text-base font-semibold" data-ticket-project>
+              {ticket.project_name}
+            </div>
+          ) : null}
 
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-[13px]">
             <Pair k="Released" v={`${day(ticket.released_at)}${ticket.released_by ? ` by ${ticket.released_by}` : ""}`} />

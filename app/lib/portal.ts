@@ -38,6 +38,7 @@ export type PortalDoc = { label: string; url: string };
 
 export type PortalOrder = {
   quote_no: string;
+  project_name?: string | null; // Step 50b
   created_at: string | null;
   stage: OrderStage;
   stage_label: string;
@@ -162,6 +163,7 @@ export async function loadBuyerOrders(tenantId: number, email: string, now: Date
 
       return {
         quote_no: r.quote_no,
+        project_name: str(j.project_name),
         created_at: facts.created_at,
         stage,
         stage_label: changed ? REAPPROVE_LABEL : STAGE_LABEL[stage],

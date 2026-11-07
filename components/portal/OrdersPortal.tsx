@@ -165,6 +165,7 @@ export default function OrdersPortal({
                     <a href={o.open_url} className="underline" style={{ color: "var(--text-primary)" }}>
                       {o.quote_no}
                     </a>
+                    {o.project_name ? ` (${o.project_name})` : ""}
                     : {o.actions.map((a) => a.label).join(", ")}
                   </li>
                 ))}
@@ -179,6 +180,11 @@ export default function OrdersPortal({
                   <a href={o.open_url} className="text-lg font-medium hover:underline">
                     {o.quote_no}
                   </a>
+                  {o.project_name ? (
+                    <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }} data-portal-project>
+                      {o.project_name}
+                    </span>
+                  ) : null}
                   <span
                     className="rounded-full px-2.5 py-0.5 text-xs font-medium"
                     style={{

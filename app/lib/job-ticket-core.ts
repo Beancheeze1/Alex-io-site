@@ -242,6 +242,7 @@ export type TicketBox = {
 export type JobTicket = {
   shop: string;
   quote_no: string;
+  project_name?: string | null; // Step 50b
   revision: string | null;
   created_at: string | null;
   released_at: string | null;

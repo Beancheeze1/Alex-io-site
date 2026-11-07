@@ -44,6 +44,7 @@ type WidgetFacts = {
   // customer contact
   customerName?: string | null;
   customerEmail?: string | null;
+  projectName?: string | null; // Step 50b: typed on the summary card
 
   // notes (freeform)
   notes?: string;
@@ -156,6 +157,7 @@ function buildPrefillPayload(facts: WidgetFacts) {
     // customer contact
     customerName: facts.customerName ?? "",
     customerEmail: facts.customerEmail ?? "",
+    projectName: (facts.projectName ?? "").trim().slice(0, 80), // Step 50b
 
     notes: facts.notes ?? "",
 
@@ -742,6 +744,25 @@ export default function SplashChatWidget({
                       <li key={l}>• {l}</li>
                     ))}
                   </ul>
+
+                  {/* Step 50b: optional project name, carried to the form's review step */}
+                  {facts.quoteKind === "boxes" ? (
+                    <label className="mt-3 block">
+                      <span className="text-xs font-medium tracking-widest text-[var(--text-muted)]">PROJECT NAME (OPTIONAL)</span>
+                      <input
+                        value={facts.projectName ?? ""}
+                        maxLength={80}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setFacts((f) => ({ ...f, projectName: v }));
+                        }}
+                        placeholder="e.g. Spring endcap display"
+                        aria-label="Project name"
+                        data-chat-project
+                        className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-faint)] outline-none focus:border-[var(--action-primary)]"
+                      />
+                    </label>
+                  ) : null}
 
                   <div className="mt-3 grid gap-2">
                     <button

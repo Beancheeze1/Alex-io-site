@@ -156,8 +156,10 @@ export async function sendQuoteStatusEmail(opts: {
       shipped_carrier: string | null;
       shipped_tracking: string | null;
       shipped_note: string | null;
+      project_name: string | null;
     }>(
       `SELECT id, quote_no, tenant_id, email, customer_name,
+              to_jsonb(q) ->> 'project_name' AS project_name,
               to_jsonb(q) ->> 'shipped_carrier' AS shipped_carrier,
               to_jsonb(q) ->> 'shipped_tracking' AS shipped_tracking,
               to_jsonb(q) ->> 'shipped_note' AS shipped_note
@@ -199,6 +201,7 @@ export async function sendQuoteStatusEmail(opts: {
     const { subject, html } = statusEmail(opts.kind, {
       brand: sender.brand,
       quoteNo: row.quote_no,
+      projectName: row.project_name, // Step 50b
       link,
       total,
       buyerName: approval.accepted?.name || customer,

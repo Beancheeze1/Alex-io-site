@@ -169,6 +169,7 @@ export async function jobTicketPdf(t: JobTicket, opts: { timeZone?: string; diel
   c.page.drawText("JOB TICKET", { x: PAGE_W - M - c.bold.widthOfTextAtSize("JOB TICKET", 11), y: c.y - 11, size: 11, font: c.bold, color: MUTED });
   c.y -= 18;
   text(c, `${t.quote_no}${t.revision ? `  Rev ${t.revision}` : ""}${t.rush ? "   RUSH" : ""}`, { size: 20, bold: true });
+  if (t.project_name) text(c, pdfSafe(`Project: ${t.project_name}`), { size: 12, bold: true }); // Step 50b
   c.y -= 6;
   pairs(c, [
     ["Released", `${day(t.released_at)}${t.released_by ? ` by ${t.released_by}` : ""}`],

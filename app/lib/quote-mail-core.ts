@@ -11,6 +11,7 @@
 // Sending, settings and the log live in app/lib/quote-mail.ts.
 
 import { escapeHtml } from "../../lib/email/send-html";
+import { withProject } from "../../lib/project-name"; // Step 50b
 
 export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup" | "proof" | "shipped";
 export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup", "proof", "shipped"];
@@ -73,6 +74,7 @@ export type StatusEmailData = {
   primaryColor?: string | null;
   onPrimary?: string | null;
   logoUrl?: string | null;
+  projectName?: string | null; // Step 50b: subject suffix + a Project row
 };
 
 export const usd = (n: number) =>
@@ -95,7 +97,7 @@ function render(d: StatusEmailData, heading: string, paras: string[], facts: [st
   const logo = d.logoUrl && /^https:\/\//i.test(d.logoUrl)
     ? `<img src="${e(d.logoUrl)}" alt="${e(d.brand)}" style="max-height:40px;max-width:200px;display:block">`
     : `<div style="font-size:16px;font-weight:700;color:#1c1c1a">${e(d.brand)}</div>`;
-  const factRows = facts
+  const factRows = (d.projectName ? ([["Project", d.projectName]] as [string, string][]).concat(facts) : facts)
     .filter(([, v]) => v)
     .map(
       ([k, v]) =>
@@ -119,6 +121,12 @@ function render(d: StatusEmailData, heading: string, paras: string[], facts: [st
 }
 
 export function statusEmail(kind: StatusKind, d: StatusEmailData): { subject: string; html: string } {
+  // Step 50b: "... quote Q-A-123 – Spring endcap" when the quote has a project name
+  const r = statusEmailBody(kind, d);
+  return { subject: withProject(r.subject, d.projectName), html: r.html };
+}
+
+function statusEmailBody(kind: StatusKind, d: StatusEmailData): { subject: string; html: string } {
   const hi = `Hi ${d.buyerName && d.buyerName.trim() ? d.buyerName.trim() : "there"},`;
   const qn = d.quoteNo;
   const rev = d.revision ? ` (revision ${d.revision})` : "";

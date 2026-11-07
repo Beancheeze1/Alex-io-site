@@ -34,6 +34,7 @@ import { logQuoteEmail, shopSender } from "@/app/lib/quote-mail";
 import { displayRevisionLabel } from "@/app/lib/revision-label";
 import { freightForQuote } from "@/app/lib/freight";
 import { boxStyleLabel } from "@/lib/box-styles";
+import { withProject } from "@/lib/project-name"; // Step 50b
 
 type QuoteRow = {
   id: number;
@@ -44,6 +45,7 @@ type QuoteRow = {
   status: string;
   created_at: string;
   locked?: boolean; // Step 36E
+  project_name?: string | null; // Step 50b
 };
 
 type ItemRow = {
@@ -123,7 +125,8 @@ export async function sendQuoteEmail(opts: {
     try {
       quote = await one<QuoteRow>(
         `SELECT id, quote_no, customer_name, email, phone, status, created_at,
-                COALESCE((to_jsonb(quotes) ->> 'locked')::boolean, false) AS locked
+                COALESCE((to_jsonb(quotes) ->> 'locked')::boolean, false) AS locked,
+                to_jsonb(quotes) ->> 'project_name' AS project_name
          FROM quotes
          WHERE quote_no = $1 AND tenant_id = $2
          LIMIT 1`,
@@ -497,7 +500,7 @@ export async function sendQuoteEmail(opts: {
     const rev = quote.locked ? displayRevisionLabel(facts || {}, true) || null : null;
     const subject = (typeof opts.subject === "string" && opts.subject.trim())
       ? opts.subject.trim()
-      : `${sender.brand}: quote ${quoteNo}${rev ? ` (revision ${rev})` : ""}`;
+      : withProject(`${sender.brand}: quote ${quoteNo}${rev ? ` (revision ${rev})` : ""}`, quote.project_name);
 
     // 12) Render HTML
     const density_pcf = primaryItem?.density_lb_ft3 != null ? Number(primaryItem.density_lb_ft3) : null;
@@ -510,6 +513,7 @@ export async function sendQuoteEmail(opts: {
         ? `${quote.customer_name}${quote.email ? ` • ${quote.email}` : ""}`
         : (quote.email || ""),
       quoteNumber: quote.quote_no,
+      projectName: quote.project_name || null, // Step 50b
       status: quote.status,
       specs: {
         L_in: primaryItem ? Number(primaryItem.length_in) : 0,
