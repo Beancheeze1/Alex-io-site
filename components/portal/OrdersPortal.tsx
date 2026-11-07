@@ -12,6 +12,7 @@
 
 import * as React from "react";
 import type { PortalOrder } from "@/app/lib/portal";
+import { isPickup } from "@/app/lib/portal-core"; // Step 51
 import ReorderButton from "@/components/quote/ReorderButton";
 
 const day = (iso: string | null) =>
@@ -247,8 +248,8 @@ export default function OrdersPortal({
 
                 {o.shipped ? (
                   <div className="mt-3 text-sm" data-portal-shipped>
-                    Shipped {day(o.shipped.at)}
-                    {o.shipped.carrier ? ` by ${o.shipped.carrier}` : ""}
+                    {isPickup(o.shipped.carrier) ? `Picked up ${day(o.shipped.at)}` : `Shipped ${day(o.shipped.at)}`}
+                    {o.shipped.carrier && !isPickup(o.shipped.carrier) ? ` by ${o.shipped.carrier}` : ""}
                     {o.shipped.tracking ? (
                       <>
                         {": "}

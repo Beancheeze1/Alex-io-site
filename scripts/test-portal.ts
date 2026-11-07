@@ -5,7 +5,9 @@
 // Run: npm run test:portal   (= npx --yes tsx scripts/test-portal.ts)
 
 import {
+  CARRIERS,
   cleanShipped,
+  isPickup,
   isPortalEmail,
   normEmail,
   openActions,
@@ -163,6 +165,15 @@ check("shipped button tracks", sh.html.includes('href="https://www.ups.com/track
 check("shipped facts", sh.html.includes("1Z999") && sh.html.includes("PO-9") && sh.html.includes("by UPS"), true);
 const sh2 = statusEmail("shipped", { brand: "Shop", quoteNo: "Q-1", link: "https://x/quote?quote_no=Q-1", total: 100, shippedCarrier: "Our truck" });
 check("shipped no tracking -> quote link", sh2.html.includes('href="https://x/quote?quote_no=Q-1"') && sh2.html.includes("View your order"), true);
+// Step 51: "Picked up" (the customer collected the order)
+check("picked up is a carrier", (CARRIERS as readonly string[]).includes("Picked up"), true);
+check("isPickup", isPickup("Picked up") && isPickup(" picked UP ") && !isPickup("UPS") && !isPickup(null), true);
+const pu = statusEmail("shipped", { brand: "Shop", quoteNo: "Q-1", link: "https://x/quote?quote_no=Q-1", total: 100, buyerName: "Sam", po: "PO-9", shippedCarrier: "Picked up" });
+check("picked up subject", pu.subject, "Shop: your order Q-1 was picked up");
+check("picked up wording", pu.html.includes("was picked up.") && !pu.html.includes("has shipped") && !pu.html.includes(">Carrier<") && pu.html.includes("View your order"), true);
+const tlpu = orderTimeline(o({ locked: true, locked_at: "2026-10-13T00:00:00Z", shipped_at: "2026-10-14T00:00:00Z", shipped_carrier: "Picked up" }));
+check("timeline picked up", `${tlpu[4].label}|${tlpu[4].detail}`, "Picked up|null");
+check("pickup needs no tracking", cleanShipped({ carrier: "Picked up" }).ok, true);
 const rel = statusEmail("released", { brand: "Shop", quoteNo: "Q-1", link: "https://x/q", total: 1, trackingUrl: "https://evil" });
 check("other kinds ignore trackingUrl", rel.html.includes('href="https://x/q"') && !rel.html.includes("evil"), true);
 

@@ -12,6 +12,7 @@
 
 import { escapeHtml } from "../../lib/email/send-html";
 import { withProject } from "../../lib/project-name"; // Step 50b
+import { isPickup } from "./portal-core"; // Step 51
 
 export type StatusKind = "accepted" | "confirmed" | "reapprove" | "released" | "expiring" | "followup" | "proof" | "shipped";
 export const STATUS_KINDS: readonly StatusKind[] = ["accepted", "confirmed", "reapprove", "released", "expiring", "followup", "proof", "shipped"];
@@ -181,6 +182,22 @@ function statusEmailBody(kind: StatusKind, d: StatusEmailData): { subject: strin
         ],
         [["Quote total", usd(d.total)]],
         "Review the proof",
+      ),
+    };
+  }
+  if (kind === "shipped" && isPickup(d.shippedCarrier)) {
+    // Step 51: the customer collected the order
+    return {
+      subject: `${d.brand}: your order ${qn} was picked up`,
+      html: render(
+        d,
+        "Your order was picked up",
+        [hi, `Your order on quote ${qn} was picked up.`, ...(d.shippedNote ? [`From ${d.brand}: ${d.shippedNote}`] : [])],
+        [
+          ["Reference", d.shippedTracking || ""],
+          ["PO", d.po || ""],
+        ],
+        "View your order",
       ),
     };
   }

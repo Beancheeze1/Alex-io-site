@@ -100,10 +100,12 @@ export function orderTimeline(o: OrderFacts): TimelineStep[] {
   steps.push({ key: "production", label: "In production", done: o.locked || !!o.shipped_at, at: o.locked_at, detail: null });
   steps.push({
     key: "shipped",
-    label: "Shipped",
+    label: isPickup(o.shipped_carrier) ? "Picked up" : "Shipped",
     done: !!o.shipped_at,
     at: o.shipped_at,
-    detail: o.shipped_at ? [o.shipped_carrier, o.shipped_tracking].filter(Boolean).join(" ") || null : null,
+    detail: o.shipped_at
+      ? (isPickup(o.shipped_carrier) ? [o.shipped_tracking] : [o.shipped_carrier, o.shipped_tracking]).filter(Boolean).join(" ") || null
+      : null,
   });
   return steps;
 }
@@ -126,7 +128,16 @@ export function openActions(o: OrderFacts, now: Date, freightSetUp: boolean): Op
   return out;
 }
 
-export const CARRIERS = ["UPS", "FedEx", "USPS", "LTL / freight", "Our truck", "Other"] as const;
+export const CARRIERS = ["UPS", "FedEx", "USPS", "LTL / freight", "Our truck", "Picked up", "Other"] as const;
+
+/**
+ * Step 51: "Picked up" in the carrier list = the customer collected the order.
+ * Same "Mark shipped" record; it reads "Picked up" instead of "Shipped by ..."
+ * on the admin card, the buyer portal and the buyer email.
+ */
+export function isPickup(carrier: string | null | undefined): boolean {
+  return String(carrier || "").trim().toLowerCase() === "picked up";
+}
 
 /** Tracking page for the parcel carriers; null for anything else. */
 export function trackingUrl(carrier: string | null | undefined, tracking: string | null | undefined): string | null {
@@ -149,7 +160,7 @@ export function cleanShipped(raw: unknown): { ok: true; value: ShippedInput } | 
   const carrier = s(b.carrier, 60);
   const tracking = s(b.tracking, 80);
   const note = s(b.note, 300);
-  if (!carrier) return { ok: false, field: "carrier", message: "Pick the carrier (or Our truck / Other)." };
+  if (!carrier) return { ok: false, field: "carrier", message: "Pick the carrier (or Our truck / Picked up / Other)." };
   if (tracking && !/^[A-Za-z0-9 #/.,-]{1,80}$/.test(tracking)) {
     return { ok: false, field: "tracking", message: "Tracking can use letters, numbers, spaces and - / # . , only." };
   }

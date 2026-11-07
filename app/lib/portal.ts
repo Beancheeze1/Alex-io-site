@@ -21,6 +21,7 @@ import { proofStage } from "@/app/lib/proofs-core";
 import {
   REAPPROVE_LABEL,
   STAGE_LABEL,
+  isPickup,
   normEmail,
   openActions,
   orderStage,
@@ -166,7 +167,11 @@ export async function loadBuyerOrders(tenantId: number, email: string, now: Date
         project_name: str(j.project_name),
         created_at: facts.created_at,
         stage,
-        stage_label: changed ? REAPPROVE_LABEL : STAGE_LABEL[stage],
+        stage_label: changed
+          ? REAPPROVE_LABEL
+          : stage === "shipped" && isPickup(facts.shipped_carrier)
+            ? "Picked up" // Step 51
+            : STAGE_LABEL[stage],
         total: changed ? approval.current_total : approval.confirmed?.total ?? approval.accepted?.total ?? null,
         was_total: changed ? approval.confirmed?.total ?? approval.accepted?.total ?? null : null,
         po: approvalRow.accepted_po ?? str(j.po_number),

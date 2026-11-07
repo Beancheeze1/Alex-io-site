@@ -8,7 +8,7 @@
 "use client";
 
 import * as React from "react";
-import { CARRIERS } from "@/app/lib/portal-core";
+import { CARRIERS, isPickup } from "@/app/lib/portal-core";
 
 type Shipped = { at: string; carrier: string | null; tracking: string | null; tracking_url: string | null; note: string | null; by: string | null };
 
@@ -108,8 +108,8 @@ export default function ShippedCard({ quoteNo }: { quoteNo: string }) {
       <div style={{ fontWeight: 600, fontSize: 12, color: "var(--text-primary)", marginBottom: 4 }}>Shipped / tracking</div>
       {shipped && !editing ? (
         <div data-shipped-info>
-          Shipped {day(shipped.at)}
-          {shipped.carrier ? ` by ${shipped.carrier}` : ""}
+          {isPickup(shipped.carrier) ? `Picked up ${day(shipped.at)}` : `Shipped ${day(shipped.at)}`}
+          {shipped.carrier && !isPickup(shipped.carrier) ? ` by ${shipped.carrier}` : ""}
           {shipped.tracking ? (
             <>
               {" · "}
@@ -167,7 +167,11 @@ export default function ShippedCard({ quoteNo }: { quoteNo: string }) {
               data-shipped-save
               onClick={() =>
                 void post({ carrier, tracking, note, notify_buyer: notify }, (j) =>
-                  j.email === "sent" ? "Marked shipped and the buyer emailed." : j.email ? `Marked shipped (email ${j.email}).` : "Saved.",
+                  j.email === "sent"
+                    ? `Marked ${isPickup(carrier) ? "picked up" : "shipped"} and the buyer emailed.`
+                    : j.email
+                      ? `Marked ${isPickup(carrier) ? "picked up" : "shipped"} (email ${j.email}).`
+                      : "Saved.",
                 )
               }
             >
