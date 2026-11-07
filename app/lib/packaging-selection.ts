@@ -40,6 +40,8 @@ import {
   priceAssembly,
   displayMinimumTopUp, // Step 39Y
   withMinimumTopUp,
+  partAsmOf, // Step 49
+  type AssemblyPart,
 } from "@/lib/display-assembly"; // Step 39D
 import { q, one } from "@/lib/db";
 import { resolveBoxUnitPrice, type BoxTierInputs } from "@/app/lib/box-tier-pricing";
@@ -561,15 +563,27 @@ function rowCells(across: unknown, down: unknown): PartitionCells | null {
 // ---------- Step 39D: displays (multi-part jobs) ----------
 
 /** How a quote's lines make up a display: the assembly line, if any, and parts per display. */
-export async function displayContext(quoteId: number): Promise<{ isDisplay: boolean; partsPerDisplay: number; displays: number | null }> {
-  const rows = await q<{ custom_style: string | null; qty: number | string; dieline: unknown }>(
-    `SELECT qbs.custom_style, qbs.qty, to_jsonb(qbs) -> 'dieline' AS dieline
-       FROM public.quote_box_selections qbs WHERE qbs.quote_id = $1`,
+export async function displayContext(
+  quoteId: number,
+): Promise<{ isDisplay: boolean; partsPerDisplay: number; displays: number | null; parts: AssemblyPart[] }> {
+  const rows = await q<{ id: number | string; custom_style: string | null; qty: number | string; dieline: unknown }>(
+    `SELECT qbs.id, qbs.custom_style, qbs.qty, to_jsonb(qbs) -> 'dieline' AS dieline
+       FROM public.quote_box_selections qbs WHERE qbs.quote_id = $1 ORDER BY qbs.id`,
     [quoteId],
   );
   const asm = rows.find((r) => r.custom_style === ASSEMBLY_STYLE);
-  const partsPerDisplay = rows.filter((r) => r.custom_style === "dieline").reduce((n, r) => n + perDisplayOf(r.dieline), 0);
-  return { isDisplay: !!asm, partsPerDisplay, displays: asm ? Math.max(1, Math.round(Number(asm.qty) || 1)) : null };
+  const partRows = rows.filter((r) => r.custom_style === "dieline");
+  const partsPerDisplay = partRows.reduce((n, r) => n + perDisplayOf(r.dieline), 0);
+  // Step 49: each part's count and assembly choice, for per-part assembly pricing
+  const parts: AssemblyPart[] = partRows.map((r, i) => {
+    const label = (r.dieline as { label?: unknown } | null)?.label;
+    return {
+      label: typeof label === "string" && label.trim() ? label.trim() : `Part ${i + 1}`,
+      count: perDisplayOf(r.dieline),
+      asm: partAsmOf(r.dieline),
+    };
+  });
+  return { isDisplay: !!asm, partsPerDisplay, displays: asm ? Math.max(1, Math.round(Number(asm.qty) || 1)) : null, parts };
 }
 
 /** The "Assembly and packing" line for a display quote, priced from the shop's rates (+ any quote override). */
@@ -581,7 +595,7 @@ export async function resolveAssemblySelection(
   // Step 39Y: the display's parts total (lines + their plates and dies; null =
   // a part has no price, undefined = not known): the shop's minimum order is
   // applied once to parts + assembly, and any shortfall is added here.
-  opts: { partsTotalUsd?: number | null } = {},
+  opts: { partsTotalUsd?: number | null; parts?: AssemblyPart[] } = {},
 ): Promise<CustomResolvedSelection> {
   const cfg = tenantId ? await loadCorrugated(tenantId).catch(() => null) : null;
   const a0 = priceAssembly({
@@ -589,6 +603,9 @@ export async function resolveAssemblySelection(
     displays,
     partsPerDisplay,
     override: parseAssemblyOverride(overrideRaw),
+    // Step 49: per-part methods (without the parts list it prices as before)
+    parts: opts.parts,
+    methods: cfg?.settings.asm_methods ?? [],
   });
   const minOrder = cfg?.settings.min_order_usd ?? 0;
   const a =
@@ -713,6 +730,7 @@ export async function repriceQuoteBoxes(
       // Step 39Y: only when every part was repriced here (not a one-row reprice)
       const resolved = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline, {
         partsTotalUsd: opts.onlyRowId ? undefined : partsTotal,
+        parts: disp?.parts, // Step 49
       });
       const upd = customSelectionUpdate(row.id, resolved);
       await q(upd.text, upd.values);
@@ -887,6 +905,7 @@ export async function priceQuoteBoxesAtQtys(
       if (row.custom_style === ASSEMBLY_STYLE) {
         const r = await resolveAssemblySelection(tenantId, qty, disp?.partsPerDisplay ?? 0, row.dieline, {
           partsTotalUsd: opts.onlyRowId ? undefined : partsTotal, // Step 39Y
+          parts: disp?.parts, // Step 49
         });
         ext = r.extended_price_usd;
         u = r.unit_price_usd;

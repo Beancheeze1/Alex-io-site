@@ -12,6 +12,10 @@ import {
   priceAssembly,
   displayMinimumTopUp,
   withMinimumTopUp,
+  cleanAssemblyMethods, // Step 49
+  cleanPartAsm,
+  partAsmOf,
+  TYPICAL_ASSEMBLY_METHODS,
 } from "../lib/display-assembly";
 import { priceRscBox } from "../lib/corrugated-price";
 import { DEFAULT_FLUTES } from "../lib/corrugated-blank";
@@ -162,6 +166,106 @@ check("print charges: one printing for the quote unchanged", same.isPrinted && !
   check("42: no products = section stays hidden", withDisplayProduct([], [...all]).length === 0);
   check("42: never twice", withDisplayProduct(["display", "rsc", "display"], [...all]).filter((k) => k === "display").length === 1);
   check("42: label", PRODUCT_INFO.display.label === "Displays");
+}
+
+// Step 49: per-part assembly methods and knocked down
+{
+  const rates = assemblyRatesFrom({ labor_per_hr_usd: 36, labor_min_per_display: 4, labor_min_per_part: 2, kit_per_display_usd: 1.25, markup_pct: 0 });
+  const methods = [
+    { id: "fold", name: "Fold / lock-tab", minutes: 0.5, materials_usd: 0, is_default: true },
+    { id: "tape", name: "Double-sided tape", minutes: 1.5, materials_usd: 0.08, is_default: false },
+  ];
+  const noMethods = priceAssembly({
+    rates,
+    displays: 100,
+    partsPerDisplay: 3,
+    parts: [
+      { label: "Header", count: 1, asm: { method: null, minutes: null } },
+      { label: "Shelf", count: 2, asm: { method: null, minutes: null } },
+    ],
+  });
+  const old = priceAssembly({ rates, displays: 100, partsPerDisplay: 3 });
+  // 36 x (4 + 2 x 3)/60 = 6 + 1.25 kit = 7.25
+  check("49: no methods, no part choices = same price as before (7.25)", noMethods.cost_per_display === 7.25 && old.cost_per_display === 7.25 && noMethods.total_usd === old.total_usd, [noMethods.cost_per_display, old.cost_per_display]);
+  check("49: parts count from the parts list", noMethods.parts_per_display === 3 && noMethods.parts?.length === 2);
+
+  // Header taped (1.5 min, $0.08), 2 shelves default fold (0.5 min): minutes = 4 + 1.5 + 2 x 0.5 = 6.5
+  // labor 36 x 6.5 / 60 = 3.90 ; materials 0.08 ; kit 1.25 -> 5.23
+  const m = priceAssembly({
+    rates,
+    displays: 100,
+    partsPerDisplay: 3,
+    methods,
+    parts: [
+      { label: "Header", count: 1, asm: { method: "tape", minutes: null } },
+      { label: "Shelf", count: 2, asm: { method: null, minutes: null } },
+    ],
+  });
+  check("49: methods: 6.5 min, $0.08 tape -> 5.23 per display", m.minutes_per_display === 6.5 && m.cost_per_display === 5.23 && m.total_usd === 523, m);
+  check("49: part details name the method", m.parts?.[0].method === "Double-sided tape" && m.parts?.[1].method === "Fold / lock-tab" && m.parts?.[1].minutes_each === 0.5, m.parts);
+  check("49: materials line in the breakdown", m.breakdown.some((b) => b.label === "Tape, glue and other materials" && b.per_display === 0.08), m.breakdown);
+
+  // Own minutes on a part beat its method: shelf 3 min each -> 4 + 1.5 + 6 = 11.5 -> 6.90 + 0.08 + 1.25 = 8.23
+  const own = priceAssembly({
+    rates,
+    displays: 10,
+    partsPerDisplay: 3,
+    methods,
+    parts: [
+      { label: "Header", count: 1, asm: { method: "tape", minutes: null } },
+      { label: "Shelf", count: 2, asm: { method: "fold", minutes: 3 } },
+    ],
+  });
+  check("49: own minutes win: 11.5 min -> 8.23", own.minutes_per_display === 11.5 && own.cost_per_display === 8.23 && own.parts?.[1].own_minutes === true, own);
+
+  // A method that was deleted from the shop list falls back to the default
+  const gone = priceAssembly({ rates, displays: 1, partsPerDisplay: 1, methods, parts: [{ label: "A", count: 1, asm: { method: "staple", minutes: null } }] });
+  check("49: unknown method -> default method", gone.parts?.[0].method === "Fold / lock-tab" && gone.minutes_per_display === 4.5, gone.parts);
+
+  // Knocked down: part minutes, materials and $ per part / per display drop; pack-out minutes + kitting stay
+  const kdRates = assemblyRatesFrom({ asm_per_display_usd: 2, asm_per_part_usd: 0.5, labor_per_hr_usd: 36, labor_min_per_display: 4, labor_min_per_part: 2, kit_per_display_usd: 1.25 });
+  const kd = priceAssembly({
+    rates: kdRates,
+    displays: 100,
+    partsPerDisplay: 3,
+    methods,
+    override: { knocked_down: true },
+    parts: [
+      { label: "Header", count: 1, asm: { method: "tape", minutes: null } },
+      { label: "Shelf", count: 2, asm: { method: null, minutes: null } },
+    ],
+  });
+  // 36 x 4 / 60 = 2.40 + 1.25 = 3.65
+  check("49: knocked down = pack-out 4 min + kitting = 3.65", kd.cost_per_display === 3.65 && kd.knocked_down === true && kd.minutes_per_display === 4, kd);
+  check("49: knocked down breakdown says pack-out", kd.breakdown.some((b) => b.label.startsWith("Pack-out labor")) && !kd.breakdown.some((b) => b.label.startsWith("Tape")), kd.breakdown);
+  check(
+    "49: description for knocked down",
+    assemblyDescription({ displays: 100, parts_per_display: 3, knocked_down: true }) === "Packing: 100 displays, 3 parts each, ships knocked down (flat)",
+    assemblyDescription({ displays: 100, parts_per_display: 3, knocked_down: true }),
+  );
+  check("49: description unchanged when assembled", assemblyDescription({ displays: 100, parts_per_display: 3 }) === "Assembly and packing: 100 displays, 3 parts each");
+  // Quote overrides still win: minutes per display replaces all labor minutes
+  const ovm = priceAssembly({ rates, displays: 1, partsPerDisplay: 3, methods, override: { minutes_per_display: 10 }, parts: [{ label: "A", count: 3, asm: { method: "tape", minutes: null } }] });
+  check("49: quote minutes override still replaces labor minutes", ovm.minutes_per_display === 10 && ovm.cost_per_display === 7.49, ovm); // 6 + 0.24 + 1.25
+  check("49: knocked_down kept by parseAssemblyOverride", parseAssemblyOverride({ knocked_down: true, minutes_per_display: "" }).knocked_down === true);
+
+  // Method list cleaning
+  const c = cleanAssemblyMethods([
+    { name: "Tape", minutes: "1.5", materials_usd: "0.08", is_default: true },
+    { name: "Glue", minutes: 1, is_default: true },
+  ]);
+  check("49: methods cleaned, ids made, one default", c.ok && c.methods[0].id === "tape" && c.methods[0].minutes === 1.5 && c.methods[1].materials_usd === 0 && c.methods.filter((x) => x.is_default).length === 1, c);
+  check("49: duplicate names refused", !cleanAssemblyMethods([{ name: "Tape", minutes: 1 }, { name: "tape", minutes: 2 }]).ok);
+  check("49: bad minutes refused", !cleanAssemblyMethods([{ name: "Tape", minutes: -1 }]).ok && !cleanAssemblyMethods([{ name: "Tape", minutes: "x" }]).ok);
+  check("49: blank name refused", !cleanAssemblyMethods([{ name: " ", minutes: 1 }]).ok);
+  check("49: same-name ids stay unique", (() => { const r = cleanAssemblyMethods([{ id: "a", name: "A", minutes: 1 }, { id: "a", name: "B", minutes: 1 }]); return r.ok && r.methods[0].id !== r.methods[1].id; })());
+  check("49: typical list is valid with one default", (() => { const r = cleanAssemblyMethods(TYPICAL_ASSEMBLY_METHODS); return r.ok && r.methods.length === 6 && r.methods.filter((x) => x.is_default).length === 1; })());
+
+  // Part choice parsing
+  check("49: partAsmOf of nothing", JSON.stringify(partAsmOf(null)) === JSON.stringify({ method: null, minutes: null }));
+  check("49: partAsmOf keeps method + minutes", JSON.stringify(partAsmOf({ asm: { method: "tape", minutes: "2" } })) === JSON.stringify({ method: "tape", minutes: 2 }));
+  check("49: cleanPartAsm blank = clear", cleanPartAsm({ method: "", minutes: "" }) === null && cleanPartAsm(null) === null);
+  check("49: cleanPartAsm refuses junk", cleanPartAsm({ method: "Bad Id!" }) === undefined && cleanPartAsm({ minutes: 9999 }) === undefined && cleanPartAsm("x") === undefined);
 }
 
 console.log(failed ? `${failed} FAILED` : "ALL PASS");

@@ -75,6 +75,7 @@ import { tenantOffersQuoteType } from "@/lib/quote-types-server";
 import { parseCustomBoxInput, type CustomBoxInput } from "@/lib/box-styles";
 import {
   customSelectionInsert,
+  displayContext, // Step 49
   repriceQuoteBoxes,
   resolveAssemblySelection,
   resolveCustomSelection,
@@ -416,7 +417,9 @@ export async function POST(req: NextRequest) {
       }
       if (dieline.display) {
         const perDisplay = dieline.parts.reduce((n, p) => n + (p.per_display ?? 1), 0);
-        const resolved = await resolveAssemblySelection(tenantId, qty, perDisplay, {}, { partsTotalUsd: partsTotal }); // Step 39Y
+        // Step 49: the part lines just inserted (buyer uploads have no assembly choices, so each part gets the shop's default method)
+        const disp = await displayContext(quote.id);
+        const resolved = await resolveAssemblySelection(tenantId, qty, perDisplay, {}, { partsTotalUsd: partsTotal, parts: disp.parts }); // Step 39Y
         const ins = customSelectionInsert({
           quoteId: quote.id,
           quoteNo: quote.quote_no,

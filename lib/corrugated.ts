@@ -19,6 +19,7 @@ import {
 } from "@/lib/corrugated-blank";
 import { priceRscBox, type BoxPriceResult, type Coverage, type RunMethod } from "@/lib/corrugated-price";
 import type { BoxStyle, PartitionCells } from "@/lib/box-styles";
+import { cleanAssemblyMethods, type AssemblyMethod } from "@/lib/display-assembly"; // Step 49
 
 export type CorrugatedSettings = CorrugatedRates & {
   joint_type: JointType;
@@ -26,6 +27,9 @@ export type CorrugatedSettings = CorrugatedRates & {
   round_to_in: number;
   edge_trim_in: number;
   board_method: BoardMethod; // Step 26
+  // Step 49: the shop's assembly methods (Displays and multi-part jobs).
+  // Optional on input: left out = keep the saved list.
+  asm_methods?: AssemblyMethod[];
 };
 
 export type BoardGrade = {
@@ -121,6 +125,11 @@ export async function loadCorrugated(tenantId: number): Promise<CorrugatedConfig
     round_to_in: Number(s?.round_to_in ?? 0.0625),
     edge_trim_in: Number(s?.edge_trim_in ?? 0),
     board_method: parseBoardMethod(s?.board_method),
+    // Step 49 (migration 053; [] before it runs)
+    asm_methods: (() => {
+      const c = cleanAssemblyMethods(s?.asm_methods ?? []);
+      return c.ok ? c.methods : [];
+    })(),
   };
 
   const flRows = await q<Record<string, any>>(
@@ -162,9 +171,26 @@ export async function loadCorrugated(tenantId: number): Promise<CorrugatedConfig
   return { settings, flutes, grades };
 }
 
+// Step 49: asm_methods is written only once migration 053 has added the column.
+let asmMethodsColumn: boolean | null = null;
+async function asmMethodsReady(): Promise<boolean> {
+  if (asmMethodsColumn) return true;
+  const r = await one<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'corrugated_settings' AND column_name = 'asm_methods'
+     ) AS ok`,
+    [],
+  );
+  asmMethodsColumn = !!r?.ok;
+  return asmMethodsColumn;
+}
+
 /** Replaces the tenant's settings, flutes and grades with a validated input. */
 export async function saveCorrugated(tenantId: number, input: CorrugatedInput): Promise<void> {
   await ensureCorrugatedDefaults(tenantId);
+  // Step 49: the method list, only when sent and the column exists
+  const writeMethods = Array.isArray(input.settings.asm_methods) && (await asmMethodsReady());
 
   await withTxn(async (tx) => {
     // Settings row. Column names come from constants, never from input.
@@ -175,6 +201,12 @@ export async function saveCorrugated(tenantId: number, input: CorrugatedInput): 
       `UPDATE public.corrugated_settings SET ${setSql}, updated_at = now() WHERE tenant_id = $1`,
       [tenantId, ...vals],
     );
+    if (writeMethods) {
+      await tx.query(`UPDATE public.corrugated_settings SET asm_methods = $2::jsonb WHERE tenant_id = $1`, [
+        tenantId,
+        JSON.stringify(input.settings.asm_methods),
+      ]);
+    }
 
     // Flutes: remove the ones no longer listed, upsert the rest in order.
     const codes = input.flutes.map((f) => f.flute);
@@ -347,6 +379,13 @@ export function validateCorrugatedInput(
       throw new FieldError("Round blank up to must be 1/16, 1/8 or 1/4 inch.");
     }
     const edge_trim_in = numIn(s.edge_trim_in, "Edge trim", 0, 2);
+    // Step 49: assembly methods (left out = keep the saved list)
+    let asm_methods: AssemblyMethod[] | undefined;
+    if (s.asm_methods !== undefined) {
+      const c = cleanAssemblyMethods(s.asm_methods);
+      if (!c.ok) throw new FieldError(c.message);
+      asm_methods = c.methods;
+    }
 
     if (!Array.isArray(b.flutes) || b.flutes.length < 1 || b.flutes.length > 12) {
       throw new FieldError("List between 1 and 12 flutes under Scoring and layout.");
@@ -415,7 +454,7 @@ export function validateCorrugatedInput(
     return {
       ok: true,
       value: {
-        settings: { ...rates, joint_type, flap_pct, round_to_in, edge_trim_in, board_method },
+        settings: { ...rates, joint_type, flap_pct, round_to_in, edge_trim_in, board_method, ...(asm_methods ? { asm_methods } : {}) },
         flutes,
         grades,
       },

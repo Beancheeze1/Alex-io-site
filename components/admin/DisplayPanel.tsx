@@ -24,6 +24,10 @@
 // the part already has it); a part with no price shows why under its row.
 // Step 39Y: the assembly section says when it includes a top-up to the
 // shop's minimum order (which now applies once to the whole display).
+// Step 49: each part's assembly method (the shop's list in Pricing →
+// Corrugated boxes) and/or its own minutes, under the part; and whether the
+// display is assembled at the plant or ships knocked down (flat). Saved with
+// Save and reprice, like the part names and counts.
 
 "use client";
 
@@ -47,7 +51,10 @@ type Part = {
   run?: "plates" | "digital" | null; // Step 39X: own run, null = the quote's / auto
   run_used?: "plates" | "digital" | null; // Step 39X: what it's priced with now
   note?: string | null; // Step 39X2: the line's pricing note
+  asm?: { method: string | null; minutes: number | null }; // Step 49
 };
+type AsmMethod = { id: string; name: string; minutes: number; materials_usd: number; is_default: boolean }; // Step 49
+type AsmPartDetail = { label: string; count: number; method: string | null; minutes_each: number; materials_each: number; own_minutes: boolean };
 type Print = { colors: ("spot" | "flood")[]; sides: 1 | 2 };
 type Assembly = {
   id: number;
@@ -59,8 +66,10 @@ type Assembly = {
     overridden?: boolean;
     min_topup_usd?: number; // Step 39Y
     min_order_usd?: number;
+    knocked_down?: boolean; // Step 49
+    parts?: AsmPartDetail[];
   } | null;
-  override: { minutes_per_display?: number | null; usd_per_display?: number | null };
+  override: { minutes_per_display?: number | null; usd_per_display?: number | null; knocked_down?: boolean };
   needs_review: boolean;
   note: string | null;
 };
@@ -78,6 +87,7 @@ type Info = {
   quote_run?: "auto" | "plates" | "digital"; // Step 39X
   short_runs_on?: boolean;
   cutoff?: number;
+  asm_methods?: AsmMethod[]; // Step 49
 };
 
 const usd = (n: number | null | undefined) =>
@@ -197,7 +207,9 @@ type Grade = { id: number; name: string; is_default: boolean; priced?: boolean }
 export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const [info, setInfo] = React.useState<Info | null>(null);
   const [displays, setDisplays] = React.useState("");
-  const [parts, setParts] = React.useState<Record<number, { per: string; label: string }>>({});
+  // Step 49: method ("" = shop default) and own minutes ("" = from the method) per part
+  const [parts, setParts] = React.useState<Record<number, { per: string; label: string; method: string; mins: string }>>({});
+  const [knockedDown, setKnockedDown] = React.useState(false); // Step 49
   const [minutes, setMinutes] = React.useState("");
   const [perDisplayUsd, setPerDisplayUsd] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -220,7 +232,20 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
         if (!alive || !j?.ok || !j.boxes_only) return;
         setInfo(j);
         setDisplays(String(j.displays ?? j.other_lines[0]?.qty ?? j.parts[0]?.qty ?? ""));
-        setParts(Object.fromEntries(j.parts.map((p) => [p.id, { per: String(p.per_display), label: p.label ?? "" }])));
+        setParts(
+          Object.fromEntries(
+            j.parts.map((p) => [
+              p.id,
+              {
+                per: String(p.per_display),
+                label: p.label ?? "",
+                method: p.asm?.method ?? "",
+                mins: p.asm?.minutes != null ? String(p.asm.minutes) : "",
+              },
+            ]),
+          ),
+        );
+        setKnockedDown(j.assembly?.override.knocked_down === true); // Step 49
         setMinutes(j.assembly?.override.minutes_per_display != null ? String(j.assembly.override.minutes_per_display) : "");
         setPerDisplayUsd(j.assembly?.override.usd_per_display != null ? String(j.assembly.override.usd_per_display) : "");
       })
@@ -260,10 +285,17 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
           quote_no: quoteNo,
           action,
           displays: Number(displays),
-          parts: Object.entries(parts).map(([id, v]) => ({ id: Number(id), per_display: Number(v.per), label: v.label })),
+          parts: Object.entries(parts).map(([id, v]) => ({
+            id: Number(id),
+            per_display: Number(v.per),
+            label: v.label,
+            // Step 49: null = the shop's default method
+            asm: v.method || v.mins.trim() ? { method: v.method || null, minutes: v.mins.trim() === "" ? null : Number(v.mins) } : null,
+          })),
           override: {
             minutes_per_display: minutes.trim() === "" ? null : Number(minutes),
             usd_per_display: perDisplayUsd.trim() === "" ? null : Number(perDisplayUsd),
+            knocked_down: knockedDown, // Step 49
           },
         }),
       });
@@ -419,6 +451,13 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
   const asm = info.assembly;
   const digits = (v: string) => v.replace(/[^\d]/g, "").slice(0, 8);
   const decimal = (v: string) => v.replace(/[^\d.]/g, "").slice(0, 10);
+  // Step 49: the shop's assembly methods and each part's priced assembly
+  const methods = info.asm_methods ?? [];
+  const defaultMethod = methods.find((m) => m.is_default) ?? null;
+  const asmDetail = asm?.detail?.parts ?? [];
+  // parts and assembly detail are both in line order
+  const asmOf = (id: number): AsmPartDetail | undefined => asmDetail[info.parts.findIndex((x) => x.id === id)];
+  const minsText = (n: number) => `${Number(n.toFixed(2))} min`;
 
   return (
     <div style={card} data-display-panel>
@@ -486,7 +525,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                       value={parts[p.id]?.label ?? ""}
                       placeholder={p.filename || "Part"}
                       disabled={locked}
-                      onChange={(e) => setParts((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { per: "1", label: "" }), label: e.target.value.slice(0, 60) } }))}
+                      onChange={(e) => setParts((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { per: "1", label: "", method: "", mins: "" }), label: e.target.value.slice(0, 60) } }))}
                       aria-label="Part name"
                     />
                   </td>
@@ -500,7 +539,7 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                       inputMode="numeric"
                       value={parts[p.id]?.per ?? "1"}
                       disabled={locked}
-                      onChange={(e) => setParts((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { per: "1", label: "" }), per: digits(e.target.value).slice(0, 5) } }))}
+                      onChange={(e) => setParts((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { per: "1", label: "", method: "", mins: "" }), per: digits(e.target.value).slice(0, 5) } }))}
                       aria-label="How many per display"
                       data-display-per={p.id}
                     />
@@ -630,6 +669,49 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
                           </select>
                         </span>
                       ) : null}
+                      {/* Step 49: how the part is assembled (saved with Save and reprice) */}
+                      {workHere ? (
+                        <span style={opt} data-display-part-asm={p.id}>
+                          Assembly
+                          <select
+                            style={{ ...input, maxWidth: 220 }}
+                            value={parts[p.id]?.method ?? ""}
+                            disabled={locked || busy}
+                            onChange={(e) => setParts((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { per: "1", label: "", method: "", mins: "" }), method: e.target.value } }))}
+                            aria-label="Assembly method"
+                            data-display-part-asm-method={p.id}
+                          >
+                            <option value="">
+                              {defaultMethod ? `Shop default (${defaultMethod.name})` : "Shop minutes per part"}
+                            </option>
+                            {methods.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({minsText(m.minutes)}
+                                {m.materials_usd > 0 ? `, ${usd(m.materials_usd)}` : ""})
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            style={{ ...input, width: 56 }}
+                            inputMode="decimal"
+                            value={parts[p.id]?.mins ?? ""}
+                            placeholder={asmOf(p.id) ? String(Number((asmOf(p.id)?.minutes_each ?? 0).toFixed(2))) : "min"}
+                            disabled={locked || busy}
+                            onChange={(e) => setParts((x) => ({ ...x, [p.id]: { ...(x[p.id] ?? { per: "1", label: "", method: "", mins: "" }), mins: decimal(e.target.value).slice(0, 6) } }))}
+                            aria-label="Assembly minutes per piece"
+                            data-display-part-asm-mins={p.id}
+                          />
+                          <span>min each</span>
+                          {asmOf(p.id) && !knockedDown ? (
+                            <span style={{ color: "var(--text-muted)" }} data-display-part-asm-priced={p.id}>
+                              · priced: {asmOf(p.id)?.count} × {minsText(asmOf(p.id)?.minutes_each ?? 0)}
+                              {(asmOf(p.id)?.materials_each ?? 0) > 0
+                                ? ` + ${usd(asmOf(p.id)?.materials_each)} materials`
+                                : ""}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                       </div>
                     </td>
                   </tr>
@@ -754,6 +836,38 @@ export default function DisplayPanel({ quoteNo }: { quoteNo: string }) {
             ) : (
               <div style={small}>Added when you make this a display.</div>
             )}
+            {/* Step 49: assembled at the plant, or ships flat for the customer to set up */}
+            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12 }} data-display-kd>
+              <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="radio"
+                  name={`kd-${quoteNo}`}
+                  checked={!knockedDown}
+                  disabled={locked || busy}
+                  onChange={() => setKnockedDown(false)}
+                  data-display-kd-assembled
+                />
+                Assembled at the plant
+              </label>
+              <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="radio"
+                  name={`kd-${quoteNo}`}
+                  checked={knockedDown}
+                  disabled={locked || busy}
+                  onChange={() => setKnockedDown(true)}
+                  data-display-kd-flat
+                />
+                Ships knocked down (flat)
+              </label>
+            </div>
+            <div style={small}>
+              {knockedDown
+                ? "Knocked down: the parts' assembly (minutes, tape and glue) isn't charged; your minutes per display (pack-out) and kitting are."
+                : methods.length
+                  ? "Each part uses its Assembly method above (or the minutes typed there); your minutes per display, kitting and markup are added."
+                  : "Add assembly methods (tape, glue, staples …) in Pricing → Corrugated boxes → Displays and multi-part jobs to price each part's assembly."}
+            </div>
             <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10 }}>
               <label style={small}>
                 Labor minutes per display (this quote){" "}

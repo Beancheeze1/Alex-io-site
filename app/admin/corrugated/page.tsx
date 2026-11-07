@@ -30,6 +30,7 @@ import {
   type RateKey,
 } from "@/lib/corrugated-blank";
 import { BOX_STYLES, boxStyleInfo, parseCells, type BoxStyle } from "@/lib/box-styles";
+import { TYPICAL_ASSEMBLY_METHODS, type AssemblyMethod } from "@/lib/display-assembly"; // Step 49
 
 type FluteRow = {
   key: string;
@@ -70,6 +71,7 @@ type ApiConfig = {
     round_to_in: number;
     edge_trim_in: number;
     board_method?: BoardMethod; // Step 26
+    asm_methods?: AssemblyMethod[]; // Step 49
   };
   flutes: FluteSpec[];
   grades: {
@@ -85,6 +87,17 @@ type ApiConfig = {
 
 let keySeq = 0;
 const newKey = () => `row${++keySeq}`;
+
+// Step 49: an assembly method row in the editor (numbers kept as typed)
+type MethodRow = { key: string; id: string | null; name: string; minutes: string; materials: string; isDefault: boolean };
+const methodToRow = (m: AssemblyMethod): MethodRow => ({
+  key: newKey(),
+  id: m.id,
+  name: m.name,
+  minutes: String(m.minutes),
+  materials: m.materials_usd ? String(m.materials_usd) : "",
+  isDefault: m.is_default,
+});
 
 const INPUT =
   "w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2 py-1 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--action-primary)] focus:ring-1 focus:ring-[var(--action-primary)]";
@@ -233,6 +246,7 @@ export default function CorrugatedSettingsPage() {
   const [flutes, setFlutes] = React.useState<FluteRow[]>([]);
   const [grades, setGrades] = React.useState<GradeRow[]>([]);
   const [boardMethod, setBoardMethod] = React.useState<BoardMethod>("blank"); // Step 26
+  const [methods, setMethods] = React.useState<MethodRow[]>([]); // Step 49
   const [pv, setPv] = React.useState({ L: "12", W: "10", D: "8", gradeKey: "", style: "rsc" as BoxStyle, cellsA: "3", cellsD: "4" });
 
   // Price check (uses SAVED settings via /api/admin/corrugated/price)
@@ -255,6 +269,7 @@ export default function CorrugatedSettingsPage() {
       edge_trim_in: formatInches(s.edge_trim_in),
     });
     setBoardMethod(s.board_method === "sheet" ? "sheet" : "blank");
+    setMethods((s.asm_methods ?? []).map(methodToRow)); // Step 49
     setFlutes(cfg.flutes.map(fluteToRow));
     setGrades(
       cfg.grades.map((g) => ({
@@ -408,6 +423,18 @@ export default function CorrugatedSettingsPage() {
     settings.round_to_in = layout.round_to_in;
     settings.edge_trim_in = trim;
     settings.board_method = boardMethod;
+    // Step 49: assembly methods
+    const am: unknown[] = [];
+    for (const m of methods) {
+      const name = m.name.trim();
+      if (!name) return { error: "Assembly methods: every method needs a name (or remove the empty row)." };
+      const minutes = parseNum(m.minutes);
+      if (minutes === null) return { error: `Assembly method "${name}": enter minutes per piece (0 is fine).` };
+      const mat = m.materials.trim() === "" ? 0 : parseNum(m.materials);
+      if (mat === null) return { error: `Assembly method "${name}": materials per piece must be a number, or blank.` };
+      am.push({ id: m.id, name, minutes, materials_usd: mat, is_default: m.isDefault });
+    }
+    settings.asm_methods = am;
 
     const fl: FluteSpec[] = [];
     for (const r of flutes) {
@@ -917,6 +944,148 @@ export default function CorrugatedSettingsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Step 49: assembly methods, picked per part on a display */}
+          <div className="mt-5" data-asm-methods>
+            <div className="text-xs font-medium text-[var(--text-primary)]">Assembly methods</div>
+            <p className="mb-2 mt-1 text-xs">
+              How each part of a display is put together, with the labor minutes and materials (tape, glue,
+              staples) per piece. Staff pick one per part on the quote&apos;s Display card; parts left on the default
+              use the method marked Default (no methods = minutes per part above). Labor is charged at your labor
+              rate, materials at cost, then your markup. A display that ships knocked down (flat) is charged only
+              minutes per display and kitting.
+            </p>
+            <div className={TABLE_WRAP}>
+              <table className="min-w-full text-left text-xs">
+                <thead className={THEAD}>
+                  <tr>
+                    <th className={TH}>Method</th>
+                    <th className={TH}>Minutes per piece</th>
+                    <th className={TH}>Materials $ per piece</th>
+                    <th className={TH}>Default</th>
+                    <th className={TH} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {methods.length === 0 ? (
+                    <tr className="border-t border-[var(--border)]">
+                      <td className={`${TD} text-[var(--text-muted)]`} colSpan={5}>
+                        No methods yet: every part uses minutes per part.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {methods.map((m) => (
+                    <tr key={m.key} className="border-t border-[var(--border)]" data-asm-method-row>
+                      <td className={TD}>
+                        <input
+                          className={INPUT}
+                          value={m.name}
+                          maxLength={40}
+                          aria-label="Method name"
+                          onChange={(e) => {
+                            setMethods((rows) => rows.map((r) => (r.key === m.key ? { ...r, name: e.target.value } : r)));
+                            touch();
+                          }}
+                        />
+                      </td>
+                      <td className={`${TD} w-32`}>
+                        <input
+                          className={INPUT}
+                          inputMode="decimal"
+                          value={m.minutes}
+                          aria-label="Minutes per piece"
+                          onChange={(e) => {
+                            setMethods((rows) => rows.map((r) => (r.key === m.key ? { ...r, minutes: e.target.value } : r)));
+                            touch();
+                          }}
+                        />
+                      </td>
+                      <td className={`${TD} w-32`}>
+                        <input
+                          className={INPUT}
+                          inputMode="decimal"
+                          value={m.materials}
+                          placeholder="0"
+                          aria-label="Materials per piece"
+                          onChange={(e) => {
+                            setMethods((rows) => rows.map((r) => (r.key === m.key ? { ...r, materials: e.target.value } : r)));
+                            touch();
+                          }}
+                        />
+                      </td>
+                      <td className={TD}>
+                        <input
+                          type="radio"
+                          name="asm-default"
+                          checked={m.isDefault}
+                          aria-label="Default method"
+                          onChange={() => {
+                            setMethods((rows) => rows.map((r) => ({ ...r, isDefault: r.key === m.key })));
+                            touch();
+                          }}
+                        />
+                      </td>
+                      <td className={`${TD} text-right`}>
+                        <button
+                          type="button"
+                          className={SMALL_BTN}
+                          onClick={() => {
+                            setMethods((rows) => rows.filter((r) => r.key !== m.key));
+                            touch();
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={SMALL_BTN}
+                disabled={methods.length >= 20}
+                onClick={() => {
+                  setMethods((rows) => [...rows, { key: newKey(), id: null, name: "", minutes: "1", materials: "", isDefault: rows.length === 0 }]);
+                  touch();
+                }}
+                data-asm-add
+              >
+                + Add method
+              </button>
+              {methods.length === 0 ? (
+                <button
+                  type="button"
+                  className={SMALL_BTN}
+                  onClick={() => {
+                    setMethods(TYPICAL_ASSEMBLY_METHODS.map(methodToRow));
+                    touch();
+                  }}
+                  data-asm-typical
+                >
+                  Add typical methods
+                </button>
+              ) : null}
+              {methods.some((m) => m.isDefault) ? (
+                <button
+                  type="button"
+                  className={SMALL_BTN}
+                  onClick={() => {
+                    setMethods((rows) => rows.map((r) => ({ ...r, isDefault: false })));
+                    touch();
+                  }}
+                >
+                  No default
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Typical methods are starting numbers only; change them to your own times and costs. Quotes keep their
+              price until they&apos;re repriced.
+            </p>
           </div>
         </section>
 

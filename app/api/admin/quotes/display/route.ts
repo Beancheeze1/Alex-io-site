@@ -29,6 +29,12 @@
 //               each part's own `run`, the method it's priced with (`run_used`),
 //               the quote's `quote_run` ("auto" | "plates" | "digital") and
 //               `short_runs_on` / `cutoff` from the shop's rates.
+//   Step 49: update also takes each part's assembly choice
+//               parts: [{ id, ..., asm: { method, minutes } | null }] (null =
+//               the shop's default method) and override.knocked_down (ships
+//               flat: only pack-out minutes and kitting are charged). GET
+//               returns each part's `asm`, the shop's `asm_methods` and the
+//               per-part detail in assembly.detail.parts.
 //   Every change sets each part's qty = displays x per display (other lines =
 //   displays), the quote's qty and compare quantity = displays, and reprices
 //   every line at today's rates. Released (locked) quotes are refused.
@@ -49,7 +55,7 @@ import {
   setQuoteBoxQty,
 } from "@/app/lib/packaging-selection";
 import { cleanPartRun, parseDielineBlank, partPrintOf, partRunOf } from "@/lib/dieline-import";
-import { ASSEMBLY_STYLE, parseAssemblyOverride, perDisplayOf } from "@/lib/display-assembly";
+import { ASSEMBLY_STYLE, cleanPartAsm, parseAssemblyOverride, partAsmOf, perDisplayOf } from "@/lib/display-assembly";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -128,6 +134,7 @@ export async function GET(req: NextRequest) {
       quote_run: parseRunMethod(facts.run_method) ?? "auto", // Step 39X
       short_runs_on: cfg ? shortRunsOn(cfg.settings) : false,
       cutoff: cfg ? Number(cfg.settings.digital_under_qty) || 0 : 0,
+      asm_methods: cfg?.settings.asm_methods ?? [], // Step 49
       parts: lines
         .filter((l) => l.custom_style === "dieline")
         .map((l) => {
@@ -141,6 +148,7 @@ export async function GET(req: NextRequest) {
             print: partPrintOf(l.dieline), // Step 39G: own printing, null = the quote's
             run: partRunOf(l.dieline), // Step 39X: own run, null = the quote's / auto
             run_used: parseRunMethod((l.pricing_detail as { run_method?: unknown } | null)?.run_method),
+            asm: partAsmOf(l.dieline), // Step 49: { method, minutes }, nulls = shop default
             note: l.pricing_note, // Step 39X2: shown on the Display card when the part has no price
             qty: Number(l.qty) || 0,
             unit: num(l.unit_price_usd),
@@ -277,6 +285,10 @@ export async function POST(req: NextRequest) {
 
     // Parts: count per display and name.
     const asked = Array.isArray(b.parts) ? (b.parts as Record<string, unknown>[]) : [];
+    // Step 49: check every part's assembly choice before saving any
+    if (asked.slice(0, 200).some((p) => p && p.asm !== undefined && cleanPartAsm(p.asm) === undefined)) {
+      return json({ ok: false, error: "invalid_asm", message: "Pick an assembly method, and minutes from 0 to 600 (or leave blank)." }, 400);
+    }
     for (const p of asked.slice(0, 200)) {
       const line = parts.find((x) => Number(x.id) === Number(p.id));
       if (!line) continue;
@@ -284,12 +296,20 @@ export async function POST(req: NextRequest) {
       const patch: Record<string, unknown> = {};
       if (Number.isInteger(pd) && pd >= 1 && pd <= 10000) patch.per_display = pd;
       if (typeof p.label === "string") patch.label = p.label.trim().slice(0, 60) || null;
+      // Step 49: the part's assembly method / minutes (null = shop default; bad input = left as is)
+      let clearAsm = false;
+      if (p.asm !== undefined) {
+        const a = cleanPartAsm(p.asm); // checked above
+        if (a === null) clearAsm = true;
+        else if (a) patch.asm = a;
+      }
       if (Object.keys(patch).length) {
         await q(
           `UPDATE public.quote_box_selections SET dieline = COALESCE(dieline, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
           [line.id, JSON.stringify(patch)],
         );
       }
+      if (clearAsm) await q(`UPDATE public.quote_box_selections SET dieline = dieline - 'asm' WHERE id = $1`, [line.id]);
     }
 
     // This quote's assembly override (blank = use the shop's rates).
@@ -298,7 +318,9 @@ export async function POST(req: NextRequest) {
 
     if (!asm) {
       const ctx = await displayContext(quote.id);
-      const resolved = await resolveAssemblySelection(Number(quote.tenant_id), displays, ctx.partsPerDisplay, override);
+      const resolved = await resolveAssemblySelection(Number(quote.tenant_id), displays, ctx.partsPerDisplay, override, {
+        parts: ctx.parts, // Step 49
+      });
       const ins = customSelectionInsert({
         quoteId: quote.id,
         quoteNo: quote.quote_no,
