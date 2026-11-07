@@ -22,6 +22,7 @@ import * as React from "react";
 import { buildOuterOutlinePolyline } from "@/app/lib/layout/outline";
 import { buildDxfForLayer as buildLayerDxf, mergedCavitySvg } from "@/app/lib/layout/layer-dxf"; // Step 39U / 39V
 import AddNoteBox from "@/components/admin/AddNoteBox"; // Step 39V
+import ProjectNameCard from "@/components/admin/ProjectNameCard"; // Step 50
 import LayoutSnapshotSelector from "@/app/quote/layout/LayoutSnapshotSelector";
 import QuoteAttachmentsPanel from "@/components/admin/QuoteAttachmentsPanel";
 import RepriceQuoteButton from "@/components/admin/RepriceQuoteButton";
@@ -52,6 +53,7 @@ type QuoteRow = {
   status: string;
   created_at: string;
   customer_id?: number | null;
+  project_name?: string | null; // Step 50
 
   // locked + revision are both selected/computed server-side in
   // /api/quote/print (revision via pickDisplayRevision, which strips a
@@ -2128,6 +2130,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
               }}
             >
               Quote {quoteNoValue || "—"}
+              {/* Step 50 */}
+              {quoteState?.project_name ? (
+                <span style={{ color: "var(--text-primary)", fontWeight: 500 }} data-admin-header-project>
+                  {" "}
+                  · {quoteState.project_name}
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -2365,6 +2374,13 @@ const handleDownload3ViewPdf = React.useCallback(async () => {
                       </div>
                     ) : null}
                   </div>
+                  {/* Step 50: the project name (staff can set or change it any time) */}
+                  <ProjectNameCard
+                    quoteNo={quoteState.quote_no}
+                    initial={quoteState.project_name ?? null}
+                    labelStyle={labelStyle}
+                    onSaved={(name) => setQuoteState((qs) => (qs ? { ...qs, project_name: name } : qs))}
+                  />
                   {/* Step 39O: who gets the commission (admin can change it until release / payout) */}
                   <CommissionCard quoteNo={quoteState.quote_no} labelStyle={labelStyle} />
                   {customerNotes ? (

@@ -42,6 +42,7 @@
   "test:shop-page-edit": "npx --yes tsx scripts/test-shop-page-edit.ts",
   "test:shop-asset": "npx --yes tsx scripts/test-shop-asset.ts",
   "test:demo-alert": "npx --yes tsx scripts/test-demo-alert.ts",
+  "test:project-name": "npx --yes tsx scripts/test-project-name.ts",
   "docker:build": "docker build -t alex-io:latest .",
   "docker:run": "docker run -p 3000:3000 --env-file .env --rm alex-io:latest"
 },

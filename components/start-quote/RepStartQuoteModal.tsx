@@ -344,6 +344,7 @@ export default function RepStartQuoteModal({
 
   // ----- Step 2: Order details -----
   const [poNumber, setPoNumber] = React.useState("");
+  const [projectName, setProjectName] = React.useState(""); // Step 50
   const [isRush, setIsRush] = React.useState(false);
   const [qty, setQty] = React.useState("");
   const [qtyBreaks, setQtyBreaks] = React.useState<QtyBreak[]>([newQtyBreakRow()]);
@@ -695,6 +696,7 @@ export default function RepStartQuoteModal({
     setPhone("");
     setSalesRepSlug("");
     setPoNumber("");
+    setProjectName(""); // Step 50
     setIsRush(false);
     setQty("");
     setQtyBreaks([newQtyBreakRow()]);
@@ -798,6 +800,7 @@ export default function RepStartQuoteModal({
           sales_rep_slug: repSlugOut || undefined,
           commission_to: salesRepSlug === "none" ? "none" : undefined,
           po_number: poNumber.trim() || null,
+          project_name: projectName.trim() || null, // Step 50
           is_rush: isRush,
           qty: toNumOrNull(qty),
           qty_breaks: cleanBreaks.length ? cleanBreaks : null,
@@ -1152,8 +1155,12 @@ export default function RepStartQuoteModal({
                   ) : null}
 
                   {activeStep === "order" ? (
-                    <StepCard title="Order details" hint="PO, rush status, quantity, and internal notes">
+                    <StepCard title="Order details" hint="Project, PO, rush status, quantity, and internal notes">
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        {/* Step 50: a name to find the quote by later */}
+                        <Field label="Project name">
+                          <Input value={projectName} onChange={(v: string) => setProjectName(v.slice(0, 80))} placeholder="Kroger endcap" />
+                        </Field>
                         <Field label="PO / reference number">
                           <Input value={poNumber} onChange={setPoNumber} placeholder="PO-10293" />
                         </Field>
@@ -2067,6 +2074,7 @@ export default function RepStartQuoteModal({
                         <ReviewRow label="Commission to" value={commissionShown} />
                         <ReviewRow label="Email" value={email || "—"} />
                         <ReviewRow label="Phone" value={phone || "—"} />
+                        <ReviewRow label="Project" value={projectName.trim() || "—"} />
                         <ReviewRow label="PO #" value={poNumber || "—"} />
                         <ReviewRow label="Rush" value={isRush ? "Yes" : "No"} />
                         <ReviewRow label="Qty" value={qty || "—"} />

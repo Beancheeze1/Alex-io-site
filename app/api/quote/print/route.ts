@@ -74,6 +74,7 @@ type QuoteRow = {
   // read back out here or displayed on the print page.
   po_number?: string | null;
   is_rush?: boolean | null;
+  project_name?: string | null; // Step 50
   qty_breaks?: Array<{ qty: number; price: number | null }> | null;
   customer_id?: number | null;
 };
@@ -356,7 +357,8 @@ export async function GET(req: NextRequest) {
         po_number,
         is_rush,
         qty_breaks,
-        customer_id
+        customer_id,
+        to_jsonb(quotes) ->> 'project_name' AS project_name -- Step 50 (null before migration 054)
       from quotes
       where quote_no = $1
         and tenant_id = $2

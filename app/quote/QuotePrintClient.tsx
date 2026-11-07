@@ -51,6 +51,7 @@ type QuoteRow = {
   po_number?: string | null;
   is_rush?: boolean | null;
   qty_breaks?: Array<{ qty: number; price: number | null }> | null;
+  project_name?: string | null; // Step 50
 
   // locked + revision are both selected and computed server-side in
   // /api/quote/print (revision via pickDisplayRevision, which already
@@ -2618,6 +2619,12 @@ const isBoxDimMatch = (itemL: number, itemW: number, _itemH: number) => {
                       </span>
                     ) : null}
                   </div>
+                  {/* Step 50: the project name under the quote number */}
+                  {quote.project_name ? (
+                    <div style={{ marginTop: 2, fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }} data-quote-project>
+                      {quote.project_name}
+                    </div>
+                  ) : null}
                   <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
                     {quote.customer_name}
                     {quote.company ? <> • {quote.company}</> : null}

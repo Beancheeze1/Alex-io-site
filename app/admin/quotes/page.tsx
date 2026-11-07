@@ -54,6 +54,7 @@ type QuoteRow = {
   locked?: boolean | null;
   locked_at?: string | null;
   boxes_only?: boolean; // Step 17
+  project_name?: string | null; // Step 50
   flow?: { stage: FlowStage; proof: "waiting" | "changes" | null; needs_review: boolean } | null; // Step 39R
 };
 
@@ -379,10 +380,11 @@ export default function AdminQuotesPage() {
 
       if (!hasSearch) return true;
 
-      // Basic text search: quote_no, customer_name, email, phone
+      // Basic text search: quote_no, project name (Step 50), customer_name, email, phone
       const haystack =
         [
           q.quote_no,
+          q.project_name ?? "",
           q.customer_name ?? "",
           q.email ?? "",
           q.phone ?? "",
@@ -553,7 +555,7 @@ export default function AdminQuotesPage() {
                 Recent quotes
               </div>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Use the filters and search to find a quote by status or customer.
+                Use the filters and search to find a quote by status, project or customer.
               </p>
             </div>
 
@@ -564,7 +566,7 @@ export default function AdminQuotesPage() {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search quotes..."
+                  placeholder="Search quotes, projects, customers..."
                   className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-card)] px-2.5 py-1.5 text-[11px] text-[var(--text-primary)] outline-none ring-0 placeholder:text-[var(--text-faint)] focus:border-[var(--action-primary)]"
                 />
                 <div className="mt-0.5 text-[10px] text-[var(--text-faint)] text-right">
@@ -707,6 +709,16 @@ export default function AdminQuotesPage() {
                               {q.quote_no}
                             </Link>
                           </span>
+                          {/* Step 50: the project name under the quote number */}
+                          {q.project_name ? (
+                            <div
+                              className="mt-0.5 max-w-[220px] truncate pl-[18px] font-sans text-[11px] text-[var(--text-secondary)]"
+                              title={q.project_name}
+                              data-quote-project={q.quote_no}
+                            >
+                              {q.project_name}
+                            </div>
+                          ) : null}
                           {q.flow && (q.flow.proof || q.flow.needs_review) ? (
                             <div className="mt-1 flex flex-wrap gap-1 pl-[18px] font-sans">
                               {q.flow.proof ? (

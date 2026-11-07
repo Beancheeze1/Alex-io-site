@@ -14,10 +14,12 @@ import { customerAccountRepId, markRepSetByStaff } from "@/app/lib/account-rep";
 import { displayRevisionLabel } from "@/app/lib/revision-label";
 import { isInternalCall } from "@/lib/internal-call";
 import { quoteFlows } from "@/app/lib/quote-flow"; // Step 39R
+import { setQuoteProjectName } from "@/app/lib/project-name"; // Step 50
 
 // GET /api/quotes?limit=25
 // Step 39R: each row also has `flow` { stage, proof, needs_review } (app/lib/quote-flow.ts)
 // for the color dots, legend and stage filters on the admin quotes list.
+// Step 50: and `project_name` (migration 054; null before it runs).
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -65,7 +67,8 @@ export async function GET(req: NextRequest) {
                q.geometry_hash,
                q.locked_at,
                q.created_at,
-               q.updated_at
+               q.updated_at,
+               to_jsonb(q) ->> 'project_name' AS project_name
         FROM public."quotes" q
         LEFT JOIN public."users" u
           ON u.id = q.sales_rep_id
@@ -112,7 +115,8 @@ export async function GET(req: NextRequest) {
              q.locked_at,
              q.created_at,
              q.updated_at,
-             q.customer_id
+             q.customer_id,
+             to_jsonb(q) ->> 'project_name' AS project_name
       FROM public."quotes" q
       LEFT JOIN public."users" u
         ON u.id = q.sales_rep_id
@@ -159,6 +163,7 @@ export async function GET(req: NextRequest) {
 //   "sales_rep_id": 2,          // optional, direct id (admin tools)
 //   "sales_rep_slug": "chuck"   // optional, looked up via users.sales_slug (tenant-scoped)
 //   "tenant_id": 1              // Step 28B: internal calls only (email/AI quotes)
+//   "project_name": "Kroger endcap" // Step 50: optional (sent = set, blank = clear)
 // }
 // Callers: staff (admin / cs / sales) for their own shop, or Step 28B an
 // internal server call (x-alexio-internal) that names the shop in tenant_id.
@@ -391,6 +396,10 @@ export async function POST(req: NextRequest) {
 
     // Step 39O: staff chose the rep on the form: the account rep never overrides it later.
     if (resolved.setByStaff && (row as { id?: number }).id) await markRepSetByStaff(Number((row as { id: number }).id), tenantId);
+    // Step 50: the project name, when the caller sent one
+    if (body.project_name !== undefined && (row as { id?: number }).id) {
+      await setQuoteProjectName(Number((row as { id: number }).id), tenantId, body.project_name);
+    }
 
     return NextResponse.json({ ok: true, quote: row }, { status: 201 });
   } catch (err: any) {
